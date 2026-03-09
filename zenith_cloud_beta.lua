@@ -982,7 +982,7 @@ do -- selection
     vars.selection = {}
     vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
     vars.selection.tab     = group_fakelag:combobox('\f<dot>Section', {'Anti Aim', 'Visuals', 'Misc', 'Configs'}, false, false)
-    vars.selection.aa_tab  = group_fakelag:combobox('\f<dot>Tab', {'Angles', 'Features'}, false, false)
+    vars.selection.aa_tab  = group_fakelag:combobox('\f<dot>Tab', {'Features', 'Angles'}, false, false)
         :depend({vars.selection.tab, 'Anti Aim'})
 
     vars.selection.tab_label = group:label(string.format('\f<dot> %s', vars.selection.tab.value))
