@@ -6860,50 +6860,13 @@ menu.set_callback(function()
 
     -- ── SETUP ────────────────────────────────────────────────────────
     -- Features, Safe Head, Manual, Edge Yaw, Freestand, AA tweaks
-    if page == "Setup" then
-        _safe_display(settings.tweaks_enable)
-        if settings.tweaks_enable:get() then
-            _safe_display(settings.tweaks)
-        end
 
-        _safe_display(aa_tweaks.enable)
-        if aa_tweaks.enable:get() then
-            _safe_display(aa_tweaks.items)
-        end
-
-        _safe_display(safe_head.enabled)
-        if safe_head.enabled:get() then
-            _safe_display(safe_head.states)
-        end
-
-        _safe_display(fs_disablers.states)
-
-        _safe_display(manual_direction.enabled)
-        if manual_direction.enabled:get() then
-            _safe_display(manual_direction.options)
-            _safe_display(manual_direction.arrows)
-            if manual_direction.arrows:get() then
-                _safe_display(manual_direction.color)
-            end
-            _safe_display(manual_direction.left_manual)
-            _safe_display(manual_direction.right_manual)
-            _safe_display(manual_direction.forward_manual)
-            _safe_display(manual_direction.disabled_manual)
-        end
-
-        _safe_display(yaw_direction.edge_yaw)
-        _safe_display(yaw_direction.freestanding)
-
-        local dn = _G.__drop_nades
-        if dn then _safe_display(dn.key) end
-        local cr = _G.__chat_reveal
-        if cr then _safe_display(cr.enabled) end
-
-    end
 
 
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
+
+
     if page == "Builder" then
         -- Pui builder items (Mode / Team / Condition + per-state AA settings)
         _safe_display(vars.angles.type)

@@ -7112,6 +7112,10 @@ menu.set_callback(function()
 
     -- ── SETUP ────────────────────────────────────────────────────────
     -- Features, Safe Head, Manual, Edge Yaw, Freestand, AA tweaks
+
+
+    -- ── AIMBOT ──────────────────────────────────────────────────────
+    -- Predict, Resolver, Unsafe Charge, Auto OS, Air Teleport, Jump Scout, Dormant
     if page == "Setup" then
         _safe_display(settings.tweaks_enable)
         if settings.tweaks_enable:get() then
@@ -7153,8 +7157,7 @@ menu.set_callback(function()
 
     end
 
-    -- ── AIMBOT ──────────────────────────────────────────────────────
-    -- Predict, Resolver, Unsafe Charge, Auto OS, Air Teleport, Jump Scout, Dormant
+
     if page == "Aimbot" then
         local p = _G.__predict
         if p then
