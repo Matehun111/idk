@@ -1,19 +1,19 @@
 -- ZENITH | STABLE | Cloud Build
 
--- Safe display helper for pui objects loaded via cloud
 local function _safe_display(obj)
-    if obj and type(obj) == "table" and type(obj.display) == "function" then
+    if obj and type(obj)=="table" and type(obj.display)=="function" then
         pcall(obj.display, obj)
     end
 end
 
 local function _safe_set_visible(obj, val)
-    if type(obj) == "number" then
+    if type(obj)=="number" then
         pcall(ui.set_visible, obj, val)
-    elseif obj and type(obj) == "table" and type(obj.set_visible) == "function" then
+    elseif obj and type(obj)=="table" and type(obj.set_visible)=="function" then
         pcall(obj.set_visible, obj, val)
     end
 end
+
 
 if not LPH_OBFUSCATED then
     LPH_NO_VIRTUALIZE = function(...) return ... end
@@ -980,16 +980,15 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label = group_fakelag:label('                      Z  E  N  I  T  H')
-    -- Section/Tab selectors removed (using Zenith dropdown instead)
-    -- Stub tab/aa_tab so depend() calls on them don't error
-    -- Real pui items needed for depend() system, but hidden from display
+    vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
     vars.selection.tab     = group_fakelag:combobox('\f<dot>Section', {'Anti Aim', 'Visuals', 'Misc', 'Configs'}, false, false)
     vars.selection.aa_tab  = group_fakelag:combobox('\f<dot>Tab', {'Angles', 'Features'}, false, false)
-    vars.selection.tab_label = group:label(' ')
-    -- Lock to Anti Aim / Angles so all depend() conditions stay satisfied
-    pcall(function() vars.selection.tab:set('Anti Aim') end)
-    pcall(function() vars.selection.aa_tab:set('Angles') end)
+        :depend({vars.selection.tab, 'Anti Aim'})
+
+    vars.selection.tab_label = group:label(string.format('\f<dot> %s', vars.selection.tab.value))
+    vars.selection.tab:set_callback(function(self)
+        vars.selection.tab_label:set(string.format('\f<dot>%s', self.value))
+    end, true)
 end
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
@@ -1236,7 +1235,16 @@ end
 -- ── CONFIGS TAB (Zenith config system) ──────────────────────────
 do
     vars.configs = {}
-    -- pui config items removed; configs accessible via Zenith dropdown only
+
+    vars.configs.cfg_label = group_other:label('\f<dot>New Config'):depend({vars.selection.tab,'Configs'})
+    vars.configs.list      = group:listbox('\nConfig List', {'No Configs!'}, '', false):depend({vars.selection.tab,'Configs'})
+    vars.configs.name      = group_other:textbox('\nConfig Name', '', false):depend({vars.selection.tab,'Configs'})
+    vars.configs.load      = group:button('Load',   nil, true):depend({vars.selection.tab,'Configs'})
+    vars.configs.create    = group_other:button('Create', nil, true):depend({vars.selection.tab,'Configs'})
+    vars.configs.save      = group:button('Save',   nil, true):depend({vars.selection.tab,'Configs'})
+    vars.configs.export    = group:button('Export', nil, true):depend({vars.selection.tab,'Configs'})
+    vars.configs.import    = group_other:button('Import', nil, true):depend({vars.selection.tab,'Configs'})
+    vars.configs.delete    = group:button('Delete', nil, true):depend({vars.selection.tab,'Configs'})
 end
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
@@ -1342,7 +1350,6 @@ helpers['functions'] = {
         local ra = (c1-r); local ga = (c2-g); local ba = (c3-b)
         for i=1,#str do
             local iter = (i-1)/(#str-1) + time
-            if not self or not self.rgba_to_hex then break end
             t_out[t_iter] = "\a"..self:rgba_to_hex(
                 r+ra*math.abs(math.cos(iter)), g+ga*math.abs(math.cos(iter)),
                 b+ba*math.abs(math.cos(iter)), a)
@@ -1358,7 +1365,6 @@ helpers['functions'] = {
         local ra=(c1-r); local ga=(c2-g); local ba=(c3-b)
         for i=1,#str do
             local iter = (i-1)/(#str-1) + time
-            if not self or not self.rgba_to_hex then break end
             t_out[t_iter] = "\a"..self:rgba_to_hex(
                 r+ra*math.abs(math.cos(iter)), g+ga*math.abs(math.cos(iter)),
                 b+ba*math.abs(math.cos(iter)), a)
@@ -1736,7 +1742,7 @@ hide_menu = function(state)
     ui.set_visible(ot.slow_motion[1], state)
     ui.set_visible(ot.on_shot_antiaim[1], state)
     ui.set_visible(ot.fake_peek[1], state)
-    if type(software.aa.other.leg_movement)=="number" then ui.set_visible(software.aa.other.leg_movement, state) elseif software.aa.other.leg_movement and type(software.aa.other.leg_movement.set_visible)=="function" then _safe_set_visible(software.aa.other.leg_movement, state) end
+    _safe_set_visible(software.aa.other.leg_movement, state)
 end
 
 -- watermark label animation (paint_ui)
@@ -1777,7 +1783,7 @@ end
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc"}
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -6811,13 +6817,13 @@ cvar.developer:set_raw_int(0)
 -- resolver_show_tab: removed in beta build
 
 menu.set_callback(function()
-    if gui.enabled and type(gui.enabled.display)=="function" then _safe_display(gui.enabled) end
+    _safe_display(gui.enabled)
 
     if not gui.enabled:get() then
         return
     end
 
-    if shared.online_label and type(shared.online_label.display)=="function" then _safe_display(shared.online_label) end
+    _safe_display(shared.online_label)
     -- display fake lag info panel every frame
     if shared.fl_whatsup     then _safe_display(shared.fl_whatsup)     end
     if shared.fl_build       then _safe_display(shared.fl_build)       end
@@ -6852,54 +6858,51 @@ menu.set_callback(function()
 
     -- ── SETUP ────────────────────────────────────────────────────────
     -- Features, Safe Head, Manual, Edge Yaw, Freestand, AA tweaks
+    if page == "Setup" then
+        _safe_display(settings.tweaks_enable)
+        if settings.tweaks_enable:get() then
+            _safe_display(settings.tweaks)
+        end
 
+        _safe_display(aa_tweaks.enable)
+        if aa_tweaks.enable:get() then
+            _safe_display(aa_tweaks.items)
+        end
+
+        _safe_display(safe_head.enabled)
+        if safe_head.enabled:get() then
+            _safe_display(safe_head.states)
+        end
+
+        _safe_display(fs_disablers.states)
+
+        _safe_display(manual_direction.enabled)
+        if manual_direction.enabled:get() then
+            _safe_display(manual_direction.options)
+            _safe_display(manual_direction.arrows)
+            if manual_direction.arrows:get() then
+                _safe_display(manual_direction.color)
+            end
+            _safe_display(manual_direction.left_manual)
+            _safe_display(manual_direction.right_manual)
+            _safe_display(manual_direction.forward_manual)
+            _safe_display(manual_direction.disabled_manual)
+        end
+
+        _safe_display(yaw_direction.edge_yaw)
+        _safe_display(yaw_direction.freestanding)
+
+        local dn = _G.__drop_nades
+        if dn then _safe_display(dn.key) end
+        local cr = _G.__chat_reveal
+        if cr then _safe_display(cr.enabled) end
+
+    end
 
 
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
-
-
     if page == "Builder" then
-        -- Pui builder items (Mode / Team / Condition + per-state AA settings)
-        _safe_display(vars.angles.type)
-        if vars.angles.type and vars.angles.type:get() == "Builder" then
-            _safe_display(vars.angles.team)
-            _safe_display(vars.angles.condition)
-            -- display all custom_aa entries for current team+condition
-            local team_idx = (vars.angles.team and vars.angles.team:get() == "T") and 2 or 1
-            local cond     = vars.angles.condition and vars.angles.condition:get() or "Standing"
-            local ca       = custom_aa[team_idx] and custom_aa[team_idx][cond]
-            if ca then
-                _safe_display(ca.enabled)
-                if ca.enabled and ca.enabled:get() then
-                    _safe_display(ca.pitch)
-                    if ca.pitch and ca.pitch:get() == "Custom" then _safe_display(ca.pitch_value) end
-                    _safe_display(ca.yaw)
-                    _safe_display(ca.yaw_offset)
-                    _safe_display(ca.delayed_swap)
-                    _safe_display(ca.ticks_delay)
-                    _safe_display(ca.yaw_left)
-                    _safe_display(ca.yaw_right)
-                    _safe_display(ca.body_yaw)
-                    _safe_display(ca.body_yaw_offset)
-                    _safe_display(ca.yaw_modifier)
-                    _safe_display(ca.yaw_modifier_offset)
-                    _safe_display(ca.defensive)
-                    if ca.defensive and ca.defensive:get() then
-                        _safe_display(ca.defensive_mode)
-                        _safe_display(ca.defensive_pitch)
-                        _safe_display(ca.pitch_amount)
-                        _safe_display(ca.pitch_amount_2)
-                        _safe_display(ca.defensive_yaw)
-                        _safe_display(ca.yaw_amount)
-                    end
-                end
-            end
-        else
-            _safe_display(vars.angles.label)
-            _safe_display(vars.angles.label2)
-            _safe_display(vars.angles.label3)
-        end
         _safe_display(anim_breakers.enabled)
         if anim_breakers.enabled:get() then
             _safe_display(anim_breakers.ground)
@@ -7047,18 +7050,6 @@ menu.set_callback(function()
     if page == "Misc" then
         if _G.__misc_page then _G.__misc_page.show() end
     end
-    if page == "Configs" then
-        _safe_display(vars.configs.cfg_label)
-        _safe_display(vars.configs.list)
-        _safe_display(vars.configs.name)
-        _safe_display(vars.configs.load)
-        _safe_display(vars.configs.save)
-        _safe_display(vars.configs.create)
-        _safe_display(vars.configs.export)
-        _safe_display(vars.configs.import)
-        _safe_display(vars.configs.delete)
-    end
-
 end)
 
 menu.update()
