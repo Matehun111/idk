@@ -970,6 +970,7 @@ local x_sc, y_sc = client.screen_size()
 
 -- pui group references
 local group_fakelag = pui.group('AA', 'Fake lag')
+local group_hidden  = pui.group('AA', 'Anti-aimbot angles') -- reuse AA group for hidden items
 local group         = pui.group('AA', 'Anti-aimbot angles')
 local group_other   = pui.group('AA', 'Other')
 
@@ -981,14 +982,16 @@ local vars = {}
 do -- selection
     vars.selection = {}
     vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
-    vars.selection.tab     = group_fakelag:combobox('\f<dot>Section', {'Anti Aim', 'Visuals', 'Misc', 'Configs'}, false, false)
-    vars.selection.aa_tab  = group_fakelag:combobox('\f<dot>Tab', {'Features', 'Angles'}, false, false)
-        :depend({vars.selection.tab, 'Anti Aim'})
-
-    vars.selection.tab_label = group:label(string.format('\f<dot> %s', vars.selection.tab.value))
-    vars.selection.tab:set_callback(function(self)
-        vars.selection.tab_label:set(string.format('\f<dot>%s', self.value))
-    end, true)
+    -- Section/Tab hidden: items controlled by Zenith dropdown only
+    -- Hidden items: must exist for depend() system but never shown to user
+    local _never_cb = group_hidden:checkbox('\n__z_never__')
+    _never_cb:depend(_never_cb) -- depends on itself being checked, never true
+    vars.selection.tab     = group_hidden:combobox('\f<dot>Section', {'---', 'Anti Aim', 'Visuals', 'Misc', 'Configs'}, false, false)
+        :depend(_never_cb)
+    vars.selection.aa_tab  = group_hidden:combobox('\f<dot>Tab', {'Features', 'Angles'}, false, false)
+        :depend(_never_cb)
+        :depend(_never_cb)
+    vars.selection.tab_label = nil
 end
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
