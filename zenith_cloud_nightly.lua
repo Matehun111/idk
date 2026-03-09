@@ -1022,49 +1022,42 @@ shared.online_label = {
     get = function() return 'Online: ...' end,
 }
 
--- ── ONLINE USER COUNTER (HTTP polling to countapi.xyz) ─────────────────
--- Uses a public hit counter: each time the script loads it increments.
--- We also poll every 60s to get current count (simulated active users).
+-- ── LOAD COUNTER + ONLINE ───────────────────────────────────────────
 do
-    local COUNTER_NS  = 'zenith-hvh'
-    local COUNTER_KEY = 'active_users_v1'
-    local _online_count = 0
-    local _last_poll = 0
+    -- Times Loaded: increment on each script load
+    local _loads_key = 'zenith_total_loads_v1'
+    local ok_l, cur_loads = pcall(database.read, _loads_key)
+    cur_loads = (ok_l and type(cur_loads)=='number') and cur_loads or 0
+    cur_loads = cur_loads + 1
+    pcall(database.write, _loads_key, cur_loads)
 
-    local function _update_online_label(n)
-        _online_count = n
-        local color = n > 0 and '\affd700ff' or '\aff6666ff'
-        if shared.fl_online then
-            shared.fl_online:set(string.format('Online: %s%d\affffffff', color, n))
-        end
+    if vars.statistics and vars.statistics.loaded then
+        vars.statistics.loaded:set(string.format('\f<dot>Times Loaded: \v%d', cur_loads))
     end
 
+    -- Online: poll GitHub raw file you control, or show local load count
+    -- Using a working free hit counter (hitcounter.io)
     local function _poll_online()
-        -- hit the counter (increment on first call, then just get)
-        local url = string.format('https://api.countapi.xyz/hit/%s/%s', COUNTER_NS, COUNTER_KEY)
+        local url = 'https://hits.sh/github.com/Matehun111/idk/zenith.svg'
         http.get(url, function(success, response)
-            if success and response then
-                local ok, data = pcall(json.parse, response)
-                if ok and data and data.value then
-                    -- countapi gives cumulative hits; we show it as active count
-                    -- To make it feel like active users, we show (hits mod 9999) + 1
-                    local n = (tonumber(data.value) or 1)
-                    -- display as running total of unique script loads today
-                    _update_online_label(n)
+            local body = type(response)=='table' and response.body or response
+            if success and body then
+                -- Extract number from SVG: <text>N</text>
+                local n = body:match('>(%d+)</text>')
+                if n then
+                    if shared.fl_online then
+                        shared.fl_online:set(string.format('Online: \affd700ff%s\affffffff loads', n))
+                    end
+                    return
                 end
             end
-            -- re-poll in 60 seconds
-            client.delay_call(60, _poll_online)
+            -- Fallback: show local load count
+            if shared.fl_online then
+                shared.fl_online:set(string.format('Online: \affd700ff%d\affffffff loads', cur_loads))
+            end
+            client.delay_call(120, _poll_online)
         end)
     end
-
-    -- On shutdown, decrement (best-effort)
-    client.set_event_callback('shutdown', function()
-        local url = string.format('https://api.countapi.xyz/update/%s/%s?amount=-1', COUNTER_NS, COUNTER_KEY)
-        http.get(url, function() end)
-    end)
-
-    -- Start polling after 2 seconds (let script fully load first)
     client.delay_call(2, _poll_online)
 end
 
