@@ -11,6 +11,7 @@
 
 if not _auth_ok then
     error("[Zenith Cloud] Run via the loader, not directly.")
+end
 
 -- Safe display helper for pui objects loaded via cloud
 local function _safe_display(obj)
