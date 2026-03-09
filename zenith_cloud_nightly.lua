@@ -1056,20 +1056,20 @@ do
     vars.aa.encha = group:multiselect('\f<dot>Features', 'Manual AA', 'Freestand', 'Animations Breaker',
         'Edge Yaw Fakeduck', 'Anti-Backstab', 'Fast Ladder Move', 'Static Freestand',
         'Static On Warmup', 'Bombsite E Fix')
-        :depend(vars.selection.aa_tab, 'Features'})
+        :depend({vars.selection.aa_tab, 'Features'})
 
     vars.aa.ground = group:combobox('\f<dot>On Ground', {'Disabled', 'Static', 'Walking', 'Jitter'})
-        :depend(vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Animations Breaker'})
+        :depend({vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Animations Breaker'})
 
     vars.aa.air = group:combobox('\f<dot>In Air', {'Disabled', 'Static', 'Walking'})
-        :depend(vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Animations Breaker'})
+        :depend({vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Animations Breaker'})
 
     vars.aa.manual_left  = group:hotkey('\f<dot>Manual Left')
-        :depend(vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Manual AA'})
+        :depend({vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Manual AA'})
     vars.aa.manual_right = group:hotkey('\f<dot>Manual Right')
-        :depend(vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Manual AA'})
+        :depend({vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Manual AA'})
     vars.aa.freestanding = group:hotkey('\f<dot>Freestanding')
-        :depend(vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Freestand'})
+        :depend({vars.selection.aa_tab, 'Features'},{vars.aa.encha, 'Freestand'})
 end
 
 -- ── ANGLES BUILDER ─────────────────────────────────────────────────────
@@ -1077,20 +1077,20 @@ do
     vars.angles = {}
 
     vars.angles.type = group:combobox('\f<dot>Mode', {'Builder', 'Preset'})
-        :depend(vars.selection.aa_tab, 'Angles'})
+        :depend({vars.selection.aa_tab, 'Angles'})
 
     vars.angles.team = group:combobox('\f<dot>Team', 'CT', 'T')
-        :depend(vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Builder'})
+        :depend({vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Builder'})
 
     vars.angles.condition = group:combobox('\f<dot>Condition', anti_aim_states)
-        :depend(vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Builder'})
+        :depend({vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Builder'})
 
     vars.angles.label  = group:label('\f<dot>You Are Using The \vPreset.')
-        :depend(vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Preset'})
+        :depend({vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Preset'})
     vars.angles.label2 = group:label('\f<dot>Everything Is Already \vSet Up.')
-        :depend(vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Preset'})
+        :depend({vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Preset'})
     vars.angles.label3 = group:label('\f<dot>Enjoy, \v'..USERNAME)
-        :depend(vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Preset'})
+        :depend({vars.selection.aa_tab, 'Angles'},{vars.angles.type, 'Preset'})
 end
 
 -- ── PER-STATE AA CONDITIONS ────────────────────────────────────────────
@@ -1115,24 +1115,24 @@ do
             local ca = custom_aa[team][state]
             local deps_base = {{vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]}}
 
-            ca.enabled = group:checkbox(string.format('Enable \v%s \v%s \ac8c8c8ffState', state, team)):depend(unpack(deps_base))
+            ca.enabled = group:checkbox(string.format('Enable \v%s \v%s \ac8c8c8ffState', state, team)):depend({unpack(deps_base))
 
             local deps = {{vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled}
 
-            ca.pitch          = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffPitch', state), {'Off','Default','Up','Down','Minimal','Random','Custom'}):depend(unpack(deps))
+            ca.pitch          = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffPitch', state), {'Off','Default','Up','Down','Minimal','Random','Custom'}):depend({unpack(deps))
             ca.pitch_value    = group:slider(string.format('\f<dot>Pitch Value %s', state), -89, 89, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.pitch,'Custom'},ca.enabled)
-            ca.yaw_base       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Base', state), {'Local view','At targets'}):depend(unpack(deps))
-            ca.yaw            = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw', state), {'Off','180','Spin','Static','180 Z','Crosshair','180 Left / Right'}):depend(unpack(deps))
+            ca.yaw_base       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Base', state), {'Local view','At targets'}):depend({unpack(deps))
+            ca.yaw            = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw', state), {'Off','180','Spin','Static','180 Z','Crosshair','180 Left / Right'}):depend({unpack(deps))
             ca.yaw_offset     = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180','Spin','Static','180 Z','Crosshair'},ca.enabled)
             ca.delayed_swap   = group:checkbox(string.format('\f<dot>\v%s ~ \ac8c8c8ffDelayed Swap', state)):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
             ca.ticks_delay    = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffDelay Ticks', state), 0, 30, 0, true, 't', 1):depend({vars.angles.team,teams_list[i]},ca.delayed_swap,{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
             ca.yaw_left       = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffLeft Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
             ca.yaw_right      = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffRight Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
-            ca.body_yaw       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffBody Yaw', state), {'Off','Static','Jitter','Opposite'}):depend(unpack(deps))
+            ca.body_yaw       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffBody Yaw', state), {'Off','Static','Jitter','Opposite'}):depend({unpack(deps))
             ca.body_yaw_offset= group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffBody Yaw Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.body_yaw,'Jitter','Static','Opposite'},ca.enabled)
             ca.yaw_modifier   = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Jitter', state), {'Off','Offset','Center','Random','Skitter'}):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'Off',true},ca.enabled)
             ca.yaw_modifier_offset = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffJitter Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'Off',true},{ca.yaw_modifier,'Off',true},ca.enabled)
-            ca.defensive      = group:checkbox(string.format('\f<dot>\v%s ~ \ac8c8c8ffForce Defensive', state)):depend(unpack(deps))
+            ca.defensive      = group:checkbox(string.format('\f<dot>\v%s ~ \ac8c8c8ffForce Defensive', state)):depend({unpack(deps))
             ca.defensive_mode = group:multiselect(string.format('\f<dot>\v%s ~ \ac8c8c8ffDefensive Mode', state), {'Double Tap','Hide Shots'}):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled,ca.defensive)
             ca.defensive_pitch= group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffDefensive Pitch', state), {'Off','Default','Up','Up-Switch','Random','Custom'}):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled,ca.defensive)
             ca.pitch_amount   = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffOffset', state), -89, 89, 0, true, '°', 1):depend({vars.angles.team,teams_list[i]},{vars.selection.aa_tab,'Angles'},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled,{ca.defensive_pitch,'Custom','Random'},ca.defensive)
@@ -1155,7 +1155,7 @@ do
     vars.visuals = {}
 
     vars.visuals.indicators     = group:checkbox('Screen Indicators')
-    vars.visuals.widgets        = group:multiselect('\f<dot>Select', 'Damage Indicator', 'Anti-Aim Arrows', 'Hitmarker'):depend(vars.visuals.indicators)
+    vars.visuals.widgets        = group:multiselect('\f<dot>Select', 'Damage Indicator', 'Anti-Aim Arrows', 'Hitmarker'):depend({vars.visuals.indicators)
     vars.visuals.damage_style   = group:combobox('\f<dot>Damage Style', '#1', '#2')
 
     vars.visuals.label_arrows   = group:label('\f<dot>Arrows Color')
@@ -1165,25 +1165,25 @@ do
     vars.visuals.hitmarker_color= group:color_picker('Hitmarker color',168,168,168,255)
 
     vars.visuals.watermark      = group:checkbox('Watermark')
-    vars.visuals.watermark_mode = group:combobox('\f<dot>Mode ', '#1', '#2'):depend(vars.visuals.watermark)
+    vars.visuals.watermark_mode = group:combobox('\f<dot>Mode ', '#1', '#2'):depend({vars.visuals.watermark)
     vars.visuals.watermark_position = group:combobox('\f<dot>Position','Left','Right')
     vars.visuals.label_watermark    = group:label('\f<dot>Watermark Color First')
     vars.visuals.watermark_color    = group:color_picker('Watermark Color',155,155,200,255)
     vars.visuals.label_watermark2   = group:label('\f<dot>Watermark Color Second')
     vars.visuals.watermark_color2   = group:color_picker('Watermark Color 2',0,0,0,255)
-    vars.visuals.watermark_items    = group:multiselect('\f<dot>Items','Username','Latency','Framerate','Time'):depend(vars.visuals.watermark_mode,'#2'})
+    vars.visuals.watermark_items    = group:multiselect('\f<dot>Items','Username','Latency','Framerate','Time'):depend({vars.visuals.watermark_mode,'#2'})
     vars.visuals.watermark_color_mode2 = group:color_picker('Watermark Color Mode 2',155,155,200,255)
 
     vars.visuals.slowed         = group:checkbox('Slowed Down')
-    vars.visuals.label_slowed   = group:label('\f<dot>Velocity Color'):depend(vars.visuals.slowed)
-    vars.visuals.color_slowed   = group:color_picker('velocity color',195,198,255,255):depend(vars.visuals.slowed)
+    vars.visuals.label_slowed   = group:label('\f<dot>Velocity Color'):depend({vars.visuals.slowed)
+    vars.visuals.color_slowed   = group:color_picker('velocity color',195,198,255,255):depend({vars.visuals.slowed)
 
     vars.visuals.logs           = group:checkbox('Log Aimbot Shots')
-    vars.visuals.full_color     = group:checkbox('Full Color Logs'):depend(vars.visuals.logs)
-    vars.visuals.label4         = group:label('\f<dot>Hit Color'):depend(vars.visuals.logs)
-    vars.visuals.hit_color      = group:color_picker('hit color',150,200,59,255):depend(vars.visuals.logs)
-    vars.visuals.label5         = group:label('\f<dot>Miss Color'):depend(vars.visuals.logs)
-    vars.visuals.miss_color     = group:color_picker('miss color',158,69,69,255):depend(vars.visuals.logs)
+    vars.visuals.full_color     = group:checkbox('Full Color Logs'):depend({vars.visuals.logs)
+    vars.visuals.label4         = group:label('\f<dot>Hit Color'):depend({vars.visuals.logs)
+    vars.visuals.hit_color      = group:color_picker('hit color',150,200,59,255):depend({vars.visuals.logs)
+    vars.visuals.label5         = group:label('\f<dot>Miss Color'):depend({vars.visuals.logs)
+    vars.visuals.miss_color     = group:color_picker('miss color',158,69,69,255):depend({vars.visuals.logs)
 end
 
 -- ── MISC TAB ───────────────────────────────────────────────────────────
@@ -1191,8 +1191,8 @@ do
     vars.misc = {}
 
     vars.misc.enabled   = group:checkbox('Drop Grenades')
-    vars.misc.hk        = group:hotkey('Hotkey', true):depend(vars.misc.enabled)
-    vars.misc.selection = group:multiselect('\f<dot>Items','Smoke','He Grenade','Molotov/Incendiary'):depend(vars.misc.enabled)
+    vars.misc.hk        = group:hotkey('Hotkey', true):depend({vars.misc.enabled)
+    vars.misc.selection = group:multiselect('\f<dot>Items','Smoke','He Grenade','Molotov/Incendiary'):depend({vars.misc.enabled)
 
     vars.misc.warmup_helper = group:checkbox('Warmup Helper')
     vars.misc.warmup_helper:set_callback(function(self)
@@ -1202,19 +1202,19 @@ do
     end, true)
 
     vars.misc.aspectratio   = group:checkbox('Aspect Ratio')
-    vars.misc.asp_offset    = group:slider('\f<dot>Aspect Ratio Value', 0, 200, 0):depend(vars.misc.aspectratio)
+    vars.misc.asp_offset    = group:slider('\f<dot>Aspect Ratio Value', 0, 200, 0):depend({vars.misc.aspectratio)
     vars.misc.aspectratio:set_callback(function(self)
         if not self:get() then cvar.r_aspectratio:set_raw_float(0) end
     end, true)
 
     vars.misc.thirdperson   = group:checkbox('Thirdperson')
-    vars.misc.distance_slider = group:slider('\f<dot>Distance', 30, 200, 150):depend(vars.misc.thirdperson)
+    vars.misc.distance_slider = group:slider('\f<dot>Distance', 30, 200, 150):depend({vars.misc.thirdperson)
 
     vars.misc.viewmodel     = group:checkbox('Viewmodel')
-    vars.misc.viewmodel_fov = group:slider('\f<dot>FOV', 0, 100, 68):depend(vars.misc.viewmodel)
-    vars.misc.viewmodel_x   = group:slider('\f<dot>X', -100, 100, 25, true, '', 0.1):depend(vars.misc.viewmodel)
-    vars.misc.viewmodel_y   = group:slider('\f<dot>Y', -100, 100, 0, true, '', 0.1):depend(vars.misc.viewmodel)
-    vars.misc.viewmodel_z   = group:slider('\f<dot>Z', -100, 100, -15, true, '', 0.1):depend(vars.misc.viewmodel)
+    vars.misc.viewmodel_fov = group:slider('\f<dot>FOV', 0, 100, 68):depend({vars.misc.viewmodel)
+    vars.misc.viewmodel_x   = group:slider('\f<dot>X', -100, 100, 25, true, '', 0.1):depend({vars.misc.viewmodel)
+    vars.misc.viewmodel_y   = group:slider('\f<dot>Y', -100, 100, 0, true, '', 0.1):depend({vars.misc.viewmodel)
+    vars.misc.viewmodel_z   = group:slider('\f<dot>Z', -100, 100, -15, true, '', 0.1):depend({vars.misc.viewmodel)
     vars.misc.viewmodel:set_callback(function(self)
         if not self:get() then
             cvar.viewmodel_fov:set_raw_float(68)
