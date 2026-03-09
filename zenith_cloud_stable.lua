@@ -985,7 +985,7 @@ do -- selection
     -- Stub tab/aa_tab so depend() calls on them don't error
     vars.selection.tab    = { value = 'Anti Aim',  get = function() return 'Anti Aim'  end, set = function() end, set_callback = function() end }
     vars.selection.aa_tab = { value = 'Angles',    get = function() return 'Angles'    end, set = function() end }
-    vars.selection.tab_label = group:label(' ')
+    vars.selection.tab_label = nil
 end
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
@@ -1232,17 +1232,7 @@ end
 -- ── CONFIGS TAB (Zenith config system) ──────────────────────────
 do
     vars.configs = {}
-
-    local _never = group_fakelag:checkbox('__hidden__'):depend({vars.selection.tab,'__never__'})
-    vars.configs.cfg_label = group_other:label('\f<dot>New Config'):depend({vars.selection.tab,'__never__'})
-    vars.configs.list      = group:listbox('\nConfig List', {'No Configs!'}, '', false):depend({vars.selection.tab,'__never__'})
-    vars.configs.name      = group_other:textbox('\nConfig Name', '', false):depend({vars.selection.tab,'__never__'})
-    vars.configs.load      = group:button('Load',   nil, true):depend({vars.selection.tab,'__never__'})
-    vars.configs.create    = group_other:button('Create', nil, true):depend({vars.selection.tab,'__never__'})
-    vars.configs.save      = group:button('Save',   nil, true):depend({vars.selection.tab,'__never__'})
-    vars.configs.export    = group:button('Export', nil, true):depend({vars.selection.tab,'__never__'})
-    vars.configs.import    = group_other:button('Import', nil, true):depend({vars.selection.tab,'__never__'})
-    vars.configs.delete    = group:button('Delete', nil, true):depend({vars.selection.tab,'__never__'})
+    -- pui config items removed; configs accessible via Zenith dropdown only
 end
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
