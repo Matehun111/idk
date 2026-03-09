@@ -1320,15 +1320,10 @@ client.set_event_callback('shutdown', function()
 end)
 
 -- ── GUI system: create proper menu items for original code compatibility ──────
--- gui.enabled: real checkbox (controls whether our AA override is active)
 -- gui.selection: real combobox for sub-page navigation inside Anti Aim
 gui = gui or {}
-if not gui.enabled or not gui.enabled.ref then
-    gui.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
-        string.format('\a%sZenith', utils.to_hex(182, 182, 101, 255)))
-        :record("gui", "enabled"):save()
-    gui.enabled:set(true)
-end
+-- gui.enabled stub (checkbox removed, always on)
+gui.enabled = gui.enabled or { get=function() return true end, set=function() end, set_callback=function() end }
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
@@ -1349,14 +1344,12 @@ function gui.frame()
     local aa = software.aa.angles
     local fl = software.aa.fakelag
     local ot = software.aa.other
-    if gui.enabled:get() then
         ui.set_visible(aa.enabled, false)
         ui.set_visible(fl.enabled[1],  false); ui.set_visible(fl.amount,  false)
         ui.set_visible(fl.variance,    false); ui.set_visible(fl.limit,   false)
         ui.set_visible(ot.slow_motion[1],     false)
         ui.set_visible(ot.on_shot_antiaim[1], false)
         ui.set_visible(ot.fake_peek[1],       false)
-    end
 end
 
 -- Disable aimbot-related UI on stable build
@@ -2414,9 +2407,6 @@ do
     end
 
     function antiaim.setup_command(e)
-        if not gui.enabled:get() then
-            return
-        end
 
         table.clear(ctx)
         shutdown()
@@ -2429,12 +2419,6 @@ do
 
         setup()
     end
-
-    gui.enabled:set_callback(function(item)
-        if not ui.get(item) then
-            shutdown()
-        end
-    end)
 end
 
 ---region settings tweaks
@@ -6611,11 +6595,6 @@ cvar.developer:set_raw_int(0)
 local resolver_show_tab  -- defined after resolver is created
 
 menu.set_callback(function()
-    _safe_display(gui.enabled)
-
-    if not gui.enabled:get() then
-        return
-    end
 
     _safe_display(shared.online_label)
     -- display fake lag info panel every frame
