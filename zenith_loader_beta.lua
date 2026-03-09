@@ -90,7 +90,6 @@ local function load_cloud()
         if not ok2 then err("Runtime error: "..tostring(rerr)); return end
         info("Zenith BETA running!")
         -- Hide loader UI
-        pcall(function() _vis_cb:set(false) end)
         rawset(_G, "_zenith_loader_loaded", true)
     end)
 end
@@ -201,90 +200,62 @@ local function try_restore()
     return true
 end
 
+-- Try session restore BEFORE creating UI
+-- If already authenticated, skip creating loader UI entirely
+try_restore()
+if auth_ok then
+    client.delay_call(0.5, load_cloud)
+end
+
 -- ── PUI MENU ──────────────────────────────────────────────────────────
+if not auth_ok then
 local grp_fl  = pui.group('AA','Fake lag')
 local grp_aa  = pui.group('AA','Anti-aimbot angles')
 local grp_oth = pui.group('AA','Other')
 pui.macros.dot = '\v•  \r'
 
--- Visibility gate: uncheck this to hide all loader UI
-local _vis_cb = grp_aa:checkbox('\n__zn_loader_visible__')
-_vis_cb:set(true)
 
 -- Fake lag column: branding
 grp_fl:label('         Z  E  N  I  T  H')
-    :depend(_vis_cb)
 grp_fl:label('\f<dot>\ac8c8c8ffBETA  —  Authentication')
-    :depend(_vis_cb)
 grp_fl:label(' ')
-    :depend(_vis_cb)
 
 local fl_user   = grp_fl:label('\f<dot>User:   \ac8c8c8ff—')
-    :depend(_vis_cb)
 local fl_status = grp_fl:label('\f<dot>Auth:   \aff6060ff✗ Not logged in')
-    :depend(_vis_cb)
 local fl_tier   = grp_fl:label('\f<dot>Tier:   \ac8c8c8ffBETA')
-    :depend(_vis_cb)
 grp_fl:label(' ')
-    :depend(_vis_cb)
 grp_fl:label('\f<dot>\ac8c8c8ffHWID: (console: zn_hwid)')
-    :depend(_vis_cb)
 grp_fl:label('\f<dot>\ac8c8c8ffLogout: zn_logout')
-    :depend(_vis_cb)
 
 -- Main column: auth form
 grp_aa:label('\f<dot>License Key:')
-    :depend(_vis_cb)
 local inp_key  = grp_aa:textbox('\nKey',  '', false)
-    :depend(_vis_cb)
 grp_aa:label('\f<dot>Username:')
-    :depend(_vis_cb)
 local inp_name = grp_aa:textbox('\nUsername', '', false)
-    :depend(_vis_cb)
 grp_aa:label('\f<dot>Password:')
-    :depend(_vis_cb)
 local inp_pw   = grp_aa:textbox('\nPassword', '', false)
-    :depend(_vis_cb)
 grp_aa:label(' ')
-    :depend(_vis_cb)
 
 local btn_register = grp_aa:button('Register')
-    :depend(_vis_cb)
 local btn_login    = grp_aa:button('Login')
-    :depend(_vis_cb)
 local btn_logout   = grp_aa:button('Logout')
-    :depend(_vis_cb)
 
 grp_aa:label(' ')
-    :depend(_vis_cb)
 local lbl_status = grp_aa:label('\f<dot>\ac8c8c8ffEnter key, then Register or Login.')
-    :depend(_vis_cb)
 
 -- Other column: info
 grp_oth:label('\f<dot>How to use:')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ff1. Enter your key')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ff   (ZNBET-XXXX-XXXX)')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ff2. Enter a username')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ff3. Enter a password')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ff4. Click Register')
-    :depend(_vis_cb)
 grp_oth:label(' ')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ffNext time: just Login')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ffor it auto-restores.')
-    :depend(_vis_cb)
 grp_oth:label(' ')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ffKey slots: 5 (Nightly)')
-    :depend(_vis_cb)
 grp_oth:label('\f<dot>\ac8c8c8ffHWID locked on first use.')
-    :depend(_vis_cb)
 
 -- Button callbacks
 btn_register:set_callback(function()
@@ -317,6 +288,8 @@ client.set_event_callback('paint_ui', function()
     pcall(function() btn_register:set_enabled(not auth_ok) end)
 end)
 
+end -- if not auth_ok
+
 -- ── CONSOLE FALLBACK ──────────────────────────────────────────────────
 client.set_event_callback("console_input", function(cmd)
     local t = cmd:match("^%s*(.-)%s*$")
@@ -328,7 +301,5 @@ client.set_event_callback("console_input", function(cmd)
 end)
 
 -- ── STARTUP ───────────────────────────────────────────────────────────
-if try_restore() then
-    client.delay_call(0.5, load_cloud)
-end
+-- (session restore already ran before pui creation)
 info("Loader v2.0.0 ready.")
