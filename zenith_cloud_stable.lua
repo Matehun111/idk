@@ -987,6 +987,25 @@ do -- selection
     vars.selection.tab_label = nil
 end
 
+-- Stubs for removed pui vars (logic still references these)
+vars.aa = vars.aa or {}
+vars.aa.encha = vars.aa.encha or {
+    get = function(_, key) return false end,
+    set = function() end
+}
+vars.aa.manual_left  = vars.aa.manual_left  or { get = function() return false end }
+vars.aa.manual_right = vars.aa.manual_right or { get = function() return false end }
+
+vars.angles = vars.angles or {}
+vars.visuals = vars.visuals or {}
+vars.visuals.watermark_color2 = vars.visuals.watermark_color2 or {
+    get = function() return 195, 198, 255, 255 end
+}
+vars.misc = vars.misc or {}
+vars.misc.selection = vars.misc.selection or {
+    get = function(_, key) return false end
+}
+
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
 shared.fl_whatsup     = group_fakelag:label(string.format('\a77ff99ffWelcome, \aff9955ff%s\affffffff!', USERNAME))
@@ -1239,6 +1258,27 @@ helpers['functions'] = {
             and math.abs(entity.get_prop(index,'m_nTickBase')-self.defensive_ticks)<14
     end,
 }
+
+-- ── CONFIGS MENU ITEMS ──────────────────────────────────────────────
+do
+    vars.configs = {}
+    vars.configs.list   = menu.new_item(ui.new_listbox,  "AA", "Anti-aimbot angles", "\nConfig List", {"No Configs!"})
+        :record("configs", "list")
+    vars.configs.name   = menu.new_item(ui.new_textbox,  "AA", "Anti-aimbot angles", "\nConfig Name")
+        :record("configs", "name")
+    vars.configs.load   = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Load",   function() end)
+        :record("configs", "load")
+    vars.configs.save   = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Save",   function() end)
+        :record("configs", "save")
+    vars.configs.create = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Create", function() end)
+        :record("configs", "create")
+    vars.configs.export = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Export", function() end)
+        :record("configs", "export")
+    vars.configs.import = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Import", function() end)
+        :record("configs", "import_cfg")
+    vars.configs.delete = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Delete", function() end)
+        :record("configs", "delete")
+end
 
 -- ── CONFIG SYSTEM (Zenith) ─────────────────────────────────────
 LPH_NO_VIRTUALIZE(function()
@@ -1591,7 +1631,7 @@ end
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -6858,6 +6898,17 @@ menu.set_callback(function()
     if page == "Misc" then
         if _G.__misc_page then _G.__misc_page.show() end
     end
+    if page == "Configs" then
+        _safe_display(vars.configs.list)
+        _safe_display(vars.configs.name)
+        _safe_display(vars.configs.load)
+        _safe_display(vars.configs.save)
+        _safe_display(vars.configs.create)
+        _safe_display(vars.configs.export)
+        _safe_display(vars.configs.import)
+        _safe_display(vars.configs.delete)
+    end
+
 end)
 
 menu.update()
