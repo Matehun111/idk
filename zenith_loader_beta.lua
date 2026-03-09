@@ -94,32 +94,35 @@ local function load_cloud()
     status_msg = "Downloading from cloud..."
     info("Fetching: "..CLOUD_URL)
     http.get(CLOUD_URL, function(success, response)
-        if not success or not response or #response < 100 then
-            err("Download failed - check console.")
+        if not success then
+            err("HTTP request failed.")
             status_msg = "Download failed."
             return
         end
-        info("Downloaded " .. #response .. " bytes, writing to disk...")
+        local body = response.body
+        if not body or #body < 100 then
+            err("Empty response body.")
+            status_msg = "Download failed - empty body."
+            return
+        end
+        info("Downloaded " .. #body .. " bytes, compiling...")
 
-        -- Set auth globals before execution
         _auth_ok    = true
         _auth_alive = true
         _auth_user  = auth_key
 
-        -- Write to temp file using gamesense filesystem, then dofile()
-        local tmp = "lua\\zenith_beta_exec.lua"
-        filesystem.write(tmp, response)
-
-        local ok, exec_err = pcall(dofile, tmp)
-        if not ok then
-            err("Execution error: " .. tostring(exec_err))
-            status_msg = "Runtime error - see console."
-            pcall(filesystem.remove, tmp)
+        local fn, lerr = (rawget(_G,"load") or load)(body, "@zenith_beta_cloud")
+        if not fn then
+            err("Compile error: " .. tostring(lerr))
+            status_msg = "Compile error - see console."
             return
         end
-
-        pcall(filesystem.remove, tmp)
-
+        local ok, rerr = pcall(fn)
+        if not ok then
+            err("Runtime error: " .. tostring(rerr))
+            status_msg = "Runtime error - see console."
+            return
+        end
         status_msg = "Zenith BETA loaded!"
         info("Running from cloud.")
     end)
