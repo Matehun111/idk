@@ -794,7 +794,7 @@ LPH_NO_VIRTUALIZE(function ()
                 return self
             end
 
-            function _safe_display(c_item)
+            function c_item:display()
                 self.is_visible = true
             end
 
@@ -1357,6 +1357,7 @@ helpers['functions'] = {
         local ra = (c1-r); local ga = (c2-g); local ba = (c3-b)
         for i=1,#str do
             local iter = (i-1)/(#str-1) + time
+            if not self or not self.rgba_to_hex then break end
             t_out[t_iter] = "\a"..self:rgba_to_hex(
                 r+ra*math.abs(math.cos(iter)), g+ga*math.abs(math.cos(iter)),
                 b+ba*math.abs(math.cos(iter)), a)
@@ -1371,6 +1372,7 @@ helpers['functions'] = {
         local ra=(c1-r); local ga=(c2-g); local ba=(c3-b)
         for i=1,#str do
             local iter = (i-1)/(#str-1) + time
+            if not self or not self.rgba_to_hex then break end
             t_out[t_iter] = "\a"..self:rgba_to_hex(
                 r+ra*math.abs(math.cos(iter)), g+ga*math.abs(math.cos(iter)),
                 b+ba*math.abs(math.cos(iter)), a)
