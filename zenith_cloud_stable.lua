@@ -11,8 +11,21 @@
 
 if not _auth_ok then
     error("[Zenith Cloud] Run via the loader, not directly.")
+
+-- Safe display helper for pui objects loaded via cloud
+local function _safe_display(obj)
+    if obj and type(obj) == "table" and type(obj.display) == "function" then
+        pcall(obj.display, obj)
+    end
 end
 
+local function _safe_set_visible(obj, val)
+    if type(obj) == "number" then
+        pcall(ui.set_visible, obj, val)
+    elseif obj and type(obj) == "table" and type(obj.set_visible) == "function" then
+        pcall(obj.set_visible, obj, val)
+    end
+end
 
 if not LPH_OBFUSCATED then
     LPH_NO_VIRTUALIZE = function(...) return ... end
@@ -793,7 +806,7 @@ LPH_NO_VIRTUALIZE(function ()
                 return self
             end
 
-            function c_item:display()
+            function _safe_display(c_item)
                 self.is_visible = true
             end
 
@@ -1740,7 +1753,7 @@ hide_menu = function(state)
     ui.set_visible(ot.slow_motion[1], state)
     ui.set_visible(ot.on_shot_antiaim[1], state)
     ui.set_visible(ot.fake_peek[1], state)
-    software.aa.other.leg_movement:set_visible(state)
+    if type(software.aa.other.leg_movement)=="number" then ui.set_visible(software.aa.other.leg_movement, state) elseif software.aa.other.leg_movement and type(software.aa.other.leg_movement.set_visible)=="function" then _safe_set_visible(software.aa.other.leg_movement, state) end
 end
 
 -- watermark label animation (paint_ui)
@@ -6815,26 +6828,26 @@ cvar.developer:set_raw_int(0)
 -- resolver_show_tab: removed in beta build
 
 menu.set_callback(function()
-    gui.enabled:display()
+    if gui.enabled and type(gui.enabled.display)=="function" then _safe_display(gui.enabled) end
 
     if not gui.enabled:get() then
         return
     end
 
-    shared.online_label:display()
+    if shared.online_label and type(shared.online_label.display)=="function" then _safe_display(shared.online_label) end
     -- display fake lag info panel every frame
-    if shared.fl_whatsup     then shared.fl_whatsup:display()     end
-    if shared.fl_build       then shared.fl_build:display()       end
-    if shared.fl_online      then shared.fl_online:display()      end
-    if shared.fl_leaderboard then shared.fl_leaderboard:display() end
+    if shared.fl_whatsup     then _safe_display(shared.fl_whatsup)     end
+    if shared.fl_build       then _safe_display(shared.fl_build)       end
+    if shared.fl_online      then _safe_display(shared.fl_online)      end
+    if shared.fl_leaderboard then _safe_display(shared.fl_leaderboard) end
 
     -- display Lua tab fake lag overrides
     if shared.lua_fl_enabled then
-        shared.lua_fl_enabled:display()
+        _safe_display(shared.lua_fl_enabled)
         if shared.lua_fl_enabled:get() then
-            shared.lua_fl_amount:display()
-            shared.lua_fl_variance:display()
-            shared.lua_fl_limit:display()
+            _safe_display(shared.lua_fl_amount)
+            _safe_display(shared.lua_fl_variance)
+            _safe_display(shared.lua_fl_limit)
         end
         -- sync to native controls
         local fl = software and software.aa and software.aa.fakelag
@@ -6850,50 +6863,50 @@ menu.set_callback(function()
         end
     end
 
-    gui.selection:display()
+    _safe_display(gui.selection)
 
     local page = gui.selection:get()
 
     -- ── SETUP ────────────────────────────────────────────────────────
     -- Features, Safe Head, Manual, Edge Yaw, Freestand, AA tweaks
     if page == "Setup" then
-        settings.tweaks_enable:display()
+        _safe_display(settings.tweaks_enable)
         if settings.tweaks_enable:get() then
-            settings.tweaks:display()
+            _safe_display(settings.tweaks)
         end
 
-        aa_tweaks.enable:display()
+        _safe_display(aa_tweaks.enable)
         if aa_tweaks.enable:get() then
-            aa_tweaks.items:display()
+            _safe_display(aa_tweaks.items)
         end
 
-        safe_head.enabled:display()
+        _safe_display(safe_head.enabled)
         if safe_head.enabled:get() then
-            safe_head.states:display()
+            _safe_display(safe_head.states)
         end
 
-        fs_disablers.states:display()
+        _safe_display(fs_disablers.states)
 
-        manual_direction.enabled:display()
+        _safe_display(manual_direction.enabled)
         if manual_direction.enabled:get() then
-            manual_direction.options:display()
-            manual_direction.arrows:display()
+            _safe_display(manual_direction.options)
+            _safe_display(manual_direction.arrows)
             if manual_direction.arrows:get() then
-                manual_direction.color:display()
+                _safe_display(manual_direction.color)
             end
-            manual_direction.left_manual:display()
-            manual_direction.right_manual:display()
-            manual_direction.forward_manual:display()
-            manual_direction.disabled_manual:display()
+            _safe_display(manual_direction.left_manual)
+            _safe_display(manual_direction.right_manual)
+            _safe_display(manual_direction.forward_manual)
+            _safe_display(manual_direction.disabled_manual)
         end
 
-        yaw_direction.edge_yaw:display()
-        yaw_direction.freestanding:display()
+        _safe_display(yaw_direction.edge_yaw)
+        _safe_display(yaw_direction.freestanding)
 
         local dn = _G.__drop_nades
-        if dn then dn.key:display() end
+        if dn then _safe_display(dn.key) end
         local cr = _G.__chat_reveal
-        if cr then cr.enabled:display() end
+        if cr then _safe_display(cr.enabled) end
 
     end
 
@@ -6901,22 +6914,22 @@ menu.set_callback(function()
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     if page == "Builder" then
-        anim_breakers.enabled:display()
+        _safe_display(anim_breakers.enabled)
         if anim_breakers.enabled:get() then
-            anim_breakers.ground:display()
-            anim_breakers.air:display()
+            _safe_display(anim_breakers.ground)
+            _safe_display(anim_breakers.air)
         end
 
-        angles.type:display()
+        _safe_display(angles.type)
 
         if angles.type:get() == "Custom" then
-            angles.custom.state:display()
+            _safe_display(angles.custom.state)
 
             local state = angles.custom.state:get()
             local list = angles.custom[state]
 
             if list.enabled ~= nil then
-                list.enabled:display()
+                _safe_display(list.enabled)
 
                 if not list.enabled:get() then
                     goto continue
@@ -6925,45 +6938,45 @@ menu.set_callback(function()
 
             if list.pitch ~= nil then
                 local pitch = list.pitch:get()
-                list.pitch:display()
+                _safe_display(list.pitch)
 
                 if pitch == "Custom" then
-                    list.pitch_offset:display()
+                    _safe_display(list.pitch_offset)
                 end
             end
 
             if list.yaw_base ~= nil then
-                list.yaw_base:display()
+                _safe_display(list.yaw_base)
             end
 
             local yaw_value = list.yaw:get()
-            list.yaw:display()
+            _safe_display(list.yaw)
 
             if yaw_value ~= "Off" then
 
                 if yaw_value == '180 LR' then
-                    list.yaw_180lr_mode:display()
-                    list.yaw_left:display()
-                    list.yaw_right:display()
+                    _safe_display(list.yaw_180lr_mode)
+                    _safe_display(list.yaw_left)
+                    _safe_display(list.yaw_right)
 
                     if list.yaw_180lr_mode:get() == 'Switch delay' then
-                        list.yaw_delay:display()
+                        _safe_display(list.yaw_delay)
                     end
                 else
-                    list.yaw_offset:display()
+                    _safe_display(list.yaw_offset)
                 end
 
-                list.yaw_jitter:display()
+                _safe_display(list.yaw_jitter)
 
                 if list.yaw_jitter:get() ~= "Off" then
-                    list.jitter_offset:display()
-                    list.jitter_randomization:display()
+                    _safe_display(list.jitter_offset)
+                    _safe_display(list.jitter_randomization)
 
                     if list.yaw_jitter:get() == "Zenith" then
-                        list.jitter_mode:display()
-                        list.zenith_safe:display()
-                        list.zenith_cycle:display()
-                        list.zenith_delay:display()
+                        _safe_display(list.jitter_mode)
+                        _safe_display(list.zenith_safe)
+                        _safe_display(list.zenith_cycle)
+                        _safe_display(list.zenith_delay)
 
                         ui.set_enabled(list.zenith_delay.ref, list.zenith_cycle:get() ~= 5)
                     end
@@ -6971,14 +6984,14 @@ menu.set_callback(function()
             end
 
             local body_yaw = list.body_yaw:get()
-            list.body_yaw:display()
+            _safe_display(list.body_yaw)
 
             if body_yaw ~= "Off" then
                 if body_yaw ~= "Opposite" then
-                    list.body_yaw_offset:display()
+                    _safe_display(list.body_yaw_offset)
                 end
 
-                list.freestanding_body_yaw:display()
+                _safe_display(list.freestanding_body_yaw)
             end
 
             ::continue::
@@ -6987,12 +7000,12 @@ menu.set_callback(function()
 
     -- ── DEFENSIVE ────────────────────────────────────────────────────
     if page == "Defensive" then
-        defensive.enabled:display()
+        _safe_display(defensive.enabled)
         if defensive.enabled:get() then
-            defensive.mode:display()
-            defensive.state:display()
-            defensive.pitch:display()
-            defensive.yaw:display()
+            _safe_display(defensive.mode)
+            _safe_display(defensive.state)
+            _safe_display(defensive.pitch)
+            _safe_display(defensive.yaw)
         end
     end
 
@@ -7001,40 +7014,40 @@ menu.set_callback(function()
     -- ── VISUAL ───────────────────────────────────────────────────────
     -- Widgets, Custom scope, Buy bot, Clientside nickname
     if page == "Visual" then
-        widgets.enabled:display()
+        _safe_display(widgets.enabled)
         if widgets.enabled:get() then
-            widgets.items:display()
+            _safe_display(widgets.items)
             if widgets.items:have_key("Watermark") then
-                widgets.display:display()
-                widgets.custom_name:display()
+                _safe_display(widgets.display)
+                _safe_display(widgets.custom_name)
                 if widgets.custom_name:get() then
-                    widgets.custom_name_value:display()
+                    _safe_display(widgets.custom_name_value)
                 end
             end
             if #widgets.items:get() > 0 then
-                widgets.color_picker:display()
+                _safe_display(widgets.color_picker)
             end
         end
 
-        custom_scope.enabled:display()
+        _safe_display(custom_scope.enabled)
         if custom_scope.enabled:get() then
-            custom_scope.color:display()
-            custom_scope.mode:display()
-            custom_scope.position:display()
-            custom_scope.offset:display()
+            _safe_display(custom_scope.color)
+            _safe_display(custom_scope.mode)
+            _safe_display(custom_scope.position)
+            _safe_display(custom_scope.offset)
         end
 
-        buy_bot.enabled:display()
+        _safe_display(buy_bot.enabled)
         if buy_bot.enabled:get() then
-            buy_bot.primary:display()
-            buy_bot.secondary:display()
-            buy_bot.utility:display()
+            _safe_display(buy_bot.primary)
+            _safe_display(buy_bot.secondary)
+            _safe_display(buy_bot.utility)
         end
 
-        clientside_nickname.enabled:display()
+        _safe_display(clientside_nickname.enabled)
         if clientside_nickname.enabled:get() then
-            clientside_nickname.nickname:display()
-            clientside_nickname.apply:display()
+            _safe_display(clientside_nickname.nickname)
+            _safe_display(clientside_nickname.apply)
         end
     end
 
@@ -7111,12 +7124,12 @@ do
 
     function home.show()
         home.update()
-        home.lbl_stats:display()
-        home.lbl_total:display()
-        home.lbl_session:display()
-        home.lbl_hs:display()
-        home.lbl_kills:display()
-        home.lbl_misses:display()
+        _safe_display(home.lbl_stats)
+        _safe_display(home.lbl_total)
+        _safe_display(home.lbl_session)
+        _safe_display(home.lbl_hs)
+        _safe_display(home.lbl_kills)
+        _safe_display(home.lbl_misses)
     end
 end
 
@@ -7153,15 +7166,15 @@ do
     mp.chat_rev   = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles','Enemy Chat Revealer'):record('misc','misc::chat_rev'):save()
 
     function mp.show()
-        mp.lbl_ct:display(); mp.ct_en:display()
-        if mp.ct_en:get() then mp.ct_text:display(); mp.ct_mode:display(); mp.ct_speed:display() end
-        mp.lbl_tt:display(); mp.tt_en:display()
-        if mp.tt_en:get() then mp.tt_kill:display(); mp.tt_death:display() end
-        mp.lbl_con:display(); mp.con_color:display()
-        mp.con_filter:display()
-        if mp.con_filter:get() then mp.con_ftext:display() end
-        mp.lbl_extra:display()
-        mp.unmute_en:display(); mp.drop_key:display(); mp.chat_rev:display()
+        _safe_display(mp.lbl_ct); _safe_display(mp.ct_en)
+        if mp.ct_en:get() then _safe_display(mp.ct_text); _safe_display(mp.ct_mode); _safe_display(mp.ct_speed) end
+        _safe_display(mp.lbl_tt); _safe_display(mp.tt_en)
+        if mp.tt_en:get() then _safe_display(mp.tt_kill); _safe_display(mp.tt_death) end
+        _safe_display(mp.lbl_con); _safe_display(mp.con_color)
+        _safe_display(mp.con_filter)
+        if mp.con_filter:get() then _safe_display(mp.con_ftext) end
+        _safe_display(mp.lbl_extra)
+        _safe_display(mp.unmute_en); _safe_display(mp.drop_key); _safe_display(mp.chat_rev)
     end
 
     -- CLANTAG ENGINE
