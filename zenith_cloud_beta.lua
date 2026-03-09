@@ -1367,6 +1367,7 @@ helpers['functions'] = {
         return t_out
     end,
     fade_handle2 = function(self, time, str, r, g, b, a)
+        a = a or 255
         local c1,c2,c3 = 32, 32, 32
         local t_out, t_iter = {}, 1
         local ra=(c1-r); local ga=(c2-g); local ba=(c3-b)
