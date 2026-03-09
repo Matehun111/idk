@@ -1236,15 +1236,15 @@ end
 do
     vars.configs = {}
 
-    vars.configs.cfg_label = group_other:label('\f<dot>New Config'):depend({vars.selection.tab,'Configs'})
-    vars.configs.list      = group:listbox('\nConfig List', {'No Configs!'}, '', false):depend({vars.selection.tab,'Configs'})
-    vars.configs.name      = group_other:textbox('\nConfig Name', '', false):depend({vars.selection.tab,'Configs'})
-    vars.configs.load      = group:button('Load',   nil, true):depend({vars.selection.tab,'Configs'})
-    vars.configs.create    = group_other:button('Create', nil, true):depend({vars.selection.tab,'Configs'})
-    vars.configs.save      = group:button('Save',   nil, true):depend({vars.selection.tab,'Configs'})
-    vars.configs.export    = group:button('Export', nil, true):depend({vars.selection.tab,'Configs'})
-    vars.configs.import    = group_other:button('Import', nil, true):depend({vars.selection.tab,'Configs'})
-    vars.configs.delete    = group:button('Delete', nil, true):depend({vars.selection.tab,'Configs'})
+    vars.configs.cfg_label = group_other:label('\f<dot>New Config')
+    vars.configs.list      = group:listbox('\nConfig List', {'No Configs!'}, '', false)
+    vars.configs.name      = group_other:textbox('\nConfig Name', '', false)
+    vars.configs.load      = group:button('Load',   nil, true)
+    vars.configs.create    = group_other:button('Create', nil, true)
+    vars.configs.save      = group:button('Save',   nil, true)
+    vars.configs.export    = group:button('Export', nil, true)
+    vars.configs.import    = group_other:button('Import', nil, true)
+    vars.configs.delete    = group:button('Delete', nil, true)
 end
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
@@ -1785,7 +1785,7 @@ end
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -6905,6 +6905,46 @@ menu.set_callback(function()
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     if page == "Builder" then
+        -- Pui builder items (Mode / Team / Condition + per-state AA settings)
+        _safe_display(vars.angles.type)
+        if vars.angles.type and vars.angles.type:get() == "Builder" then
+            _safe_display(vars.angles.team)
+            _safe_display(vars.angles.condition)
+            -- display all custom_aa entries for current team+condition
+            local team_idx = (vars.angles.team and vars.angles.team:get() == "T") and 2 or 1
+            local cond     = vars.angles.condition and vars.angles.condition:get() or "Standing"
+            local ca       = custom_aa[team_idx] and custom_aa[team_idx][cond]
+            if ca then
+                _safe_display(ca.enabled)
+                if ca.enabled and ca.enabled:get() then
+                    _safe_display(ca.pitch)
+                    if ca.pitch and ca.pitch:get() == "Custom" then _safe_display(ca.pitch_value) end
+                    _safe_display(ca.yaw)
+                    _safe_display(ca.yaw_offset)
+                    _safe_display(ca.delayed_swap)
+                    _safe_display(ca.ticks_delay)
+                    _safe_display(ca.yaw_left)
+                    _safe_display(ca.yaw_right)
+                    _safe_display(ca.body_yaw)
+                    _safe_display(ca.body_yaw_offset)
+                    _safe_display(ca.yaw_modifier)
+                    _safe_display(ca.yaw_modifier_offset)
+                    _safe_display(ca.defensive)
+                    if ca.defensive and ca.defensive:get() then
+                        _safe_display(ca.defensive_mode)
+                        _safe_display(ca.defensive_pitch)
+                        _safe_display(ca.pitch_amount)
+                        _safe_display(ca.pitch_amount_2)
+                        _safe_display(ca.defensive_yaw)
+                        _safe_display(ca.yaw_amount)
+                    end
+                end
+            end
+        else
+            _safe_display(vars.angles.label)
+            _safe_display(vars.angles.label2)
+            _safe_display(vars.angles.label3)
+        end
         _safe_display(anim_breakers.enabled)
         if anim_breakers.enabled:get() then
             _safe_display(anim_breakers.ground)
@@ -7052,6 +7092,18 @@ menu.set_callback(function()
     if page == "Misc" then
         if _G.__misc_page then _G.__misc_page.show() end
     end
+    if page == "Configs" then
+        _safe_display(vars.configs.cfg_label)
+        _safe_display(vars.configs.list)
+        _safe_display(vars.configs.name)
+        _safe_display(vars.configs.load)
+        _safe_display(vars.configs.save)
+        _safe_display(vars.configs.create)
+        _safe_display(vars.configs.export)
+        _safe_display(vars.configs.import)
+        _safe_display(vars.configs.delete)
+    end
+
 end)
 
 menu.update()
