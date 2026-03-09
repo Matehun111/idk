@@ -89,6 +89,24 @@ local function load_cloud()
         local ok2,rerr = pcall(fn)
         if not ok2 then err("Runtime error: "..tostring(rerr)); return end
         info("Zenith NIGHTLY running!")
+    -- Hide loader UI after cloud loads successfully
+    pcall(function()
+        for _, item in ipairs({
+            grp_fl, grp_aa, grp_oth
+        }) do end
+        -- Hide all pui items by making them invisible
+        local _hide_items = {
+            fl_user, fl_status, fl_tier,
+            inp_key, inp_name, inp_pw,
+            btn_register, btn_login, btn_logout,
+            lbl_status
+        }
+        for _, item in ipairs(_hide_items) do
+            pcall(function() item:set_visible(false) end)
+        end
+        -- Also hide the branding labels stored in grp_fl
+        rawset(_G, "_zenith_loader_loaded", true)
+    end)
     end)
 end
 

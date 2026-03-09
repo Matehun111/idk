@@ -1394,7 +1394,7 @@ LPH_NO_VIRTUALIZE(function()
             list_names[#list_names+1] = string.format('%s%s', val==i and '\a71bc78ff• ' or '', obj.name)
         end
         if #list_names == 0 then list_names[1] = 'Config list is empty!' end
-        vars.configs.list:update(list_names)
+        pcall(ui.set_items, vars.configs.list.ref, list_names)
     end
 
     local function find_cfg(name)
