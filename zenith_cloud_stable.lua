@@ -980,15 +980,12 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
-    vars.selection.tab     = group_fakelag:combobox('\f<dot>Section', {'Anti Aim', 'Visuals', 'Misc', 'Configs'}, false, false)
-    vars.selection.aa_tab  = group_fakelag:combobox('\f<dot>Tab', {'Angles', 'Features'}, false, false)
-        :depend({vars.selection.tab, 'Anti Aim'})
-
-    vars.selection.tab_label = group:label(string.format('\f<dot> %s', vars.selection.tab.value))
-    vars.selection.tab:set_callback(function(self)
-        vars.selection.tab_label:set(string.format('\f<dot>%s', self.value))
-    end, true)
+    vars.selection.label = group_fakelag:label('                      Z  E  N  I  T  H')
+    -- Section/Tab selectors removed (using Zenith dropdown instead)
+    -- Stub tab/aa_tab so depend() calls on them don't error
+    vars.selection.tab    = { value = 'Anti Aim',  get = function() return 'Anti Aim'  end, set = function() end, set_callback = function() end }
+    vars.selection.aa_tab = { value = 'Angles',    get = function() return 'Angles'    end, set = function() end }
+    vars.selection.tab_label = group:label('')
 end
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
@@ -1236,15 +1233,16 @@ end
 do
     vars.configs = {}
 
-    vars.configs.cfg_label = group_other:label('\f<dot>New Config')
-    vars.configs.list      = group:listbox('\nConfig List', {'No Configs!'}, '', false)
-    vars.configs.name      = group_other:textbox('\nConfig Name', '', false)
-    vars.configs.load      = group:button('Load',   nil, true)
-    vars.configs.create    = group_other:button('Create', nil, true)
-    vars.configs.save      = group:button('Save',   nil, true)
-    vars.configs.export    = group:button('Export', nil, true)
-    vars.configs.import    = group_other:button('Import', nil, true)
-    vars.configs.delete    = group:button('Delete', nil, true)
+    local _never = group_fakelag:checkbox('__hidden__'):depend({vars.selection.tab,'__never__'})
+    vars.configs.cfg_label = group_other:label('\f<dot>New Config'):depend({vars.selection.tab,'__never__'})
+    vars.configs.list      = group:listbox('\nConfig List', {'No Configs!'}, '', false):depend({vars.selection.tab,'__never__'})
+    vars.configs.name      = group_other:textbox('\nConfig Name', '', false):depend({vars.selection.tab,'__never__'})
+    vars.configs.load      = group:button('Load',   nil, true):depend({vars.selection.tab,'__never__'})
+    vars.configs.create    = group_other:button('Create', nil, true):depend({vars.selection.tab,'__never__'})
+    vars.configs.save      = group:button('Save',   nil, true):depend({vars.selection.tab,'__never__'})
+    vars.configs.export    = group:button('Export', nil, true):depend({vars.selection.tab,'__never__'})
+    vars.configs.import    = group_other:button('Import', nil, true):depend({vars.selection.tab,'__never__'})
+    vars.configs.delete    = group:button('Delete', nil, true):depend({vars.selection.tab,'__never__'})
 end
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
