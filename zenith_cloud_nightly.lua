@@ -1030,9 +1030,8 @@ do
     cur_loads = (ok_l and type(cur_loads)=='number') and cur_loads or 0
     cur_loads = cur_loads + 1
     pcall(database.write, _loads_key, cur_loads)
-    if vars.statistics and vars.statistics.loaded then
-        vars.statistics.loaded:set(string.format('\f<dot>Times Loaded: \v%d', cur_loads))
-    end
+    -- value stored, will be applied when label is created below
+    rawset(_G, "_zenith_load_count", cur_loads)
 
     -- Online users: increment on load, decrement on shutdown
     -- Uses counterapi.dev (free, reliable)
@@ -1079,7 +1078,7 @@ do
 
     vars.statistics.label_info  = group_other:label('\f<dot>Information')
     vars.statistics.user        = group_other:label('\f<dot>User: \v'..USERNAME)
-    vars.statistics.loaded      = group_other:label('\f<dot>Times Loaded: \v')
+    vars.statistics.loaded      = group_other:label(string.format('\f<dot>Times Loaded: \v%d', _G._zenith_load_count or 0))
     vars.statistics.time_in_game= group_other:label('\f<dot>Session: ')
 end
 
