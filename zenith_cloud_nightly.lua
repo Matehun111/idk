@@ -1,17 +1,4 @@
--- ======================================================================
---  ZENITH | NIGHTLY | Cloud Build
---  Fetched and executed by zenith_loader_nightly.lua
---  Do NOT run this file directly — auth is handled by the loader.
--- ======================================================================
---  Loader injects before load():
---    _auth_ok    = true
---    _auth_alive = true
---    _auth_user  = "<key string>"
--- ======================================================================
-
-if not _auth_ok then
-    error("[Zenith Cloud] Run via the loader, not directly.")
-end
+-- ZENITH | NIGHTLY | Cloud Build
 
 -- Safe display helper for pui objects loaded via cloud
 local function _safe_display(obj)
