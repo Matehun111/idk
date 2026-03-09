@@ -983,21 +983,13 @@ do -- selection
     vars.selection.label = group_fakelag:label('                      Z  E  N  I  T  H')
     -- Section/Tab selectors removed (using Zenith dropdown instead)
     -- Stub tab/aa_tab so depend() calls on them don't error
-    -- Stub pui items - must look like real pui objects for depend() to work
-    local function _make_stub(val)
-        local t = { value=val, ref=0, items={val} }
-        t.get = function() return val end
-        t.set = function() end
-        t.set_callback = function() end
-        t.display = function() end
-        t.depend = function(s,...) return s end
-        t.set_visible = function() end
-        t.set_enabled = function() end
-        return t
-    end
-    vars.selection.tab    = _make_stub('Anti Aim')
-    vars.selection.aa_tab = _make_stub('Angles')
-    vars.selection.tab_label = _make_stub('')
+    -- Real pui items needed for depend() system, but hidden from display
+    vars.selection.tab     = group_fakelag:combobox('\f<dot>Section', {'Anti Aim', 'Visuals', 'Misc', 'Configs'}, false, false)
+    vars.selection.aa_tab  = group_fakelag:combobox('\f<dot>Tab', {'Angles', 'Features'}, false, false)
+    vars.selection.tab_label = group:label(' ')
+    -- Lock to Anti Aim / Angles so all depend() conditions stay satisfied
+    pcall(function() vars.selection.tab:set('Anti Aim') end)
+    pcall(function() vars.selection.aa_tab:set('Angles') end)
 end
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
