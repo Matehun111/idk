@@ -1260,25 +1260,23 @@ helpers['functions'] = {
 }
 
 -- ── CONFIGS MENU ITEMS ──────────────────────────────────────────────
-do
-    vars.configs = {}
-    vars.configs.list   = menu.new_item(ui.new_listbox,  "AA", "Anti-aimbot angles", "\nConfig List", {"No Configs!"})
-        :record("configs", "list")
-    vars.configs.name   = menu.new_item(ui.new_textbox,  "AA", "Anti-aimbot angles", "\nConfig Name")
-        :record("configs", "name")
-    vars.configs.load   = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Load",   function() end)
-        :record("configs", "load")
-    vars.configs.save   = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Save",   function() end)
-        :record("configs", "save")
-    vars.configs.create = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Create", function() end)
-        :record("configs", "create")
-    vars.configs.export = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Export", function() end)
-        :record("configs", "export")
-    vars.configs.import = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Import", function() end)
-        :record("configs", "import_cfg")
-    vars.configs.delete = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Delete", function() end)
-        :record("configs", "delete")
-end
+vars.configs = {}
+vars.configs.list   = menu.new_item(ui.new_listbox,  "AA", "Anti-aimbot angles", "\nConfig List", {"No Configs!"})
+    :record("configs", "list")
+vars.configs.name   = menu.new_item(ui.new_textbox,  "AA", "Anti-aimbot angles", "\nConfig Name")
+    :record("configs", "name")
+vars.configs.load   = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Load",   function() end)
+    :record("configs", "load")
+vars.configs.save   = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Save",   function() end)
+    :record("configs", "save")
+vars.configs.create = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Create", function() end)
+    :record("configs", "create")
+vars.configs.export = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Export", function() end)
+    :record("configs", "export")
+vars.configs.import = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Import", function() end)
+    :record("configs", "import_cfg")
+vars.configs.delete = menu.new_item(ui.new_button,   "AA", "Anti-aimbot angles", "Delete", function() end)
+    :record("configs", "delete")
 
 -- ── CONFIG SYSTEM (Zenith) ─────────────────────────────────────
 LPH_NO_VIRTUALIZE(function()
