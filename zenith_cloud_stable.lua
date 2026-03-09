@@ -1115,24 +1115,24 @@ do
             local ca = custom_aa[team][state]
             local deps_base = {{vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]}}
 
-            ca.enabled = group:checkbox(string.format('Enable \v%s \v%s \ac8c8c8ffState', state, team)):depend({unpack(deps_base)})
+            ca.enabled = group:checkbox(string.format('Enable \v%s \v%s \ac8c8c8ffState', state, team)):depend(unpack(deps_base))
 
             local deps = {{vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled}
 
-            ca.pitch          = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffPitch', state), {'Off','Default','Up','Down','Minimal','Random','Custom'}):depend({unpack(deps)})
+            ca.pitch          = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffPitch', state), {'Off','Default','Up','Down','Minimal','Random','Custom'}):depend(unpack(deps))
             ca.pitch_value    = group:slider(string.format('\f<dot>Pitch Value %s', state), -89, 89, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.pitch,'Custom'},ca.enabled)
-            ca.yaw_base       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Base', state), {'Local view','At targets'}):depend({unpack(deps)})
-            ca.yaw            = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw', state), {'Off','180','Spin','Static','180 Z','Crosshair','180 Left / Right'}):depend({unpack(deps)})
+            ca.yaw_base       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Base', state), {'Local view','At targets'}):depend(unpack(deps))
+            ca.yaw            = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw', state), {'Off','180','Spin','Static','180 Z','Crosshair','180 Left / Right'}):depend(unpack(deps))
             ca.yaw_offset     = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180','Spin','Static','180 Z','Crosshair'},ca.enabled)
             ca.delayed_swap   = group:checkbox(string.format('\f<dot>\v%s ~ \ac8c8c8ffDelayed Swap', state)):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
             ca.ticks_delay    = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffDelay Ticks', state), 0, 30, 0, true, 't', 1):depend({vars.angles.team,teams_list[i]},ca.delayed_swap,{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
             ca.yaw_left       = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffLeft Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
             ca.yaw_right      = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffRight Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'180 Left / Right'},ca.enabled)
-            ca.body_yaw       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffBody Yaw', state), {'Off','Static','Jitter','Opposite'}):depend({unpack(deps)})
+            ca.body_yaw       = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffBody Yaw', state), {'Off','Static','Jitter','Opposite'}):depend(unpack(deps))
             ca.body_yaw_offset= group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffBody Yaw Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.body_yaw,'Jitter','Static','Opposite'},ca.enabled)
             ca.yaw_modifier   = group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffYaw Jitter', state), {'Off','Offset','Center','Random','Skitter'}):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'Off',true},ca.enabled)
             ca.yaw_modifier_offset = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffJitter Offset', state), -180, 180, 0, true, '°'):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},{ca.yaw,'Off',true},{ca.yaw_modifier,'Off',true},ca.enabled)
-            ca.defensive      = group:checkbox(string.format('\f<dot>\v%s ~ \ac8c8c8ffForce Defensive', state)):depend({unpack(deps)})
+            ca.defensive      = group:checkbox(string.format('\f<dot>\v%s ~ \ac8c8c8ffForce Defensive', state)):depend(unpack(deps))
             ca.defensive_mode = group:multiselect(string.format('\f<dot>\v%s ~ \ac8c8c8ffDefensive Mode', state), {'Double Tap','Hide Shots'}):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled,ca.defensive)
             ca.defensive_pitch= group:combobox(string.format('\f<dot>\v%s ~ \ac8c8c8ffDefensive Pitch', state), {'Off','Default','Up','Up-Switch','Random','Custom'}):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled,ca.defensive)
             ca.pitch_amount   = group:slider(string.format('\f<dot>\v%s ~ \ac8c8c8ffOffset', state), -89, 89, 0, true, '°', 1):depend({vars.angles.team,teams_list[i]},{vars.angles.type,'Builder'},{vars.angles.condition,anti_aim_states[k]},ca.enabled,{ca.defensive_pitch,'Custom','Random'},ca.defensive)
