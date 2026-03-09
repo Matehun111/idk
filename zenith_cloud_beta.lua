@@ -985,7 +985,7 @@ do -- selection
     -- Stub tab/aa_tab so depend() calls on them don't error
     vars.selection.tab    = { value = 'Anti Aim',  get = function() return 'Anti Aim'  end, set = function() end, set_callback = function() end }
     vars.selection.aa_tab = { value = 'Angles',    get = function() return 'Angles'    end, set = function() end }
-    vars.selection.tab_label = group:label('')
+    vars.selection.tab_label = group:label(' ')
 end
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
