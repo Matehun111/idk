@@ -6613,6 +6613,7 @@ menu.update()
 
 
 
+
 -- ======================================================================
 --  CONFIG SYSTEM (Zenith)
 -- ======================================================================
@@ -6622,14 +6623,23 @@ do
     local live    = {}
     local cur_sel = 1
 
-    local m_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','Config List',{'--'})
-    local m_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Config Name')
-    local m_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',            function() end)
-    local m_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load Anti-Aim's", function() end)
-    local m_save   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',            function() end)
-    local m_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create / Upload', function() end)
-    local m_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete Mine',     function() end)
-    local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+    -- pui group for the listbox (pui listbox has working :update())
+    local _cfg_grp  = pui.group('AA', 'Anti-aimbot angles')
+    local p_list    = _cfg_grp:listbox('\nCloud Configs', {'No configs.'})
+    p_list:set_callback(function(self)
+        cur_sel = (self:get() or 0) + 1
+        local sel = live[cur_sel]
+        if sel then pcall(ui.set, m_name.ref, sel.name) end
+    end)
+
+    -- menu.new_item for everything else (textbox, buttons, label)
+    local m_name   = menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','by ??? \n')
+    local m_load   = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Load',            function() end)
+    local m_loadaa = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles',"Load Anti-Aim's", function() end)
+    local m_save   = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Save',            function() end)
+    local m_create = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Create / Upload', function() end)
+    local m_delete = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Delete Mine',     function() end)
+    local m_status = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
 
     local function db_read()
         local ok,v = pcall(database.read, _db_key)
@@ -6646,16 +6656,20 @@ do
     local function refresh_list()
         local names = {}
         for i,cfg in ipairs(live) do
-            local pfx = cfg.source=='cloud' and '[Cloud] ' or '[Mine] '
+            local pfx = cfg.source=='cloud' and '\aff9955ff[Cloud] \affffffff' or '\a71bc78ff[Mine] \affffffff'
             names[i] = pfx..cfg.name
         end
         if #names==0 then names={'No configs.'} end
-        pcall(ui.set_items, m_list.ref, names)
+        p_list:update(names)
         cur_sel = math.max(1, math.min(cur_sel, #live))
-        pcall(ui.set, m_list.ref, cur_sel-1)
+        p_list:set(cur_sel - 1)
         local sel = live[cur_sel]
-        if sel then pcall(ui.set, m_name.ref, sel.name) end
-        pcall(menu.update)
+        if sel then
+            local author = sel.author or '???'
+            pcall(ui.set, m_name.ref, 'by '..author)
+        else
+            pcall(ui.set, m_name.ref, '')
+        end
     end
 
     local function export_data()
@@ -6663,7 +6677,7 @@ do
         for _,item in ipairs(menu.get_items()) do
             if item.is_recorded and item.record_key then out[item.record_key]=item.value end
         end
-        local ok,r = pcall(json.stringify,out); return ok and r or '{}'
+        local ok,r = pcall(json.stringify, out); return ok and r or '{}'
     end
 
     local function apply_data(str, aa_only)
@@ -6700,11 +6714,13 @@ do
             http.get(_remote, function(ok,res)
                 local body = type(res)=='table' and res.body or res
                 if ok and body and #body>2 then
-                    local ok2,arr = pcall(json.parse,body)
+                    local ok2,arr = pcall(json.parse, body)
                     if ok2 and type(arr)=='table' then
                         for _,cfg in ipairs(arr) do
                             local dup=false
-                            for _,lc in ipairs(live) do if lc.name==cfg.name and lc.source=='local' then dup=true;break end end
+                            for _,lc in ipairs(live) do
+                                if lc.name==cfg.name and lc.source=='local' then dup=true; break end
+                            end
                             if not dup then cfg.source='cloud'; live[#live+1]=cfg end
                         end
                     end
@@ -6714,10 +6730,6 @@ do
         end)
     end
 
-    m_list:set_callback(function()
-        local ok,v = pcall(ui.get,m_list.ref); cur_sel=(ok and type(v)=='number' and v or 0)+1
-        local sel=live[cur_sel]; if sel then pcall(ui.set,m_name.ref,sel.name) end
-    end)
     m_load:set_callback(function()
         local sel=live[cur_sel]; if not sel then set_status('Select a config.'); return end
         set_status(apply_data(sel.data,false) and 'Loaded: '..sel.name or 'Load failed.')
@@ -6732,8 +6744,8 @@ do
         sel.data=export_data(); save_locals(); set_status('Saved: '..sel.name)
     end)
     m_create:set_callback(function()
-        local ok,name=pcall(ui.get,m_name.ref); name=strip(ok and name or '')
-        if name=='' then set_status('Enter a name first.'); return end
+        local ok,name=pcall(ui.get, m_name.ref); name=strip(ok and name or '')
+        if name=='' or name:find('^by ') then set_status('Enter a name in the box first.'); return end
         live[#live+1]={name=name,author=USERNAME,source='local',data=export_data()}
         cur_sel=#live; save_locals(); refresh_list(); set_status('Created: '..name)
     end)
@@ -6744,8 +6756,9 @@ do
         save_locals(); refresh_list(); set_status('Deleted: '..name)
     end)
 
-    local _cfg_items = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+    local _cfg_items = {m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
     function _G.__configs_show()
+        _safe_display(p_list)
         for _,it in ipairs(_cfg_items) do _safe_display(it) end
     end
 
