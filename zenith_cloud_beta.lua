@@ -4122,17 +4122,25 @@ LPH_NO_VIRTUALIZE(function ()
         local last_server_var = 0.0
 
         local texture do
-            http.get("https://zenith.dev/assets/logo.png", function(status, response)
-                if not status then
-                    return
-                end
-
-                local code = response.status
-
-                if code >= 200 and code < 300 then
-                    texture = renderer.load_png(response.body, 22, 22)
-                end
-            end)
+            local _b64 = "iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAC/UlEQVR4nO1USUxTURQ99w+dPh1oSxWI1gGVCKiBqMQqRWMMJBhXf6NRYyIYCWp0r+BaN+7UhQtduPimiRpt4kaJEUIUp6SoGJAmVaAMMraF9ve6KAGNRRcS48KTvLd4991zzrv35gH/AGhuLS0p0dwGCEtFKs75XAbAQwTA75f+lJQEQQAAT03jlbaapmvdAEoyIVX8VeKvlAlEbDabPUZP5TPnuooiRXFg9bYjTyg5faL3lRYAmgXgYjpb8mL1IjQ3E5jNcbsvuP3wmaItBVJq7xpTquFcvXtSl69bXWUbmFsYizR0EWJV4JYWlhxbzu47ero8HOpKdjxvl0KRXun2zfvJuuNNrhRZjxER4PdnLUl2YhUQBGKSjAcK88wsxMeE1MoqBJ72IJljF3JsVhYMYhmIGKhe5MnZ1AhYnw9X93D+i7z1Pu+2A2d5KhUXktMR2GyWdGfwnhB9EwxweuQQERLMvyemiooGqbPzuhd23w1lbfmumYFu3WKR4ch1iyOjCcjiLMYGBllZs5l4ItwW6+1o8npL3oXDrTMA+GdiVRVJ03SXt7bWt7cqUFq5yyR5y7j/5ROajH7B+9BH5Be44XS7Ubi2GLK3hG9dvkQrbHqypzuyvz90+xFUVYCm6cD346ZlZIbDwb6pWImpYJmujwy0i7496zAS9WB73Q7YHQ50PAjCIn/F0Ov7dPLUnrTR4JTPN14wAWBEo/NGpQXDKjRNQ1HFwRpPVX3y4ZtPrI8PoS0iYbSni4c+96F0Zy2eBx4jx+kCpXUq/ropYnZ7c8sqd29t73t4119djdbW1h9KQUTEy8vrLVaj+MWct8o+OTEIWcmFQTZBNhigOAvBuo7Y2GfMxsYRS8xiOPwBNnseZJlCn9qvloKZMpOy4JiZmZRxo94ff9WE8Ns6KdejyJODEFMzSCXiccloSYCQSiamrKIoWmBUBLPNhOnRXn1meuIOQAAt+ef3M7JIqCJUQIU6f6JBA6IbM3c9XQwsxDVomcYjMw3/8ffwDeRqFtr3d6CrAAAAAElFTkSuQmCC"
+            local function _b64decode(s)
+                local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+                s = s:gsub('[^'..b..'=]', '')
+                return (s:gsub('.', function(x)
+                    if x == '=' then return '' end
+                    local r,f = '', (b:find(x)-1)
+                    for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+                    return r
+                end):gsub('%d%d%d%d%d%d%d%d', function(x)
+                    local n = 0
+                    x:gsub('.', function(c) n = n*2+(c=='1' and 1 or 0) end)
+                    return string.char(n)
+                end))
+            end
+            local ok, bytes = pcall(_b64decode, _b64)
+            if ok and bytes and #bytes > 10 then
+                texture = renderer.load_png(bytes, 22, 22)
+            end
         end
 
         local function get_flags()
