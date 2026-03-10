@@ -306,6 +306,60 @@ client.set_event_callback("console_input", function(cmd)
         set_status(160,160,200,"Logged out."); warn("Logged out."); return true
     end
     if t=="zn_hwid" then info("HWID: "..get_hwid()); return true end
+
+    -- ── HWID RESET (admin only) ───────────────────────────────────────
+    -- Usage: zn_hwid_reset <username>
+    -- Usage: zn_hwid_reset_all   (wipes ALL user HWIDs)
+    local reset_target = t:match("^zn_hwid_reset%s+(.+)$")
+    if reset_target then
+        if auth_user ~= "matehun" then
+            warn("[Zenith] Access denied — admin only."); return true
+        end
+        local users = db_read(DB_USERS)
+        local ukey = reset_target:lower()
+        if users[ukey] then
+            users[ukey].hwid = nil   -- clear HWID lock, keep password/key
+            db_write(DB_USERS, users)
+            info("[Zenith] HWID reset for: " .. reset_target)
+            set_status(100,255,150,"HWID reset: " .. reset_target)
+        else
+            warn("[Zenith] User not found: " .. reset_target)
+            set_status(255,100,100,"User not found: " .. reset_target)
+        end
+        return true
+    end
+
+    if t=="zn_hwid_reset_all" then
+        if auth_user ~= "matehun" then
+            warn("[Zenith] Access denied — admin only."); return true
+        end
+        local users = db_read(DB_USERS)
+        local count = 0
+        for _, u in pairs(users) do
+            if type(u) == "table" and u.hwid then
+                u.hwid = nil; count = count + 1
+            end
+        end
+        db_write(DB_USERS, users)
+        info(string.format("[Zenith] Reset HWID for %d users.", count))
+        set_status(100,255,150,string.format("Reset %d HWIDs", count))
+        return true
+    end
+
+    -- list all users (admin only)
+    if t=="zn_users" then
+        if auth_user ~= "matehun" then
+            warn("[Zenith] Access denied — admin only."); return true
+        end
+        local users = db_read(DB_USERS)
+        info("[Zenith] Registered users:")
+        for name, u in pairs(users) do
+            if type(u) == "table" then
+                info(string.format("  %s | hwid: %s", name, u.hwid or "none"))
+            end
+        end
+        return true
+    end
 end)
 
 -- ── STARTUP ───────────────────────────────────────────────────────────
