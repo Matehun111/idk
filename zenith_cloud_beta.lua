@@ -1032,56 +1032,48 @@ do
     -- value stored, will be applied when label is created below
     rawset(_G, "_zenith_load_count", cur_loads)
 
-    -- Online users: increment on load, decrement on shutdown
-    -- Uses counterapi.dev (free, reliable)
-    local _ns  = 'zenith-hvh-v2'
-    local _key = 'online_users'
+    -- Online users: heartbeat-based, self-healing
+    -- Each user writes a timestamp every 30s; count entries < 90s old = online
+    local _HB_KEY = 'zenith_online_hb_v1'
+    local _my_hb_user = (_auth_user or 'unknown') .. '_' .. tostring(math.random(10000,99999))
 
     local function _set_online(n)
         if shared.fl_online then
-            local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('Online: %s%d\affffffff', col, n))
+            local col = n > 0 and '\\affd700ff' or '\\aff6666ff'
+            shared.fl_online:set(string.format('Online: %s%d\\affffffff', col, n))
         end
     end
 
-    local _incremented = false
-    local function _get_count()
-        http.get(
-            string.format('https://api.counterapi.dev/v1/%s/%s', _ns, _key),
-            function(ok, res)
-                local body = type(res)=='table' and res.body or res
-                if ok and body then
-                    local n = body:match('"count":(%d+)')
-                    if n then _set_online(tonumber(n)) end
-                end
-                client.delay_call(60, _get_count)
-            end
-        )
-    end
-
-    local function _increment()
-        if _incremented then return end
-        _incremented = true
-        http.get(
-            string.format('https://api.counterapi.dev/v1/%s/%s/up', _ns, _key),
-            function(ok, res)
-                local body = type(res)=='table' and res.body or res
-                if ok and body then
-                    local n = body:match('"count":(%d+)')
-                    if n then _set_online(tonumber(n)) end
-                end
-                client.delay_call(60, _get_count)
-            end
-        )
+    local function _hb_tick()
+        -- write our heartbeat
+        local ok_r, tbl = pcall(database.read, _HB_KEY)
+        tbl = (ok_r and type(tbl) == 'table') and tbl or {}
+        local now = os.time()
+        tbl[_my_hb_user] = now
+        -- prune stale entries (> 120s old)
+        for k, t in pairs(tbl) do
+            if (now - t) > 120 then tbl[k] = nil end
+        end
+        pcall(database.write, _HB_KEY, tbl)
+        -- count online
+        local cnt = 0
+        for _, t in pairs(tbl) do
+            if (now - t) <= 90 then cnt = cnt + 1 end
+        end
+        _set_online(cnt)
+        client.delay_call(30, _hb_tick)
     end
 
     client.set_event_callback('shutdown', function()
-        if _incremented then
-            http.get(string.format('https://api.counterapi.dev/v1/%s/%s/down', _ns, _key), function() end)
+        -- remove our entry on clean exit
+        local ok_r, tbl = pcall(database.read, _HB_KEY)
+        if ok_r and type(tbl) == 'table' then
+            tbl[_my_hb_user] = nil
+            pcall(database.write, _HB_KEY, tbl)
         end
     end)
 
-    client.delay_call(2, _increment)
+    client.delay_call(2, _hb_tick)
 end
 
 
@@ -6388,8 +6380,8 @@ end
 --  ZENITH LEADERBOARD  (database kill tracking)
 -- ======================================================================
 do
-    local _LB_KEY   = 'zenith_leaderboard_v1'
-    local _TOT_KEY  = 'zenith_total_users_v1'
+    local _LB_KEY   = 'zenith_leaderboard_v2'
+    local _TOT_KEY  = 'zenith_total_users_v2'
     local _my_user  = _auth_user or 'unknown'
 
     local function _lb_read()
