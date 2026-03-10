@@ -7322,84 +7322,121 @@ if _HAS_RESOLVER and _auth_alive then
 --  ZENITH SIMPLE RESOLVER
 -- ======================================================================
 
+-- ======================================================================
+
 local _res = {
-    players = {},   -- [steamid] = {stage, misses, last_yaw, side, flip_count, jitter_offset}
+    players = {},
     enabled = true,
 }
 
-local _res_stages = {0, 15, -15, 30, -30, 58, -58, 90, -90, 180}
-local _res_jitter = {0, 15, -15, 30, -30}
+-- ── Resolver logic ────────────────────────────────────────────────────
+
+local _res_brute_stages = {0, 58, -58, 35, -35, 90, -90, 15, -15, 180}
+local _res_jitter_stages = {0, 15, -15, 30, -30, 45, -45}
 
 local function _res_get(ent)
     local sid = entity.get_steam64(ent)
     if not sid then return nil end
     if not _res.players[sid] then
         _res.players[sid] = {
-            stage        = 1,
-            misses       = 0,
-            last_yaw     = 0,
-            side         = 1,     -- 1 = right, -1 = left
-            flip_count   = 0,
-            jitter_off   = 0,
-            lby          = 0,
-            resolved_yaw = 0,
+            stage      = 1,
+            jstage     = 1,
+            misses     = 0,
+            last_yaw   = 0,
+            side       = 1,
+            flip_count = 0,
+            jitter_off = 0,
+            lby        = 0,
+            is_jitter  = false,
+            flip_hist  = {},
         }
     end
     return _res.players[sid]
 end
 
--- detect jitter / side from yaw delta history
 local function _res_detect(p, eye_yaw)
     local delta = eye_yaw - p.last_yaw
-    -- normalise delta to [-180, 180]
     while delta >  180 do delta = delta - 360 end
     while delta < -180 do delta = delta + 360 end
     p.last_yaw = eye_yaw
 
-    -- side detection from LBY delta
-    if math.abs(delta) > 25 then
+    -- side detection
+    if math.abs(delta) > 20 then
         p.side = delta > 0 and 1 or -1
         p.flip_count = p.flip_count + 1
+        local h = p.flip_hist
+        h[#h+1] = delta
+        if #h > 6 then table.remove(h, 1) end
+        -- jitter detection: last 4 flips alternate sign
+        if #h >= 4 then
+            local jitter = true
+            for i = #h-2, #h do
+                if h[i] and h[i-1] and (h[i] * h[i-1]) > 0 then
+                    jitter = false; break
+                end
+            end
+            p.is_jitter = jitter
+        end
     end
 
-    -- jitter detection: small rapid flips
-    if math.abs(delta) > 5 and math.abs(delta) < 40 then
+    -- jitter counter offset
+    if p.is_jitter and math.abs(delta) > 5 and math.abs(delta) < 60 then
         p.jitter_off = -delta * 0.5
     else
-        p.jitter_off = p.jitter_off * 0.7  -- decay
+        p.jitter_off = p.jitter_off * 0.65
     end
 end
 
--- called on each resolved yaw set
 local function _res_apply(ent, p)
-    local stage_yaw = _res_stages[p.stage] or 0
-    -- combine: brute stage + side bias + jitter counter
-    local yaw = stage_yaw * p.side + p.jitter_off
+    local mode = 'Brute'
+    local ok, m = pcall(ui.get, _res_ui_mode and _res_ui_mode.ref)
+    if ok and m then mode = m end
+
+    local yaw = 0
+
+    if mode == 'Brute' then
+        yaw = (_res_brute_stages[p.stage] or 0) * p.side
+    elseif mode == 'Jitter' then
+        yaw = (_res_jitter_stages[p.jstage] or 0) * p.side
+    elseif mode == 'Side' then
+        yaw = 58 * p.side
+    elseif mode == 'Auto' then
+        if p.is_jitter then
+            yaw = p.jitter_off + (_res_jitter_stages[p.jstage] or 0) * p.side
+        else
+            yaw = (_res_brute_stages[p.stage] or 0) * p.side
+        end
+    end
+
+    -- apply overlap override if enabled
+    local ok2, ov = pcall(ui.get, _res_ui_overlap and _res_ui_overlap.ref)
+    if ok2 and ov and ov > 0 then
+        yaw = yaw + (p.side * ov)
+    end
+
     plist.set(ent, 'Y offset', yaw)
     p.resolved_yaw = yaw
 end
 
--- on miss: advance stage
 local function _res_on_miss(ent)
-    local p = _res_get(ent)
-    if not p then return end
-    p.misses  = p.misses + 1
-    p.stage   = (p.stage % #_res_stages) + 1
+    local p = _res_get(ent); if not p then return end
+    p.misses = p.misses + 1
+    p.stage  = (p.stage  % #_res_brute_stages)  + 1
+    p.jstage = (p.jstage % #_res_jitter_stages)  + 1
 end
 
--- on hit: reset stage
 local function _res_on_hit(ent)
-    local p = _res_get(ent)
-    if not p then return end
-    p.misses = 0
-    p.stage  = 1
+    local p = _res_get(ent); if not p then return end
+    -- reset on hit only if option enabled
+    local ok, rst = pcall(ui.get, _res_ui_reset and _res_ui_reset.ref)
+    if ok and rst then
+        p.misses = 0; p.stage = 1; p.jstage = 1
+    end
 end
 
--- net_update_end: collect eye yaw and apply resolution
 client.set_event_callback('net_update_end', function()
     if not _auth_alive then return end
     if not _res.enabled then return end
-
     local enemies = entity.get_players(true)
     for _, ent in ipairs(enemies) do
         if entity.is_alive(ent) then
@@ -7413,46 +7450,88 @@ client.set_event_callback('net_update_end', function()
     end
 end)
 
--- aim_miss
 client.set_event_callback('aim_miss', function(e)
     if not _auth_alive then return end
     local tgt = client.userid_to_entindex(e.target)
     if tgt then _res_on_miss(tgt) end
 end)
 
--- aim_hit / player_hurt
 client.set_event_callback('aim_fire', function(e)
     if not _auth_alive then return end
     local tgt = client.userid_to_entindex(e.target_index or 0)
     if tgt then _res_on_hit(tgt) end
 end)
 
--- cleanup on round start
 client.set_event_callback('round_prestart', function()
     _res.players = {}
 end)
 
--- ── UI: single checkbox in Resolver page ─────────────────────────────
+-- ── UI ────────────────────────────────────────────────────────────────
 
 local _res_ui_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Enable Resolver')
+    :record('aa', 'res::enabled'):save()
 _res_ui_enabled:set(true)
 
-local _res_ui_info = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles',
-    'Auto: jitter counter + brute stages + side detect')
+local _res_ui_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles', 'Mode',
+    {'Auto', 'Brute', 'Jitter', 'Side'})
+    :record('aa', 'res::mode'):save()
 
--- assign resolver_show_tab (forward declared before menu.set_callback)
+local _res_ui_overlap = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles', 'Overlap Bias', 0, 60, 0)
+    :record('aa', 'res::overlap'):save()
+
+local _res_ui_reset = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Reset on Hit')
+    :record('aa', 'res::reset'):save()
+_res_ui_reset:set(true)
+
+local _res_ui_lby = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'LBY Override')
+    :record('aa', 'res::lby'):save()
+
+local _res_ui_info = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles',
+    '\a888888ffAuto detects jitter + brute cycles per-player')
+
+-- LBY override logic
+client.set_event_callback('net_update_end', function()
+    if not _auth_alive or not _res.enabled then return end
+    local ok, lby_on = pcall(ui.get, _res_ui_lby.ref)
+    if not ok or not lby_on then return end
+    local enemies = entity.get_players(true)
+    for _, ent in ipairs(enemies) do
+        if entity.is_alive(ent) and not entity.is_dormant(ent) then
+            local p = _res_get(ent)
+            if p then
+                local animstate = entity.get_animstate and entity.get_animstate(ent)
+                if animstate then
+                    local lby_delta = animstate.goal_feet_yaw - (entity.get_prop(ent, 'm_angEyeAngles[1]') or 0)
+                    while lby_delta >  180 do lby_delta = lby_delta - 360 end
+                    while lby_delta < -180 do lby_delta = lby_delta + 360 end
+                    if math.abs(lby_delta) > 25 then
+                        plist.set(ent, 'Y offset', p.resolved_yaw + lby_delta * 0.4)
+                    end
+                end
+            end
+        end
+    end
+end)
+
 resolver_show_tab = function()
-    if _res_ui_enabled then _safe_display(_res_ui_enabled) end
-    if _res_ui_info    then _safe_display(_res_ui_info)    end
+    if not _res_ui_enabled then return end
+    _safe_display(_res_ui_enabled)
+    local en = _res_ui_enabled:get()
+    if en then
+        _safe_display(_res_ui_mode)
+        _safe_display(_res_ui_overlap)
+        _safe_display(_res_ui_reset)
+        _safe_display(_res_ui_lby)
+        _safe_display(_res_ui_info)
+    end
 end
 
--- sync enabled flag
 client.set_event_callback('paint_ui', function()
     if _res_ui_enabled then
         _res.enabled = _res_ui_enabled:get()
     end
 end)
 
-client.color_log(100, 255, 150, '[Zenith] Simple resolver loaded.')
+client.color_log(100, 255, 150, '[Zenith] Resolver loaded.')
 
 end -- _HAS_RESOLVER
