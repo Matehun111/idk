@@ -1045,25 +1045,44 @@ do
         end
     end
 
-    local function _poll()
+    local _incremented = false
+    local function _get_count()
+        http.get(
+            string.format('https://api.counterapi.dev/v1/%s/%s', _ns, _key),
+            function(ok, res)
+                local body = type(res)=='table' and res.body or res
+                if ok and body then
+                    local n = body:match('"count":(%d+)')
+                    if n then _set_online(tonumber(n)) end
+                end
+                client.delay_call(60, _get_count)
+            end
+        )
+    end
+
+    local function _increment()
+        if _incremented then return end
+        _incremented = true
         http.get(
             string.format('https://api.counterapi.dev/v1/%s/%s/up', _ns, _key),
             function(ok, res)
                 local body = type(res)=='table' and res.body or res
                 if ok and body then
                     local n = body:match('"count":(%d+)')
-                    if n then _set_online(tonumber(n)); return end
+                    if n then _set_online(tonumber(n)) end
                 end
-                client.delay_call(30, _poll)
+                client.delay_call(60, _get_count)
             end
         )
     end
 
     client.set_event_callback('shutdown', function()
-        http.get(string.format('https://api.counterapi.dev/v1/%s/%s/down', _ns, _key), function() end)
+        if _incremented then
+            http.get(string.format('https://api.counterapi.dev/v1/%s/%s/down', _ns, _key), function() end)
+        end
     end)
 
-    client.delay_call(2, _poll)
+    client.delay_call(2, _increment)
 end
 
 
@@ -7109,6 +7128,9 @@ do
     -- CLANTAG
     mp.lbl_ct     = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\xa1 Clantag')
     mp.ct_en      = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag'):record('misc','misc::ct_en'):save()
+    if not mp.ct_en:get() then mp.ct_en:set(true) end
+    -- default clantag
+    pcall(function() if mp.ct_text:get()=='' then mp.ct_text:set('zenith.gs') end end)
     mp.ct_text    = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Clantag Text'):record('misc','misc::ct_text'):save()
     mp.ct_mode    = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles', 'Clantag Mode',
         {'Static','Scroll','Bounce','Flicker'}):record('misc','misc::ct_mode'):save()
@@ -7129,8 +7151,6 @@ do
     -- EXTRAS
     mp.lbl_extra  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\x99 Misc Extras')
     mp.unmute_en  = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles','Unmute Silenced Players'):record('misc','misc::unmute_en'):save()
-    mp.drop_key   = menu.new_item(ui.new_hotkey,   'AA','Anti-aimbot angles','Drop Nades Key'):record('misc','misc::drop_key'):save()
-    mp.chat_rev   = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles','Enemy Chat Revealer'):record('misc','misc::chat_rev'):save()
 
     function mp.show()
         _safe_display(mp.lbl_ct); _safe_display(mp.ct_en)
@@ -7141,7 +7161,7 @@ do
         _safe_display(mp.con_filter)
         if mp.con_filter:get() then _safe_display(mp.con_ftext) end
         _safe_display(mp.lbl_extra)
-        _safe_display(mp.unmute_en); _safe_display(mp.drop_key); _safe_display(mp.chat_rev)
+        _safe_display(mp.unmute_en)
     end
 
     -- CLANTAG ENGINE
