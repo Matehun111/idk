@@ -6881,6 +6881,12 @@ menu.update()
 -- ======================================================================
 do
     local _db_key    = 'zenith_cfgs_v3'
+    local function get_timestamp()
+        -- gamesense has no os library; use client.userid as seed + realtime
+        local t = globals.realtime and math.floor(globals.realtime()) or 0
+        -- format as simple counter string
+        return tostring(t)
+    end
     local _remote    = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
     local live       = {}   -- {name, author, data, updated, source}  source='local'|'cloud'
     local cur_sel    = 1
@@ -6894,6 +6900,10 @@ do
     local m_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create', function() end)
     local m_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete', function() end)
     local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+
+    -- Hide all config items initially (shown only on Configs page)
+    local _cfg_refs = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+    for _,it in ipairs(_cfg_refs) do pcall(ui.set_visible, it.ref, false) end
 
     -- ── Helpers ───────────────────────────────────────────────────────
     local function db_read()
@@ -6971,6 +6981,7 @@ do
         end
         refresh_list()
         -- fetch cloud configs
+        set_status('Fetching cloud configs...')
         pcall(function()
             http.get(_remote, function(ok,res)
                 local body = type(res)=='table' and res.body or res
@@ -7026,7 +7037,7 @@ do
         local sel=live[cur_sel]
         if not sel or sel.source=='cloud' then set_status('Select a local config to save.'); return end
         sel.data    = export_data()
-        sel.updated = os.date and os.date('%d.%m.%y %H:%M') or '?'
+        sel.updated = get_timestamp()
         save_locals()
         set_status('Saved: '..sel.name)
     end)
@@ -7036,7 +7047,7 @@ do
         name = strip(ok and name or '')
         if name=='' then set_status('Enter a name first.'); return end
         live[#live+1]={name=name,author=USERNAME,data=export_data(),
-            updated=os.date and os.date('%d.%m.%y %H:%M') or '?',source='local'}
+            updated=get_timestamp(),source='local'}
         cur_sel=#live
         save_locals()
         refresh_list()
@@ -7056,7 +7067,10 @@ do
     -- ── Show function (called from menu.set_callback) ─────────────────
     local _cfg_items = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
     function _G.__configs_show()
-        for _,it in ipairs(_cfg_items) do _safe_display(it) end
+        for _,it in ipairs(_cfg_items) do
+            pcall(ui.set_visible, it.ref, true)
+            _safe_display(it)
+        end
     end
 
     -- ── Init ──────────────────────────────────────────────────────────
