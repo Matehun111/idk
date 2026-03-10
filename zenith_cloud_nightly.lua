@@ -1326,7 +1326,7 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Presets", "Setup", "Builder", "Defensive", "Visual", "Misc"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
     if _HAS_AIMBOT   then table.insert(pages, 4, "Aimbot")   end
     if _HAS_RESOLVER then table.insert(pages, #pages, "Resolver") end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
@@ -6870,186 +6870,74 @@ menu.set_callback(function()
         if _G.__misc_page then _G.__misc_page.show() end
     end
 
-    if page == "Presets" then
-        if _G.__cloud_presets then _G.__cloud_presets.show() end
+    if page == "Configs" then
+        if _G.__configs_show then _G.__configs_show() end
     end
-
 end)
 
 menu.update()
 
 
+
+
 -- ======================================================================
---  CLOUD PRESETS SYSTEM
+--  CONFIG SYSTEM (Zenith)
 -- ======================================================================
 do
-    local _presets_db_key = 'zenith_presets_v2'
-    local _likes_db_key   = 'zenith_preset_likes_v2'
-    local _remote_url     = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
+    local _db_key    = 'zenith_cfgs_v3'
+    local _remote    = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
+    local live       = {}   -- {name, author, data, updated, source}  source='local'|'cloud'
+    local cur_sel    = 1
 
-    -- ── State ────────────────────────────────────────────────────────
-    local cp = {}          -- module table
-    _G.__cloud_presets = cp
+    -- ── menu.new_item declarations ────────────────────────────────────
+    local m_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','\nConfig List',{'--'})
+    local m_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Config Name')
+    local m_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',   function() end)
+    local m_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load AA's", function() end)
+    local m_save   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',   function() end)
+    local m_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create', function() end)
+    local m_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete', function() end)
+    local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','')
 
-    local all_presets   = {}   -- full list fetched/merged
-    local my_likes      = {}   -- set of preset names I liked
-    local cur_idx       = 1
-    local filter_mode   = 'None'  -- None | Liked | Mine
-    local sort_mode     = 'Likes' -- Likes | Loads | Updated | Name
-    local filtered      = {}   -- currently shown list
-
-    -- ── pui items ────────────────────────────────────────────────────
-    local grp_aa  = pui.group('AA', 'Anti-aimbot angles')
-    local grp_fl  = pui.group('AA', 'Fake lag')
-    local grp_oth = pui.group('AA', 'Other')
-
-    -- AA column
-    local p_list    = grp_aa:listbox('\nPresets', {'-'})
-    local p_load    = grp_aa:button('Load')
-    local p_loadaa  = grp_aa:button("Load Anti-Aim's")
-    local p_like    = grp_aa:button('Like')
-    local p_save    = grp_aa:button('Save My Preset')
-    local p_delete  = grp_aa:button('Delete My Preset')
-
-    -- Fake lag column: info panel
-    local p_likes_lbl   = grp_fl:label('Likes: -')
-    local p_loads_lbl   = grp_fl:label('Loads: -')
-    local p_author_lbl  = grp_fl:label('Author: -')
-    local p_build_lbl   = grp_fl:label('Build: -')
-    local p_relev_lbl   = grp_fl:label('Relevance: -')
-    local p_update_lbl  = grp_fl:label('Last Update: -')
-
-    -- Other column: settings
-    local p_settings_lbl = grp_oth:label('\f<dot>Presets Settings')
-    local p_filter  = grp_oth:combobox('Filter', {'None', 'Liked', 'Mine'})
-    local p_sort    = grp_oth:combobox('Sort', {'Likes', 'Loads', 'Updated', 'Name'})
-    local p_status  = grp_oth:label('')
-    local p_upload  = grp_oth:button('Upload My Preset')
-
-    -- ── Helpers ──────────────────────────────────────────────────────
-    local function set_status(msg)
-        p_status:set('\ac8c8c8ff'..msg)
-    end
-
-    local function get_time_str()
-        local t = os.time and os.time() or 0
-        return os.date and os.date('%d.%m.%y %H:%M', t) or '??'
-    end
-
-    local function load_my_likes()
-        local ok, v = pcall(database.read, _likes_db_key)
-        if ok and type(v) == 'string' then
-            local ok2, t = pcall(json.parse, v)
-            if ok2 and type(t) == 'table' then
-                my_likes = t
-                return
-            end
+    -- ── Helpers ───────────────────────────────────────────────────────
+    local function db_read()
+        local ok,v = pcall(database.read, _db_key)
+        if ok and type(v)=='string' then
+            local ok2,t = pcall(json.parse, v)
+            if ok2 and type(t)=='table' then return t end
         end
-        my_likes = {}
+        return {}
     end
 
-    local function save_my_likes()
-        pcall(database.write, _likes_db_key, json.stringify(my_likes))
+    local function db_write(t)
+        pcall(database.write, _db_key, json.stringify(t))
     end
 
-    local function i_liked(name)
-        for _, n in ipairs(my_likes) do
-            if n == name then return true end
-        end
-        return false
+    local function set_status(s)
+        pcall(ui.set, m_status.ref, s)
     end
 
-    local function build_filtered()
-        filtered = {}
-        local f = p_filter:get()
-        local s = p_sort:get()
-        for _, pr in ipairs(all_presets) do
-            local include = true
-            if f == 'Liked' and not i_liked(pr.name) then include = false end
-            if f == 'Mine'  and pr.author ~= USERNAME  then include = false end
-            if include then filtered[#filtered+1] = pr end
-        end
-        -- sort
-        if s == 'Likes' then
-            table.sort(filtered, function(a,b) return (a.likes or 0) > (b.likes or 0) end)
-        elseif s == 'Loads' then
-            table.sort(filtered, function(a,b) return (a.loads or 0) > (b.loads or 0) end)
-        elseif s == 'Name' then
-            table.sort(filtered, function(a,b) return (a.name or '') < (b.name or '') end)
-        else -- Updated
-            table.sort(filtered, function(a,b) return (a.updated or '') > (b.updated or '') end)
-        end
-        -- build listbox names
+    local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
+
+    local function refresh_list()
         local names = {}
-        for i, pr in ipairs(filtered) do
-            local liked_star = i_liked(pr.name) and '\a71bc78ff\xe2\x98\x85 \r' or ''
-            names[i] = string.format('%s%s \ac8c8c8ff(%d \xe2\x99\xa5)', liked_star, pr.name, pr.likes or 0)
+        for i,cfg in ipairs(live) do
+            local pfx = cfg.source=='cloud' and '\a77ccffff[Cloud] \affffffff' or ''
+            names[i] = pfx..cfg.name
         end
-        if #names == 0 then names = {'No presets found.'} end
-        p_list:update(names)
-        cur_idx = 1
-        p_list:set(0)
+        if #names==0 then names={'No configs.'} end
+        pcall(ui.set_items, m_list.ref, names)
+        -- keep selection in range
+        if cur_sel > #live then cur_sel = math.max(1,#live) end
+        pcall(ui.set, m_list.ref, cur_sel-1)
+        -- update name box
+        local sel = live[cur_sel]
+        if sel then pcall(ui.set, m_name.ref, sel.name) end
     end
 
-    local function update_info_panel()
-        local pr = filtered[cur_idx]
-        if not pr then
-            p_likes_lbl:set( '\xe2\x99\xa5 Likes: \ac8c8c8ff-')
-            p_loads_lbl:set( '\xe2\x96\xb6 Loads: \ac8c8c8ff-')
-            p_author_lbl:set('\xf0\x9f\x91\xa4 Author: \ac8c8c8ff-')
-            p_build_lbl:set( '\xe2\x96\xa0 Build: \ac8c8c8ff-')
-            p_relev_lbl:set( '\xe2\x9a\x91 Relevance: \ac8c8c8ff-')
-            p_update_lbl:set('\xf0\x9f\x96\xab Last Update: \ac8c8c8ff-')
-            return
-        end
-        local liked = i_liked(pr.name) and '\a71bc78ff' or '\affffffff'
-        p_likes_lbl:set(  string.format('\a71bc78ff\xe2\x99\xa5\r Likes: %s%d',   liked, pr.likes  or 0))
-        p_loads_lbl:set(  string.format('\a71bc78ff\xe2\x96\xb6\r Loads: \affffffff%d', pr.loads  or 0))
-        p_author_lbl:set( string.format('\a71bc78ff\xf0\x9f\x91\xa4\r Author: \aff9955ff%s', pr.author or '?'))
-        p_build_lbl:set(  string.format('\a71bc78ff\xe2\x96\xa0\r Build: \a77ccffff%s',   pr.build  or 'Unknown'))
-        local rel_col = (pr.relevance == 'Updated') and '\a71bc78ff' or '\affaa44ff'
-        p_relev_lbl:set(  string.format('\a71bc78ff\xe2\x9a\x91\r Relevance: %s%s', rel_col, pr.relevance or 'Unknown'))
-        p_update_lbl:set( string.format('\a71bc78ff\xf0\x9f\x96\xab\r Last Update: \affffffff%s', pr.updated or '?'))
-    end
-
-    -- ── Fetch remote presets ──────────────────────────────────────────
-    local function fetch_presets()
-        set_status('Fetching presets...')
-        http.get(_remote_url, function(ok, res)
-            local body = type(res)=='table' and res.body or res
-            if ok and body then
-                local ok2, data = pcall(json.parse, body)
-                if ok2 and type(data) == 'table' then
-                    all_presets = data
-                    -- merge local user preset if any
-                    local ok3, local_raw = pcall(database.read, _presets_db_key)
-                    if ok3 and type(local_raw) == 'string' then
-                        local ok4, local_pr = pcall(json.parse, local_raw)
-                        if ok4 and type(local_pr) == 'table' and local_pr.name then
-                            -- replace if exists, else insert at front
-                            local found = false
-                            for i, p in ipairs(all_presets) do
-                                if p.name == local_pr.name and p.author == USERNAME then
-                                    all_presets[i] = local_pr; found = true; break
-                                end
-                            end
-                            if not found then table.insert(all_presets, 1, local_pr) end
-                        end
-                    end
-                    build_filtered()
-                    update_info_panel()
-                    set_status(string.format('Loaded %d presets.', #all_presets))
-                    return
-                end
-            end
-            set_status('Failed to fetch presets.')
-        end)
-    end
-
-    -- ── Export current settings as preset data ────────────────────────
-    local function export_cfg()
+    local function export_data()
         local out = {}
-        for _, item in ipairs(menu.get_items()) do
+        for _,item in ipairs(menu.get_items()) do
             if item.is_recorded and item.record_key then
                 out[item.record_key] = item.value
             end
@@ -7057,19 +6945,15 @@ do
         return json.stringify(out)
     end
 
-    -- ── Apply preset data ─────────────────────────────────────────────
-    local function apply_cfg(data_str, aa_only)
-        local ok, data = pcall(json.parse, data_str)
-        if not ok or type(data) ~= 'table' then
-            set_status('Invalid preset data.'); return false
-        end
-        for _, item in ipairs(menu.get_items()) do
+    local function apply_data(data_str, aa_only)
+        local ok,data = pcall(json.parse, data_str or '{}')
+        if not ok or type(data)~='table' then return false end
+        for _,item in ipairs(menu.get_items()) do
             if item.is_recorded and item.record_key then
                 local v = data[item.record_key]
                 if v ~= nil then
                     if aa_only then
-                        -- only apply AA-related records
-                        if item.record_key:match('^aa') or item.record_key:match('^angles') then
+                        if item.record_key:find('^aa') or item.record_key:find('^angles') then
                             pcall(function() item:set(v) end)
                         end
                     else
@@ -7081,117 +6965,107 @@ do
         return true
     end
 
+    -- ── Load from DB + remote ─────────────────────────────────────────
+    local function reload()
+        live = {}
+        -- local configs
+        for _,cfg in ipairs(db_read()) do
+            cfg.source = 'local'
+            live[#live+1] = cfg
+        end
+        refresh_list()
+        -- fetch cloud configs
+        pcall(function()
+            http.get(_remote, function(ok,res)
+                local body = type(res)=='table' and res.body or res
+                if ok and body then
+                    local ok2,arr = pcall(json.parse, body)
+                    if ok2 and type(arr)=='table' then
+                        for _,cfg in ipairs(arr) do
+                            -- don't duplicate local
+                            local dup=false
+                            for _,lc in ipairs(live) do
+                                if lc.name==cfg.name and lc.source=='local' then dup=true;break end
+                            end
+                            if not dup then
+                                cfg.source='cloud'
+                                live[#live+1]=cfg
+                            end
+                        end
+                        refresh_list()
+                    end
+                end
+            end)
+        end)
+    end
+
+    local function save_locals()
+        local t={}
+        for _,cfg in ipairs(live) do
+            if cfg.source=='local' then t[#t+1]=cfg end
+        end
+        db_write(t)
+    end
+
     -- ── Button callbacks ──────────────────────────────────────────────
-    p_load:set_callback(function()
-        local pr = filtered[cur_idx]
-        if not pr then set_status('No preset selected.'); return end
-        -- increment loads
-        pr.loads = (pr.loads or 0) + 1
-        if apply_cfg(pr.data or '{}', false) then
-            set_status('Loaded: '..pr.name)
-        end
+    m_list:set_callback(function(self)
+        cur_sel = (pcall(ui.get,m_list.ref) and ui.get(m_list.ref) or 0)+1
+        local sel=live[cur_sel]
+        if sel then pcall(ui.set,m_name.ref,sel.name) end
     end)
 
-    p_loadaa:set_callback(function()
-        local pr = filtered[cur_idx]
-        if not pr then set_status('No preset selected.'); return end
-        pr.loads = (pr.loads or 0) + 1
-        if apply_cfg(pr.data or '{}', true) then
-            set_status("Loaded AA's: "..pr.name)
-        end
+    m_load:set_callback(function()
+        local sel=live[cur_sel]
+        if not sel then set_status('Nothing selected.'); return end
+        if apply_data(sel.data,false) then set_status('Loaded: '..sel.name) end
     end)
 
-    p_like:set_callback(function()
-        local pr = filtered[cur_idx]
-        if not pr then set_status('No preset selected.'); return end
-        if i_liked(pr.name) then
-            -- unlike
-            pr.likes = math.max(0, (pr.likes or 1) - 1)
-            for i, n in ipairs(my_likes) do
-                if n == pr.name then table.remove(my_likes, i); break end
-            end
-            set_status('Unliked: '..pr.name)
-        else
-            pr.likes = (pr.likes or 0) + 1
-            my_likes[#my_likes+1] = pr.name
-            set_status('Liked: '..pr.name)
-        end
-        save_my_likes()
-        build_filtered()
-        update_info_panel()
+    m_loadaa:set_callback(function()
+        local sel=live[cur_sel]
+        if not sel then set_status('Nothing selected.'); return end
+        if apply_data(sel.data,true) then set_status("Loaded AA's: "..sel.name) end
     end)
 
-    p_save:set_callback(function()
-        local pr = {
-            name      = USERNAME.."'s Config",
-            author    = USERNAME,
-            build     = BUILD or 'nightly',
-            relevance = 'Updated',
-            likes     = 0,
-            loads     = 0,
-            updated   = get_time_str(),
-            data      = export_cfg(),
-        }
-        pcall(database.write, _presets_db_key, json.stringify(pr))
-        -- add/update in local list
-        local found = false
-        for i, p in ipairs(all_presets) do
-            if p.author == USERNAME then all_presets[i] = pr; found = true; break end
-        end
-        if not found then table.insert(all_presets, 1, pr) end
-        build_filtered()
-        update_info_panel()
-        set_status('Preset saved locally.')
+    m_save:set_callback(function()
+        local sel=live[cur_sel]
+        if not sel or sel.source=='cloud' then set_status('Select a local config to save.'); return end
+        sel.data    = export_data()
+        sel.updated = os.date and os.date('%d.%m.%y %H:%M') or '?'
+        save_locals()
+        set_status('Saved: '..sel.name)
     end)
 
-    p_delete:set_callback(function()
-        pcall(database.write, _presets_db_key, '{}')
-        for i, p in ipairs(all_presets) do
-            if p.author == USERNAME then table.remove(all_presets, i); break end
-        end
-        build_filtered()
-        update_info_panel()
-        set_status('Your preset deleted.')
+    m_create:set_callback(function()
+        local ok,name = pcall(ui.get, m_name.ref)
+        name = strip(ok and name or '')
+        if name=='' then set_status('Enter a name first.'); return end
+        live[#live+1]={name=name,author=USERNAME,data=export_data(),
+            updated=os.date and os.date('%d.%m.%y %H:%M') or '?',source='local'}
+        cur_sel=#live
+        save_locals()
+        refresh_list()
+        set_status('Created: '..name)
     end)
 
-    p_upload:set_callback(function()
-        set_status('Contact owner to upload your preset to the cloud list.')
+    m_delete:set_callback(function()
+        local sel=live[cur_sel]
+        if not sel or sel.source=='cloud' then set_status('Can only delete local configs.'); return end
+        local name=sel.name
+        table.remove(live,cur_sel)
+        save_locals()
+        refresh_list()
+        set_status('Deleted: '..name)
     end)
 
-    p_filter:set_callback(function() build_filtered(); update_info_panel() end)
-    p_sort:set_callback(function()   build_filtered(); update_info_panel() end)
-
-    p_list:set_callback(function(self)
-        cur_idx = (self:get() or 0) + 1
-        update_info_panel()
-    end)
-
-    -- ── Show/hide helpers ─────────────────────────────────────────────
-    function cp.show()
-        _safe_display(p_list)
-        _safe_display(p_load)
-        _safe_display(p_loadaa)
-        _safe_display(p_like)
-        _safe_display(p_save)
-        _safe_display(p_delete)
-        _safe_display(p_likes_lbl)
-        _safe_display(p_loads_lbl)
-        _safe_display(p_author_lbl)
-        _safe_display(p_build_lbl)
-        _safe_display(p_relev_lbl)
-        _safe_display(p_update_lbl)
-        _safe_display(p_settings_lbl)
-        _safe_display(p_filter)
-        _safe_display(p_sort)
-        _safe_display(p_status)
-        _safe_display(p_upload)
+    -- ── Show function (called from menu.set_callback) ─────────────────
+    local _cfg_items = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+    function _G.__configs_show()
+        for _,it in ipairs(_cfg_items) do _safe_display(it) end
     end
 
     -- ── Init ──────────────────────────────────────────────────────────
-    load_my_likes()
-    client.delay_call(3, fetch_presets)
+    client.delay_call(1, reload)
 end
-
 
 -- ======================================================================
 --  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
