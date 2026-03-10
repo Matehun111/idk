@@ -6618,7 +6618,6 @@ cvar.developer:set_raw_int(0)
 -- ======================================================================
 do
     local DB_MY  = 'zenith_my_cfgs_v3'
-    local DB_ALL = 'zenith_shared_cfgs_v3'
     local live    = {}
     local cur_sel = 1
     local ME      = USERNAME or 'user'
@@ -6694,7 +6693,6 @@ do
     end
 
         if not found then table.insert(pool,1,cfg) end
-        jwrite(DB_ALL,pool)
     end
 
     local CLOUD_URL = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
@@ -6762,7 +6760,7 @@ do
         if name=='' then setstatus('Enter a name.'); return end
         local cfg={name=name,author=ME,data=export_data()}
         local saves=jread(DB_MY); saves[#saves+1]=cfg; jwrite(DB_MY,saves)
-        jwrite(DB_MY, jread(DB_MY)); live[#live+1]=cfg; cur_sel=#live; refresh(); setstatus('Saved locally: '..name..'. Contact owner to add to cloud.')
+        live[#live+1]=cfg; cur_sel=#live; refresh(); setstatus('Saved locally: '..name..'. DM owner to add to cloud.')
     end)
     c_delete:set_callback(function()
         local sel=live[cur_sel]
@@ -6770,8 +6768,6 @@ do
         local name=sel.name
         local saves=jread(DB_MY)
         for i,s in ipairs(saves) do if s.name==name then table.remove(saves,i);break end end; jwrite(DB_MY,saves)
-        local pool=jread(DB_ALL)
-        for i,p in ipairs(pool) do if p.name==name and p.author==ME then table.remove(pool,i);break end end; jwrite(DB_ALL,pool)
         table.remove(live,cur_sel); cur_sel=math.max(1,cur_sel-1); refresh(); setstatus('Deleted: '..name)
     end)
 
