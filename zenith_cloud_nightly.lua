@@ -1048,7 +1048,7 @@ do
         -- write our heartbeat
         local ok_r, tbl = pcall(database.read, _HB_KEY)
         tbl = (ok_r and type(tbl) == 'table') and tbl or {}
-        local now = os.time()
+        local now = math.floor(globals.tickcount() / globals.tickrate())
         tbl[_my_hb_user] = now
         -- prune stale entries (> 120s old)
         for k, t in pairs(tbl) do
@@ -7394,90 +7394,99 @@ local _res = {
 }
 
 -- ── Resolver logic ────────────────────────────────────────────────────
-
-local _res_brute_stages = {0, 58, -58, 35, -35, 90, -90, 15, -15, 180}
-local _res_jitter_stages = {0, 15, -15, 30, -30, 45, -45}
+-- Brute stages start at 58 (most common real angle), not 0
+-- Stage 0 = untouched (let gamesense native handle it first shot)
+local _res_brute_stages  = {58, -58, 35, -35, 90, -90, 15, -15, 120, -120, 180, 0}
+local _res_jitter_stages = {15, -15, 30, -30, 0, 45, -45}
 
 local function _res_get(ent)
     local sid = entity.get_steam64(ent)
     if not sid then return nil end
     if not _res.players[sid] then
         _res.players[sid] = {
-            stage      = 1,
-            jstage     = 1,
-            misses     = 0,
-            last_yaw   = 0,
-            side       = 1,
-            flip_count = 0,
-            jitter_off = 0,
-            lby        = 0,
-            is_jitter  = false,
-            flip_hist  = {},
+            stage        = 1,
+            jstage       = 1,
+            misses       = 0,
+            hits         = 0,
+            last_yaw     = nil,
+            side         = 1,       -- default 1 so we apply offset immediately
+            flip_count   = 0,
+            jitter_off   = 0,
+            is_jitter    = false,
+            flip_hist    = {},
+            resolved_yaw = 0,
+            first_seen   = false,
         }
     end
     return _res.players[sid]
 end
 
 local function _res_detect(p, eye_yaw)
+    if not p.first_seen then
+        p.last_yaw   = eye_yaw
+        p.first_seen = true
+        return
+    end
+
     local delta = eye_yaw - p.last_yaw
     while delta >  180 do delta = delta - 360 end
     while delta < -180 do delta = delta + 360 end
     p.last_yaw = eye_yaw
 
-    -- side detection
-    if math.abs(delta) > 20 then
+    -- side: any meaningful delta tells us which way they're hiding
+    if math.abs(delta) > 10 then
         p.side = delta > 0 and 1 or -1
         p.flip_count = p.flip_count + 1
         local h = p.flip_hist
         h[#h+1] = delta
-        if #h > 6 then table.remove(h, 1) end
-        -- jitter detection: last 4 flips alternate sign
+        if #h > 8 then table.remove(h, 1) end
+
+        -- jitter: majority of recent flips alternate sign
         if #h >= 4 then
-            local jitter = true
-            for i = #h-2, #h do
-                if h[i] and h[i-1] and (h[i] * h[i-1]) > 0 then
-                    jitter = false; break
-                end
+            local alt = 0
+            for i = 2, #h do
+                if h[i] * h[i-1] < 0 then alt = alt + 1 end
             end
-            p.is_jitter = jitter
+            p.is_jitter = (alt >= (#h-1) * 0.5)
         end
     end
 
     -- jitter counter offset
     if p.is_jitter and math.abs(delta) > 5 and math.abs(delta) < 60 then
-        p.jitter_off = -delta * 0.5
+        p.jitter_off = p.jitter_off * 0.4 + (-delta * 0.6)
     else
-        p.jitter_off = p.jitter_off * 0.65
+        p.jitter_off = p.jitter_off * 0.4
     end
 end
 
 local function _res_apply(ent, p)
-    local mode = 'Brute'
+    if not p.first_seen then return end
+
+    local mode = 'Auto'
     local ok, m = pcall(ui.get, _res_ui_mode and _res_ui_mode.ref)
     if ok and m then mode = m end
 
     local yaw = 0
 
     if mode == 'Brute' then
-        yaw = (_res_brute_stages[p.stage] or 0) * p.side
+        yaw = (_res_brute_stages[p.stage] or 58) * p.side
     elseif mode == 'Jitter' then
-        yaw = (_res_jitter_stages[p.jstage] or 0) * p.side
+        yaw = (_res_jitter_stages[p.jstage] or 15) * p.side + p.jitter_off
     elseif mode == 'Side' then
         yaw = 58 * p.side
     elseif mode == 'Auto' then
         if p.is_jitter then
-            yaw = p.jitter_off + (_res_jitter_stages[p.jstage] or 0) * p.side
+            yaw = (_res_jitter_stages[p.jstage] or 15) * p.side + p.jitter_off
         else
-            yaw = (_res_brute_stages[p.stage] or 0) * p.side
+            yaw = (_res_brute_stages[p.stage] or 58) * p.side
         end
     end
 
-    -- apply overlap override if enabled
+    -- overlap bias
     local ok2, ov = pcall(ui.get, _res_ui_overlap and _res_ui_overlap.ref)
-    if ok2 and ov and ov > 0 then
-        yaw = yaw + (p.side * ov)
-    end
+    if ok2 and ov and ov > 0 then yaw = yaw + (p.side * ov) end
 
+    yaw = math.max(-180, math.min(180, yaw))
     plist.set(ent, 'Y offset', yaw)
     p.resolved_yaw = yaw
 end
@@ -7486,12 +7495,16 @@ local function _res_on_miss(ent)
     local p = _res_get(ent); if not p then return end
     p.misses = p.misses + 1
     p.stage  = (p.stage  % #_res_brute_stages)  + 1
-    p.jstage = (p.jstage % #_res_jitter_stages)  + 1
+    p.jstage = (p.jstage % #_res_jitter_stages) + 1
+    -- also flip side assumption on repeated misses
+    if p.misses % 4 == 0 then
+        p.side = -p.side
+    end
 end
 
 local function _res_on_hit(ent)
     local p = _res_get(ent); if not p then return end
-    -- reset on hit only if option enabled
+    p.hits = p.hits + 1
     local ok, rst = pcall(ui.get, _res_ui_reset and _res_ui_reset.ref)
     if ok and rst then
         p.misses = 0; p.stage = 1; p.jstage = 1
@@ -7503,7 +7516,7 @@ client.set_event_callback('net_update_end', function()
     if not _res.enabled then return end
     local enemies = entity.get_players(true)
     for _, ent in ipairs(enemies) do
-        if entity.is_alive(ent) then
+        if entity.is_alive(ent) and not entity.is_dormant(ent) then
             local p = _res_get(ent)
             if p then
                 local eye_yaw = entity.get_prop(ent, 'm_angEyeAngles[1]') or 0
@@ -7520,10 +7533,14 @@ client.set_event_callback('aim_miss', function(e)
     if tgt then _res_on_miss(tgt) end
 end)
 
-client.set_event_callback('aim_fire', function(e)
+client.set_event_callback('player_hurt', function(e)
     if not _auth_alive then return end
-    local tgt = client.userid_to_entindex(e.target_index or 0)
-    if tgt then _res_on_hit(tgt) end
+    local attacker = client.userid_to_entindex(e.attacker)
+    local me = entity.get_local_player()
+    if attacker and me and attacker == me then
+        local victim = client.userid_to_entindex(e.userid)
+        if victim then _res_on_hit(victim) end
+    end
 end)
 
 client.set_event_callback('round_prestart', function()
@@ -7554,7 +7571,7 @@ local _res_ui_lby = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', '
 local _res_ui_info = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles',
     '\a888888ffAuto detects jitter + brute cycles per-player')
 
--- LBY override logic
+-- LBY override: uses m_flLowerBodyYawTarget vs eye yaw to detect real body side
 client.set_event_callback('net_update_end', function()
     if not _auth_alive or not _res.enabled then return end
     local ok, lby_on = pcall(ui.get, _res_ui_lby.ref)
@@ -7564,14 +7581,17 @@ client.set_event_callback('net_update_end', function()
         if entity.is_alive(ent) and not entity.is_dormant(ent) then
             local p = _res_get(ent)
             if p then
-                local animstate = entity.get_animstate and entity.get_animstate(ent)
-                if animstate then
-                    local lby_delta = animstate.goal_feet_yaw - (entity.get_prop(ent, 'm_angEyeAngles[1]') or 0)
-                    while lby_delta >  180 do lby_delta = lby_delta - 360 end
-                    while lby_delta < -180 do lby_delta = lby_delta + 360 end
-                    if math.abs(lby_delta) > 25 then
-                        plist.set(ent, 'Y offset', p.resolved_yaw + lby_delta * 0.4)
-                    end
+                local eye_yaw = entity.get_prop(ent, 'm_angEyeAngles[1]') or 0
+                local lby     = entity.get_prop(ent, 'm_flLowerBodyYawTarget') or eye_yaw
+                local lby_delta = lby - eye_yaw
+                while lby_delta >  180 do lby_delta = lby_delta - 360 end
+                while lby_delta < -180 do lby_delta = lby_delta + 360 end
+                -- significant LBY update = real foot yaw exposed
+                if math.abs(lby_delta) > 28 then
+                    local corrected = p.resolved_yaw + lby_delta * 0.35
+                    if corrected >  180 then corrected =  180 end
+                    if corrected < -180 then corrected = -180 end
+                    plist.set(ent, 'Y offset', corrected)
                 end
             end
         end
