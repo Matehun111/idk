@@ -872,8 +872,7 @@ LPH_NO_VIRTUALIZE(function ()
             callbacks[#callbacks + 1] = callback
         end
 
-        function rawset(_G,"__configs_show",nil)
-menu.update()
+        function menu.update()
             update_items()
         end
 
