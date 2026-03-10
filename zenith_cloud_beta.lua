@@ -6719,9 +6719,17 @@ do
         table.remove(live,cur_sel); cur_sel=math.max(1,cur_sel-1); refresh(); setstatus('Deleted: '..name)
     end)
 
-    -- Register display function - called from menu.set_callback
-    rawset(_G,'__cfg_display',function()
-        for _,it in ipairs(_citems) do _safe_display(it) end
+    -- Hide all config items initially
+    for _,it in ipairs(_citems) do _safe_set_visible(it, false) end
+
+    rawset(_G,'__cfg_show',function()
+        for _,it in ipairs(_citems) do
+            _safe_set_visible(it, true)
+            _safe_display(it)
+        end
+    end)
+    rawset(_G,'__cfg_hide',function()
+        for _,it in ipairs(_citems) do _safe_set_visible(it, false) end
     end)
 
     client.delay_call(1,reload)
@@ -7004,7 +7012,9 @@ menu.set_callback(function()
     end
 
     if page == "Configs" then
-        if rawget(_G,"__cfg_display") then __cfg_display() end
+        if rawget(_G,"__cfg_show") then __cfg_show() end
+    else
+        if rawget(_G,"__cfg_hide") then __cfg_hide() end
     end
 end)
 
