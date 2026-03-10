@@ -6592,6 +6592,8 @@ cvar.developer:set_raw_int(0)
 
 
 
+
+
 -- ======================================================================
 --  CLOUD CONFIG SYSTEM
 -- ======================================================================
@@ -6602,23 +6604,18 @@ do
     local cur_sel = 1
     local ME      = USERNAME or 'user'
 
-    local cgrp   = pui.group('AA', 'Anti-aimbot angles')
-    -- Visibility gate: this checkbox controls all config items via :depend()
-    local c_vis    = cgrp:checkbox('\n__cfg_vis__')
-    c_vis:set(false)
-    c_vis:depend(c_vis)  -- never visible
-    local c_sep    = cgrp:label('\a71bc78ff\xe2\x94\x81\xe2\x94\x81  Cloud Configs  \xe2\x94\x81\xe2\x94\x81'):depend(c_vis)
-    local c_list   = cgrp:listbox('\nConfig List', {'No configs.'}):depend(c_vis)
-    local c_by     = cgrp:label('\ac8c8c8ffSelect a config'):depend(c_vis)
-    local c_name   = cgrp:textbox('Config Name'):depend(c_vis)
-    local c_load   = cgrp:button('Load'):depend(c_vis)
-    local c_loadaa = cgrp:button("Load Anti-Aim\'s"):depend(c_vis)
-    local c_save   = cgrp:button('Save'):depend(c_vis)
-    local c_create = cgrp:button('Create / Upload'):depend(c_vis)
-    local c_delete = cgrp:button('Delete Mine'):depend(c_vis)
-    local c_status = cgrp:label(' '):depend(c_vis)
-
-    local _citems = {c_sep,c_list,c_by,c_name,c_load,c_loadaa,c_save,c_create,c_delete,c_status}
+    -- Use menu.new_item so items only show when _safe_display is called
+    local c_sep    = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','\xe2\x94\x81\xe2\x94\x81  Cloud Configs  \xe2\x94\x81\xe2\x94\x81')
+    local c_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','Config List',{'No configs.'})
+    local c_by     = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','Select a config')
+    local c_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Config Name')
+    local c_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',             function()end)
+    local c_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load Anti-Aim\'s", function()end)
+    local c_save   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',             function()end)
+    local c_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create / Upload',  function()end)
+    local c_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete Mine',      function()end)
+    local c_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+    local _citems  = {c_sep,c_list,c_by,c_name,c_load,c_loadaa,c_save,c_create,c_delete,c_status}
 
     local function jread(k)
         local ok,v=pcall(database.read,k)
@@ -6629,20 +6626,27 @@ do
         return {}
     end
     local function jwrite(k,t) pcall(database.write,k,json.stringify(t)) end
-    local function setstatus(s) c_status:set('\ac8c8c8ff'..tostring(s)) end
+    local function setstatus(s) pcall(ui.set,c_status.ref,' \ac8c8c8ff'..tostring(s)) end
     local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
 
     local function refresh()
-        if #live==0 then c_list:update({'No configs.'}); c_by:set('\ac8c8c8ffNo configs yet.'); return end
+        if #live==0 then
+            pcall(ui.set_items,c_list.ref,{'No configs.'})
+            pcall(ui.set,c_by.ref,'Select a config')
+            return
+        end
         local names={}
         for i,cfg in ipairs(live) do
-            names[i]=(cfg.author==ME and '\a71bc78ff[Mine] ' or '\a77ccffff[Cloud] ')..'\affffffff'..cfg.name
+            names[i]=(cfg.author==ME and '[Mine] ' or '[Cloud] ')..cfg.name
         end
-        c_list:update(names)
+        pcall(ui.set_items,c_list.ref,names)
         cur_sel=math.max(1,math.min(cur_sel,#live))
-        c_list:set(cur_sel-1)
+        pcall(ui.set,c_list.ref,cur_sel-1)
         local sel=live[cur_sel]
-        if sel then c_name:set(sel.name); c_by:set('\ac8c8c8ffby \aff9955ff'..(sel.author or '?')) end
+        if sel then
+            pcall(ui.set,c_name.ref,sel.name)
+            pcall(ui.set,c_by.ref,'by '..(sel.author or '?'))
+        end
     end
 
     local function export_data()
@@ -6688,10 +6692,13 @@ do
         refresh(); setstatus(#live..' config(s).')
     end
 
-    c_list:set_callback(function(self)
-        cur_sel=(self:get() or 0)+1
+    c_list:set_callback(function()
+        local ok,v=pcall(ui.get,c_list.ref); cur_sel=(ok and v or 0)+1
         local sel=live[cur_sel]
-        if sel then c_name:set(sel.name); c_by:set('\ac8c8c8ffby \aff9955ff'..(sel.author or '?')) end
+        if sel then
+            pcall(ui.set,c_name.ref,sel.name)
+            pcall(ui.set,c_by.ref,'by '..(sel.author or '?'))
+        end
     end)
     c_load:set_callback(function()
         local sel=live[cur_sel]; if not sel then setstatus('Select a config.'); return end
@@ -6703,15 +6710,16 @@ do
     end)
     c_save:set_callback(function()
         local sel=live[cur_sel]
-        if not sel or sel.author~=ME then setstatus("Can't edit this config."); return end
+        if not sel or sel.author~=ME then setstatus("Can't edit this."); return end
         sel.data=export_data()
         local saves=jread(DB_MY); local found=false
         for i,s in ipairs(saves) do if s.name==sel.name then saves[i]=sel;found=true;break end end
         if not found then saves[#saves+1]=sel end
-        jwrite(DB_MY,saves); publish(sel); setstatus('Saved & synced: '..sel.name)
+        jwrite(DB_MY,saves); publish(sel); setstatus('Saved: '..sel.name)
     end)
     c_create:set_callback(function()
-        local name=strip(c_name:get()); if name=='' then setstatus('Enter a name.'); return end
+        local ok,name=pcall(ui.get,c_name.ref); name=strip(ok and name or '')
+        if name=='' then setstatus('Enter a name.'); return end
         local cfg={name=name,author=ME,data=export_data()}
         local saves=jread(DB_MY); saves[#saves+1]=cfg; jwrite(DB_MY,saves)
         publish(cfg); live[#live+1]=cfg; cur_sel=#live; refresh(); setstatus('Uploaded: '..name)
@@ -6720,17 +6728,15 @@ do
         local sel=live[cur_sel]
         if not sel or sel.author~=ME then setstatus("Can't delete this."); return end
         local name=sel.name
-        local saves=jread(DB_MY); for i,s in ipairs(saves) do if s.name==name then table.remove(saves,i);break end end; jwrite(DB_MY,saves)
-        local pool=jread(DB_ALL); for i,p in ipairs(pool) do if p.name==name and p.author==ME then table.remove(pool,i);break end end; jwrite(DB_ALL,pool)
+        local saves=jread(DB_MY)
+        for i,s in ipairs(saves) do if s.name==name then table.remove(saves,i);break end end; jwrite(DB_MY,saves)
+        local pool=jread(DB_ALL)
+        for i,p in ipairs(pool) do if p.name==name and p.author==ME then table.remove(pool,i);break end end; jwrite(DB_ALL,pool)
         table.remove(live,cur_sel); cur_sel=math.max(1,cur_sel-1); refresh(); setstatus('Deleted: '..name)
     end)
 
     rawset(_G,'__cfg_show',function()
-        c_vis:set(true)
         for _,it in ipairs(_citems) do _safe_display(it) end
-    end)
-    rawset(_G,'__cfg_hide',function()
-        c_vis:set(false)
     end)
 
     client.delay_call(1,reload)
@@ -7017,8 +7023,6 @@ menu.set_callback(function()
 
     if page == "Configs" then
         if rawget(_G,"__cfg_show") then __cfg_show() end
-    else
-        if rawget(_G,"__cfg_hide") then __cfg_hide() end
     end
 end)
 
