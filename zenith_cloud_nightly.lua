@@ -6948,6 +6948,7 @@ do
         pcall(ui.set, m_list.ref, cur_sel-1)
         local sel = live[cur_sel]
         if sel then pcall(ui.set, m_name.ref, sel.name) end
+        pcall(menu.update)
     end
 
     local function export_data()

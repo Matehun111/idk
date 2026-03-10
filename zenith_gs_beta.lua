@@ -91,6 +91,11 @@ local function load_cloud()
         info("zenith.gs BETA running!")
         -- Hide loader UI
         rawset(_G, "_zenith_loader_loaded", true)
+        if rawget(_G,"_hide_loader") then _G._hide_loader() end
+        -- Signal loader to hide its UI
+        rawset(_G, "_hide_loader", function()
+            pcall(function() _vis:set(false) end)
+        end)
     end)
 end
 
@@ -212,50 +217,54 @@ if not auth_ok then
 local grp_fl  = pui.group('AA','Fake lag')
 local grp_aa  = pui.group('AA','Anti-aimbot angles')
 local grp_oth = pui.group('AA','Other')
+-- Visibility gate: set false after cloud loads to hide all items
+local _vis = grp_aa:checkbox('\n__loader_vis__')
+_vis:set(true)
+_vis:depend(_vis) -- hides itself
 pui.macros.dot = '\v•  \r'
 
 
 -- Fake lag column: branding
-grp_fl:label('         Z  E  N  I  T  H')
-grp_fl:label('\f<dot>\ac8c8c8ffBETA  —  Authentication')
-grp_fl:label(' ')
+grp_fl:label('         Z  E  N  I  T  H'):depend(_vis)
+grp_fl:label('\f<dot>\ac8c8c8ffBETA  —  Authentication'):depend(_vis)
+grp_fl:label(' '):depend(_vis)
 
-local fl_user   = grp_fl:label('\f<dot>User:   \ac8c8c8ff—')
-local fl_status = grp_fl:label('\f<dot>Auth:   \aff6060ff✗ Not logged in')
-local fl_tier   = grp_fl:label('\f<dot>Tier:   \ac8c8c8ffBETA')
-grp_fl:label(' ')
-grp_fl:label('\f<dot>\ac8c8c8ffHWID: (console: zn_hwid)')
-grp_fl:label('\f<dot>\ac8c8c8ffLogout: zn_logout')
+local fl_user   = grp_fl:label('\f<dot>User:   \ac8c8c8ff—'):depend(_vis)
+local fl_status = grp_fl:label('\f<dot>Auth:   \aff6060ff✗ Not logged in'):depend(_vis)
+local fl_tier   = grp_fl:label('\f<dot>Tier:   \ac8c8c8ffBETA'):depend(_vis)
+grp_fl:label(' '):depend(_vis)
+grp_fl:label('\f<dot>\ac8c8c8ffHWID: (console: zn_hwid)'):depend(_vis)
+grp_fl:label('\f<dot>\ac8c8c8ffLogout: zn_logout'):depend(_vis)
 
 -- Main column: auth form
-grp_aa:label('\f<dot>License Key:')
-local inp_key  = grp_aa:textbox('\nKey',  '', false)
-grp_aa:label('\f<dot>Username:')
-local inp_name = grp_aa:textbox('\nUsername', '', false)
-grp_aa:label('\f<dot>Password:')
-local inp_pw   = grp_aa:textbox('\nPassword', '', false)
-grp_aa:label(' ')
+grp_aa:label('\f<dot>License Key:'):depend(_vis)
+local inp_key  = grp_aa:textbox('\nKey',  '', false):depend(_vis)
+grp_aa:label('\f<dot>Username:'):depend(_vis)
+local inp_name = grp_aa:textbox('\nUsername', '', false):depend(_vis)
+grp_aa:label('\f<dot>Password:'):depend(_vis)
+local inp_pw   = grp_aa:textbox('\nPassword', '', false):depend(_vis)
+grp_aa:label(' '):depend(_vis)
 
-local btn_register = grp_aa:button('Register')
-local btn_login    = grp_aa:button('Login')
-local btn_logout   = grp_aa:button('Logout')
+local btn_register = grp_aa:button('Register'):depend(_vis)
+local btn_login    = grp_aa:button('Login'):depend(_vis)
+local btn_logout   = grp_aa:button('Logout'):depend(_vis)
 
-grp_aa:label(' ')
-local lbl_status = grp_aa:label('\f<dot>\ac8c8c8ffEnter key, then Register or Login.')
+grp_aa:label(' '):depend(_vis)
+local lbl_status = grp_aa:label('\f<dot>\ac8c8c8ffEnter key, then Register or Login.'):depend(_vis)
 
 -- Other column: info
-grp_oth:label('\f<dot>How to use:')
-grp_oth:label('\f<dot>\ac8c8c8ff1. Enter your key')
-grp_oth:label('\f<dot>\ac8c8c8ff   (ZNBET-XXXX-XXXX)')
-grp_oth:label('\f<dot>\ac8c8c8ff2. Enter a username')
-grp_oth:label('\f<dot>\ac8c8c8ff3. Enter a password')
-grp_oth:label('\f<dot>\ac8c8c8ff4. Click Register')
-grp_oth:label(' ')
-grp_oth:label('\f<dot>\ac8c8c8ffNext time: just Login')
-grp_oth:label('\f<dot>\ac8c8c8ffor it auto-restores.')
-grp_oth:label(' ')
-grp_oth:label('\f<dot>\ac8c8c8ffKey slots: 5 (Nightly)')
-grp_oth:label('\f<dot>\ac8c8c8ffHWID locked on first use.')
+grp_oth:label('\f<dot>How to use:'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ff1. Enter your key'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ff   (ZNBET-XXXX-XXXX)'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ff2. Enter a username'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ff3. Enter a password'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ff4. Click Register'):depend(_vis)
+grp_oth:label(' '):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ffNext time: just Login'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ffor it auto-restores.'):depend(_vis)
+grp_oth:label(' '):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ffKey slots: 5 (Nightly)'):depend(_vis)
+grp_oth:label('\f<dot>\ac8c8c8ffHWID locked on first use.'):depend(_vis)
 
 -- Button callbacks
 btn_register:set_callback(function()
