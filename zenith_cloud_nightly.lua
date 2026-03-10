@@ -6689,10 +6689,8 @@ menu.set_callback(function()
         _safe_display(yaw_direction.edge_yaw)
         _safe_display(yaw_direction.freestanding)
 
-        local dn = _G.__drop_nades
-        if dn then _safe_display(dn.key) end
-        local cr = _G.__chat_reveal
-        if cr then _safe_display(cr.enabled) end
+
+
 
     end
 
@@ -6882,6 +6880,11 @@ menu.set_callback(function()
             _safe_display(clientside_nickname.nickname)
             _safe_display(clientside_nickname.apply)
         end
+
+        -- Clantag on Visual page
+        if _G.__misc_page and _G.__misc_page.show_clantag then
+            _G.__misc_page.show_clantag()
+        end
     end
 
     -- HOME PAGE
@@ -6897,10 +6900,13 @@ menu.set_callback(function()
 
     if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
+    else
+        if _G.__configs_hide then _G.__configs_hide() end
     end
 end)
 
 menu.update()
+
 
 
 
@@ -6916,23 +6922,29 @@ do
     local live    = {}
     local cur_sel = 1
 
-    -- pui group for the listbox (pui listbox has working :update())
-    local _cfg_grp  = pui.group('AA', 'Anti-aimbot angles')
-    local p_list    = _cfg_grp:listbox('\nCloud Configs', {'No configs.'})
-    p_list:set_callback(function(self)
-        cur_sel = (self:get() or 0) + 1
-        local sel = live[cur_sel]
-        if sel then pcall(ui.set, m_name.ref, sel.name) end
-    end)
+    -- Hidden visibility gate checkbox
+    local _cfg_grp = pui.group('AA', 'Anti-aimbot angles')
+    local _cfg_vis = _cfg_grp:checkbox('\n__cfg_vis__')
+    _cfg_vis:set(false)
 
-    -- menu.new_item for everything else (textbox, buttons, label)
-    local m_name   = menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','by ??? \n')
+    -- pui listbox (depends on gate so it hides on other pages)
+    local p_list = _cfg_grp:listbox('\nCloud Configs', {'No configs.'})
+    p_list:depend(_cfg_vis)
+
+    -- menu.new_item items (hidden unless in _cfg_items list and _safe_display called)
+    local m_name   = menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','by matehun')
     local m_load   = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Load',            function() end)
     local m_loadaa = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles',"Load Anti-Aim's", function() end)
     local m_save   = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Save',            function() end)
     local m_create = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Create / Upload', function() end)
     local m_delete = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Delete Mine',     function() end)
     local m_status = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
+
+    p_list:set_callback(function(self)
+        cur_sel = (self:get() or 0) + 1
+        local sel = live[cur_sel]
+        if sel then pcall(ui.set, m_name.ref, 'by '..(sel.author or '???')) end
+    end)
 
     local function db_read()
         local ok,v = pcall(database.read, _db_key)
@@ -6949,7 +6961,7 @@ do
     local function refresh_list()
         local names = {}
         for i,cfg in ipairs(live) do
-            local pfx = cfg.source=='cloud' and '\aff9955ff[Cloud] \affffffff' or '\a71bc78ff[Mine] \affffffff'
+            local pfx = cfg.source=='cloud' and '\aff9955ff[Cloud]\affffffff ' or '\a71bc78ff[Mine]\affffffff  '
             names[i] = pfx..cfg.name
         end
         if #names==0 then names={'No configs.'} end
@@ -6957,12 +6969,8 @@ do
         cur_sel = math.max(1, math.min(cur_sel, #live))
         p_list:set(cur_sel - 1)
         local sel = live[cur_sel]
-        if sel then
-            local author = sel.author or '???'
-            pcall(ui.set, m_name.ref, 'by '..author)
-        else
-            pcall(ui.set, m_name.ref, '')
-        end
+        if sel then pcall(ui.set, m_name.ref, 'by '..(sel.author or '???'))
+        else pcall(ui.set, m_name.ref, 'by matehun') end
     end
 
     local function export_data()
@@ -7038,7 +7046,7 @@ do
     end)
     m_create:set_callback(function()
         local ok,name=pcall(ui.get, m_name.ref); name=strip(ok and name or '')
-        if name=='' or name:find('^by ') then set_status('Enter a name in the box first.'); return end
+        if name=='' or name:sub(1,3)=='by ' then set_status('Enter a name in the box.'); return end
         live[#live+1]={name=name,author=USERNAME,source='local',data=export_data()}
         cur_sel=#live; save_locals(); refresh_list(); set_status('Created: '..name)
     end)
@@ -7049,10 +7057,15 @@ do
         save_locals(); refresh_list(); set_status('Deleted: '..name)
     end)
 
-    local _cfg_items = {m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+    local _cfg_menu_items = {m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+
     function _G.__configs_show()
-        _safe_display(p_list)
-        for _,it in ipairs(_cfg_items) do _safe_display(it) end
+        _cfg_vis:set(true)   -- show pui listbox
+        for _,it in ipairs(_cfg_menu_items) do _safe_display(it) end
+    end
+
+    function _G.__configs_hide()
+        _cfg_vis:set(false)  -- hide pui listbox
     end
 
     client.delay_call(1, reload)
@@ -7159,9 +7172,11 @@ do
     mp.lbl_extra  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\x99 Misc Extras')
     mp.unmute_en  = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles','Unmute Silenced Players'):record('misc','misc::unmute_en'):save()
 
-    function mp.show()
+    function mp.show_clantag()
         _safe_display(mp.lbl_ct); _safe_display(mp.ct_en)
         if mp.ct_en:get() then _safe_display(mp.ct_text); _safe_display(mp.ct_mode); _safe_display(mp.ct_speed) end
+    end
+    function mp.show()
         _safe_display(mp.lbl_tt); _safe_display(mp.tt_en)
         if mp.tt_en:get() then _safe_display(mp.tt_kill); _safe_display(mp.tt_death) end
         _safe_display(mp.lbl_con); _safe_display(mp.con_color)
@@ -7225,29 +7240,7 @@ do
         end
     end)
 
-    -- DROP NADES
-    local _dn_prev=false
-    client.set_event_callback('setup_command', function(cmd)
-        if not mp.drop_key then return end
-        local kd = mp.drop_key:get()
-        if kd and not _dn_prev then client.exec('drop') end
-        _dn_prev = kd
-    end)
 
-    -- ENEMY CHAT REVEALER
-    client.set_event_callback('player_chat', function(e)
-        if not mp.chat_rev or not mp.chat_rev:get() then return end
-        local me = entity.get_local_player(); if not me then return end
-        local txt = e.text or ''; if txt=='' then return end
-        local my_t = entity.get_prop(me,'m_iTeamNum') or 0
-        local s_t  = entity.get_prop(e.entityid,'m_iTeamNum') or 0
-        if s_t~=my_t then
-            local nm = entity.get_player_name(e.entityid) or ''
-            if nm~='' and nm~='unknown' then
-                client.color_log(255,80,80,'[Enemy] '..nm..': '..txt)
-            end
-        end
-    end)
 end
 
 client.color_log(113, 152, 255, '[Zenith] Home/Presets/Misc/Clantag systems loaded.')

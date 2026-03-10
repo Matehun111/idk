@@ -91,10 +91,8 @@ local function load_cloud()
         info("zenith.gs STABLE running!")
         -- Hide loader UI
         rawset(_G, "_zenith_loader_loaded", true)
-        if rawget(_G,"_hide_loader") then _G._hide_loader() end
-        -- Signal loader to hide its UI
-        rawset(_G, "_hide_loader", function()
-            pcall(function() _vis:set(false) end)
+        client.delay_call(0.1, function()
+            if rawget(_G,"_vis") then pcall(function() _G._vis:set(false) end) end
         end)
     end)
 end
@@ -221,6 +219,7 @@ local grp_oth = pui.group('AA','Other')
 local _vis = grp_aa:checkbox('\n__loader_vis__')
 _vis:set(true)
 _vis:depend(_vis) -- hides itself
+rawset(_G, "_vis", _vis) -- expose for hide callback
 pui.macros.dot = '\v•  \r'
 
 
