@@ -6604,6 +6604,7 @@ do
     -- Visibility gate: this checkbox controls all config items via :depend()
     local c_vis    = cgrp:checkbox('\n__cfg_vis__')
     c_vis:set(false)
+    c_vis:depend(c_vis)  -- never visible
     local c_sep    = cgrp:label('\a71bc78ff\xe2\x94\x81\xe2\x94\x81  Cloud Configs  \xe2\x94\x81\xe2\x94\x81'):depend(c_vis)
     local c_list   = cgrp:listbox('\nConfig List', {'No configs.'}):depend(c_vis)
     local c_by     = cgrp:label('\ac8c8c8ffSelect a config'):depend(c_vis)
