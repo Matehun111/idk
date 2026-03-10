@@ -1345,7 +1345,7 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Configs"}
     if _HAS_AIMBOT   then table.insert(pages, 4, "Aimbot")   end
     if _HAS_RESOLVER then table.insert(pages, #pages, "Resolver") end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
@@ -6893,10 +6893,6 @@ menu.set_callback(function()
     end
 
 
-    -- MISC PAGE
-    if page == "Misc" then
-        if _G.__misc_page then _G.__misc_page.show() end
-    end
 
     if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
@@ -7187,109 +7183,119 @@ end
 
 --  MISC PAGE  (Clantag, Trashtalk, Console Color, Console Filter)
 -- ======================================================================
+--  CLANTAG SYSTEM (zenith.gs)
+-- ======================================================================
 do
     local mp = {}
-    _G.__misc_page = mp
+    _G.__misc_page = mp   -- keep reference so Visual page show_clantag() still works
 
-    -- CLANTAG
-    mp.lbl_ct     = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\xa1 Clantag')
-    mp.ct_en      = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag'):record('misc','misc::ct_en'):save()
-    if not mp.ct_en:get() then mp.ct_en:set(true) end
-    -- default clantag
-    pcall(function() if mp.ct_text:get()=='' then mp.ct_text:set('zenith.gs') end end)
-    mp.ct_text    = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Clantag Text'):record('misc','misc::ct_text'):save()
-    mp.ct_mode    = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles', 'Clantag Mode',
-        {'Static','Scroll','Bounce','Flicker'}):record('misc','misc::ct_mode'):save()
-    mp.ct_speed   = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Clantag Speed', 1, 20, 5):record('misc','misc::ct_speed'):save()
+    -- Tags
+    local _write_tag = {
+        '','','',
+        'z','ze','zen','zeni','zenit','zenith',
+        'zenith.','zenith.g','zenith.gs',
+        'zenith.gs','zenith.gs','zenith.gs',
+        'zenith.g','zenith.','zenith',
+        'zenit','zeni','zen','ze','z',''
+    }
+    local _bounce_tag = {
+        'z','ze','zen','zeni','zenit','zenith',
+        'zenith.','zenith.g','zenith.gs',
+        'zenith.g','zenith.','zenith',
+        'zenit','zeni','zen','ze','z'
+    }
+    local _scroll_tag = {
+        'zenith.gs       ','enith.gs z      ','nith.gs ze      ',
+        'ith.gs zen      ','th.gs zeni      ','h.gs zenit      ',
+        '.gs zenith      ','gs zenith.      ','s zenith.g      ',
+        ' zenith.gs      ','zenith.gs       '
+    }
+    local _flicker_tags = {'zenith.gs','ZENITH.GS','Zenith.Gs','zEnItH.gS'}
 
-    -- TRASHTALK
-    mp.lbl_tt     = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xf0\x9f\x92\xac Trashtalk')
-    mp.tt_en      = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Trashtalk'):record('misc','misc::tt_en'):save()
-    mp.tt_kill    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', '- On Kill'):record('misc','misc::tt_kill'):save()
-    mp.tt_death   = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', '- On Death'):record('misc','misc::tt_death'):save()
+    -- Menu items
+    mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff⚡ Clantag')
+    mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag'):record('misc','misc::ct_en'):save()
+    mp.ct_mode  = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles', 'Animation',
+                    {'Static','Write','Scroll','Bounce','Flicker'}):record('misc','misc::ct_mode'):save()
+    mp.ct_text  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Custom Text'):record('misc','misc::ct_text'):save()
+    mp.ct_speed = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Speed', 1, 20, 5):record('misc','misc::ct_speed'):save()
 
-    -- CONSOLE
-    mp.lbl_con    = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xf0\x9f\x96\xa5 Console')
-    mp.con_color  = menu.new_item(ui.new_color_picker,'AA','Anti-aimbot angles','Console Color',100,220,255,255):record('misc','misc::con_color'):save()
-    mp.con_filter = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles','Console Filter'):record('misc','misc::con_filter'):save()
-    mp.con_ftext  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','- Filter Text'):record('misc','misc::con_ftext'):save()
+    -- Defaults
+    client.delay_call(0.1, function()
+        if not mp.ct_en:get() then mp.ct_en:set(true) end
+        local ok,v = pcall(ui.get, mp.ct_text.ref)
+        if not ok or not v or v=='' then pcall(ui.set, mp.ct_text.ref, 'zenith.gs') end
+    end)
 
-    -- EXTRAS
-    mp.lbl_extra  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\x99 Misc Extras')
-    mp.unmute_en  = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles','Unmute Silenced Players'):record('misc','misc::unmute_en'):save()
-
+    -- Show on Visual page
     function mp.show_clantag()
-        _safe_display(mp.lbl_ct); _safe_display(mp.ct_en)
-        if mp.ct_en:get() then _safe_display(mp.ct_text); _safe_display(mp.ct_mode); _safe_display(mp.ct_speed) end
-    end
-    function mp.show()
-        _safe_display(mp.lbl_tt); _safe_display(mp.tt_en)
-        if mp.tt_en:get() then _safe_display(mp.tt_kill); _safe_display(mp.tt_death) end
-        _safe_display(mp.lbl_con); _safe_display(mp.con_color)
-        _safe_display(mp.con_filter)
-        if mp.con_filter:get() then _safe_display(mp.con_ftext) end
-        _safe_display(mp.lbl_extra)
-        _safe_display(mp.unmute_en)
+        _safe_display(mp.lbl_ct)
+        _safe_display(mp.ct_en)
+        if mp.ct_en:get() then
+            _safe_display(mp.ct_mode)
+            local mode = mp.ct_mode:get()
+            if mode == 'Static' then
+                _safe_display(mp.ct_text)
+            elseif mode == 'Write' or mode == 'Scroll' or mode == 'Bounce' or mode == 'Flicker' then
+                _safe_display(mp.ct_speed)
+            end
+        end
     end
 
-    -- CLANTAG ENGINE
-    local _ct_idx=0; local _ct_dir=1; local _ct_last=0; local _ct_flick=0
-    client.set_event_callback('setup_command', function(cmd)
-        if not mp.ct_en or not mp.ct_en:get() then return end
-        local rt = globals.realtime and globals.realtime() or 0
-        local iv = 1.0 / math.max(1, mp.ct_speed:get())
-        if rt - _ct_last < iv then return end
-        _ct_last = rt
-        local raw = mp.ct_text:get()
-        if not raw or #raw==0 then return end
-        local mode = mp.ct_mode:get()
-        local tag  = raw
-        if mode=='Scroll' then
-            _ct_idx = (_ct_idx % #raw) + 1
-            tag = raw:sub(_ct_idx)..raw:sub(1,_ct_idx-1)
-        elseif mode=='Bounce' then
-            _ct_idx = _ct_idx + _ct_dir
-            if _ct_idx >= #raw then _ct_dir=-1 elseif _ct_idx<=0 then _ct_dir=1 end
-            _ct_idx = math.max(1, math.min(#raw, _ct_idx))
-            tag = raw:sub(1, _ct_idx)
-        elseif mode=='Flicker' then
-            _ct_flick = _ct_flick+1
-            tag = (_ct_flick%2==0) and raw or ''
-        end
-        -- apply via native reference
-        local ct = software and software.misc and software.misc.miscellaneous and software.misc.miscellaneous.clan_tag_spammer
-        if ct then pcall(function() ui.set(ct[1], true) end) end
-        client.exec('cl_clanid 0')
+    -- No misc tab needed - show() is empty
+    function mp.show() end
+
+    -- Engine
+    local _old_tick = 0
+    local _win_panel = false
+
+    client.set_event_callback('cs_win_panel_match', function()
+        _win_panel = true
+        client.set_clan_tag('zenith.gs')
+    end)
+    client.set_event_callback('round_poststart', function()
+        _win_panel = false
     end)
 
-    -- TRASHTALK ENGINE
-    local _tt_kills  = {'get rekt','ez','thanks for the free kill','you just got zenith\'d','lmao cant aim?'}
-    local _tt_deaths = {'nice shot ig','1 hp i swear','my mouse slipped','reported','was lagging clearly'}
-    client.set_event_callback('player_death', function(e)
-        if not mp.tt_en or not mp.tt_en:get() then return end
-        local me = entity.get_local_player(); if not me then return end
-        if mp.tt_kill:get() and client.userid_to_entindex(e.attacker)==me then
-            local l=_tt_kills[math.random(1,#_tt_kills)]
-            client.delay_call(0.4, function() client.exec('say "'..l..'"') end)
-        end
-        if mp.tt_death:get() and client.userid_to_entindex(e.userid)==me then
-            local l=_tt_deaths[math.random(1,#_tt_deaths)]
-            client.delay_call(0.4, function() client.exec('say "'..l..'"') end)
-        end
-    end)
+    local function play_tag(frames, speed, count)
+        local idx = math.floor(globals.curtime() * speed % count) + 1
+        client.set_clan_tag(frames[idx])
+    end
 
-    -- UNMUTE ENGINE
     client.set_event_callback('net_update_end', function()
-        if not mp.unmute_en or not mp.unmute_en:get() then return end
-        for i=1,globals.maxplayers() do
-            if entity.get_classname(i)=='CCSPlayer' then pcall(utils.unmute,i) end
+        if _win_panel then return end
+        -- check gamesense native clantag spammer
+        local ok, gs_ct = pcall(ui.get, ui.reference('Misc','Miscellaneous','Clan tag spammer'))
+        if ok and gs_ct then return end
+
+        if not mp.ct_en or not mp.ct_en:get() then
+            client.set_clan_tag('')
+            return
+        end
+
+        if globals.tickcount() - _old_tick < 4 then return end
+        _old_tick = globals.tickcount()
+
+        local mode = mp.ct_mode:get()
+        local spd  = mp.ct_speed:get()
+
+        if mode == 'Static' then
+            local ok2, txt = pcall(ui.get, mp.ct_text.ref)
+            client.set_clan_tag(ok2 and txt or 'zenith.gs')
+        elseif mode == 'Write' then
+            play_tag(_write_tag, spd * 0.5, #_write_tag)
+        elseif mode == 'Scroll' then
+            play_tag(_scroll_tag, spd * 0.3, #_scroll_tag)
+        elseif mode == 'Bounce' then
+            play_tag(_bounce_tag, spd * 0.5, #_bounce_tag)
+        elseif mode == 'Flicker' then
+            play_tag(_flicker_tags, spd * 0.8, #_flicker_tags)
         end
     end)
-
-
 end
 
-client.color_log(113, 152, 255, '[Zenith] Home/Presets/Misc/Clantag systems loaded.')
+client.color_log(113, 152, 255, '[Zenith] Clantag system loaded.')
+
 
 
 local math_abs = math.abs
