@@ -6690,9 +6690,6 @@ do
         return true
     end
 
-        if not found then table.insert(pool,1,cfg) end
-    end
-
     local CLOUD_URL = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
 
     local function reload()
