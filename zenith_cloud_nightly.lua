@@ -190,7 +190,6 @@ local keybinds = { }
 local indicators = { }
 local arrows = { }
 local velocity_warning = { }
-local con_filter_text = { }
 local ctx_bebra = { }
 local custom_scope = { }
 
@@ -2445,7 +2444,7 @@ do
     : record("settings", "settings::tweaks_enable")
     : save()
 
-    settings.tweaks = menu.new_item(ui.new_multiselect, 'AA', 'Anti-aimbot angles', merge { "- Functions", "\n", "settings::tweaks" }, { 'Log Aimbot Shots', 'Trashtalk', 'Unmute Silenced Players', 'Console Filter', 'Damage Marker' })
+    settings.tweaks = menu.new_item(ui.new_multiselect, 'AA', 'Anti-aimbot angles', merge { "- Functions", "\n", "settings::tweaks" }, { 'Log Aimbot Shots', 'Damage Marker' })
     : record("settings", "settings::tweaks")
     : save()
 end
@@ -4089,117 +4088,6 @@ do
 
 end
 
----region trashtalk
-do
-    local phrases = {
-        "1",
-        "bro ur crosshair was nowhere near me LMAO",
-        "how are you this bad",
-        "i was afk and you still missed",
-        "my grandma aims better than you",
-        "do you play with your feet?",
-        "i felt bad so i stood still and you STILL missed",
-        "uninstall steam",
-        "is your mouse plugged in?",
-        "you belong in silver",
-        "bro queued the wrong game",
-        "i havent moved in 3 seconds. HOW",
-        "your sens must be 0.001",
-        "i actually yawned watching that",
-        "refund your monitor",
-        "that spray was actually impressive. impressively bad",
-        "did you close your eyes",
-        "go back to fortnite",
-        "ur team is carrying a corpse rn",
-        "i tabbed out and still didnt die",
-        "bro is playing with a steering wheel",
-        "even a bot wouldve hit that",
-        "i could feel you missing from here",
-        "report for griefing yourself",
-        "you make me feel invincible fr",
-    }
-
-    local function talk()
-        client.exec("say " .. phrases[globals.tickcount() % #phrases + 1])
-    end
-
-    local my_killer = -1
-    client.set_event_callback('player_death', function (event)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Trashtalk') then
-            return
-        end
-
-        local game_rules = entity.get_game_rules()
-        if not game_rules then
-            return
-        end
-
-        if entity.get_prop(game_rules, 'm_bWarmupPeriod') == 1 then
-            return
-        end
-
-        local lp = entity.get_local_player()
-        if lp == nil then
-            return
-        end
-
-        local victim, attacker = client.userid_to_entindex(event["userid"]), client.userid_to_entindex(event["attacker"])
-        if victim == attacker then
-            return
-        end
-
-        do
-            if victim == lp then
-                my_killer = attacker
-            end
-
-            if my_killer ~= -1 and attacker ~= lp then
-                if my_killer == victim then
-                    talk()
-                    my_killer = -1
-                end
-            end
-        end
-
-        if attacker == lp then
-            talk()
-        end
-    end)
-
-    client.set_event_callback('round_prestart', function ()
-        my_killer = -1
-    end)
-end
-
---- region unmute
-do
-    local function handle_unmute()
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Unmute Silenced Players') then
-            return
-        end
-
-        for i = 1, globals.maxplayers() do
-            if entity.get_classname(i) ~= 'CCSPlayer' then
-                goto skip
-            end
-
-            utils.unmute(i)
-            ::skip::
-        end
-    end
-
-    settings.tweaks:set_callback(handle_unmute)
-    settings.tweaks_enable:set_callback(handle_unmute)
-    client.set_event_callback('player_connect_full', handle_unmute)
-end
 
 ---region autopeek
 do
@@ -5237,21 +5125,9 @@ end)()
 
 --- region console filter
 do
-    cvar.con_filter_text:set_string("[gamesense]")
 
-    local function apply_con_filter()
-        cvar.con_filter_enable:set_raw_int(
-            (settings.tweaks_enable:get() and settings.tweaks:have_key('Console Filter'))
-                and 1 or 0
-        )
-    end
-
-    settings.tweaks:set_callback(apply_con_filter)
-    settings.tweaks_enable:set_callback(apply_con_filter)
-    apply_con_filter()
 
     defer(function ()
-        cvar.con_filter_enable:set_raw_int(0)
     end)
 end
 
@@ -7181,7 +7057,7 @@ do
     end
 end
 
---  MISC PAGE  (Clantag, Trashtalk, Console Color, Console Filter)
+--  CLANTAG SYSTEM (zenith.gs)
 -- ======================================================================
 --  CLANTAG SYSTEM (zenith.gs)
 -- ======================================================================
