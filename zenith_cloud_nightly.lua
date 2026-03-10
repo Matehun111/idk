@@ -6869,10 +6869,8 @@ menu.set_callback(function()
     if page == "Misc" then
         if _G.__misc_page then _G.__misc_page.show() end
     end
-    end
 end)
 
-rawset(_G,"__configs_show",nil)
 menu.update()
 
 
