@@ -872,7 +872,8 @@ LPH_NO_VIRTUALIZE(function ()
             callbacks[#callbacks + 1] = callback
         end
 
-        function menu.update()
+        function rawset(_G,"__configs_show",nil)
+menu.update()
             update_items()
         end
 
@@ -1326,7 +1327,7 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc"}
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -6577,217 +6578,15 @@ menu.set_callback(function()
     if page == "Misc" then
         if _G.__misc_page then _G.__misc_page.show() end
     end
-
-    if page == "Configs" then
-        if _G.__configs_show then _G.__configs_show() end
     end
 end)
 
+rawset(_G,"__configs_show",nil)
 menu.update()
 
 
 
 
--- ======================================================================
---  CONFIG SYSTEM (Zenith)
--- ======================================================================
-do
-    local _db_key    = 'zenith_cfgs_v3'
-    local function get_timestamp()
-        -- gamesense has no os library; use client.userid as seed + realtime
-        local t = globals.realtime and math.floor(globals.realtime()) or 0
-        -- format as simple counter string
-        return tostring(t)
-    end
-    local _remote    = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
-    local live       = {}   -- {name, author, data, updated, source}  source='local'|'cloud'
-    local cur_sel    = 1
-
-    -- ── menu.new_item declarations ────────────────────────────────────
-    local m_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','Config List',{'--'})
-    local m_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Config Name')
-    local m_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',   function() end)
-    local m_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load AA's", function() end)
-    local m_save   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',   function() end)
-    local m_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create', function() end)
-    local m_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete', function() end)
-    local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
-
-    -- Hide all config items initially (shown only on Configs page)
-    local _cfg_refs = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
-    for _,it in ipairs(_cfg_refs) do pcall(ui.set_visible, it.ref, false) end
-
-    -- ── Helpers ───────────────────────────────────────────────────────
-    local function db_read()
-        local ok,v = pcall(database.read, _db_key)
-        if ok and type(v)=='string' then
-            local ok2,t = pcall(json.parse, v)
-            if ok2 and type(t)=='table' then return t end
-        end
-        return {}
-    end
-
-    local function db_write(t)
-        pcall(database.write, _db_key, json.stringify(t))
-    end
-
-    local function set_status(s)
-        pcall(ui.set, m_status.ref, s)
-    end
-
-    local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
-
-    local function refresh_list()
-        local names = {}
-        for i,cfg in ipairs(live) do
-            local pfx = cfg.source=='cloud' and '\a77ccffff[Cloud] \affffffff' or ''
-            names[i] = pfx..cfg.name
-        end
-        if #names==0 then names={'No configs.'} end
-        pcall(ui.set_items, m_list.ref, names)
-        -- keep selection in range
-        if cur_sel > #live then cur_sel = math.max(1,#live) end
-        pcall(ui.set, m_list.ref, cur_sel-1)
-        -- update name box
-        local sel = live[cur_sel]
-        if sel then pcall(ui.set, m_name.ref, sel.name) end
-    end
-
-    local function export_data()
-        local out = {}
-        for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then
-                out[item.record_key] = item.value
-            end
-        end
-        return json.stringify(out)
-    end
-
-    local function apply_data(data_str, aa_only)
-        local ok,data = pcall(json.parse, data_str or '{}')
-        if not ok or type(data)~='table' then return false end
-        for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then
-                local v = data[item.record_key]
-                if v ~= nil then
-                    if aa_only then
-                        if item.record_key:find('^aa') or item.record_key:find('^angles') then
-                            pcall(function() item:set(v) end)
-                        end
-                    else
-                        pcall(function() item:set(v) end)
-                    end
-                end
-            end
-        end
-        return true
-    end
-
-    -- ── Load from DB + remote ─────────────────────────────────────────
-    local function reload()
-        live = {}
-        -- local configs
-        for _,cfg in ipairs(db_read()) do
-            cfg.source = 'local'
-            live[#live+1] = cfg
-        end
-        refresh_list()
-        -- fetch cloud configs
-        set_status('Fetching cloud configs...')
-        pcall(function()
-            http.get(_remote, function(ok,res)
-                local body = type(res)=='table' and res.body or res
-                if ok and body then
-                    local ok2,arr = pcall(json.parse, body)
-                    if ok2 and type(arr)=='table' then
-                        for _,cfg in ipairs(arr) do
-                            -- don't duplicate local
-                            local dup=false
-                            for _,lc in ipairs(live) do
-                                if lc.name==cfg.name and lc.source=='local' then dup=true;break end
-                            end
-                            if not dup then
-                                cfg.source='cloud'
-                                live[#live+1]=cfg
-                            end
-                        end
-                        refresh_list()
-                    end
-                end
-            end)
-        end)
-    end
-
-    local function save_locals()
-        local t={}
-        for _,cfg in ipairs(live) do
-            if cfg.source=='local' then t[#t+1]=cfg end
-        end
-        db_write(t)
-    end
-
-    -- ── Button callbacks ──────────────────────────────────────────────
-    m_list:set_callback(function(self)
-        cur_sel = (pcall(ui.get,m_list.ref) and ui.get(m_list.ref) or 0)+1
-        local sel=live[cur_sel]
-        if sel then pcall(ui.set,m_name.ref,sel.name) end
-    end)
-
-    m_load:set_callback(function()
-        local sel=live[cur_sel]
-        if not sel then set_status('Nothing selected.'); return end
-        if apply_data(sel.data,false) then set_status('Loaded: '..sel.name) end
-    end)
-
-    m_loadaa:set_callback(function()
-        local sel=live[cur_sel]
-        if not sel then set_status('Nothing selected.'); return end
-        if apply_data(sel.data,true) then set_status("Loaded AA's: "..sel.name) end
-    end)
-
-    m_save:set_callback(function()
-        local sel=live[cur_sel]
-        if not sel or sel.source=='cloud' then set_status('Select a local config to save.'); return end
-        sel.data    = export_data()
-        sel.updated = get_timestamp()
-        save_locals()
-        set_status('Saved: '..sel.name)
-    end)
-
-    m_create:set_callback(function()
-        local ok,name = pcall(ui.get, m_name.ref)
-        name = strip(ok and name or '')
-        if name=='' then set_status('Enter a name first.'); return end
-        live[#live+1]={name=name,author=USERNAME,data=export_data(),
-            updated=get_timestamp(),source='local'}
-        cur_sel=#live
-        save_locals()
-        refresh_list()
-        set_status('Created: '..name)
-    end)
-
-    m_delete:set_callback(function()
-        local sel=live[cur_sel]
-        if not sel or sel.source=='cloud' then set_status('Can only delete local configs.'); return end
-        local name=sel.name
-        table.remove(live,cur_sel)
-        save_locals()
-        refresh_list()
-        set_status('Deleted: '..name)
-    end)
-
-    -- ── Show function (called from menu.set_callback) ─────────────────
-    local _cfg_items = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
-    function _G.__configs_show()
-        for _,it in ipairs(_cfg_items) do
-            pcall(ui.set_visible, it.ref, true)
-            _safe_display(it)
-        end
-    end
-
-    -- ── Init ──────────────────────────────────────────────────────────
-    client.delay_call(1, reload)
-end
 
 -- ======================================================================
 --  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
