@@ -1048,7 +1048,7 @@ do
         -- write our heartbeat
         local ok_r, tbl = pcall(database.read, _HB_KEY)
         tbl = (ok_r and type(tbl) == 'table') and tbl or {}
-        local now = os.time()
+        local now = math.floor(globals.tickcount() / (1/globals.tickinterval()))
         tbl[_my_hb_user] = now
         -- prune stale entries (> 120s old)
         for k, t in pairs(tbl) do

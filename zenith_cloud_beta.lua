@@ -1048,7 +1048,7 @@ do
         -- write our heartbeat
         local ok_r, tbl = pcall(database.read, _HB_KEY)
         tbl = (ok_r and type(tbl) == 'table') and tbl or {}
-        local now = os.time()
+        local now = math.floor(globals.tickcount() / (1/globals.tickinterval()))
         tbl[_my_hb_user] = now
         -- prune stale entries (> 120s old)
         for k, t in pairs(tbl) do
@@ -6281,7 +6281,7 @@ do
                         ui.set(dt_ref[1], false)
                     end
                     _at_dt_suppressed = true
-                    _at_restore_time  = now + math.floor(globals.tickrate() * 2)  -- 2 seconds
+                    _at_restore_time  = now + math.floor((1/globals.tickinterval()) * 2)  -- 2 seconds
                 end
             end
 
@@ -6297,7 +6297,7 @@ do
             end
             -- if DT was suppressed, set restore timer from landing moment
             if _at_dt_suppressed then
-                _at_restore_time = now + math.floor(globals.tickrate() * 2)
+                _at_restore_time = now + math.floor((1/globals.tickinterval()) * 2)
             end
         end
 
