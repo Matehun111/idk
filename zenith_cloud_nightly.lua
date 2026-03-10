@@ -6788,30 +6788,29 @@ menu.update()
 --  CONFIG SYSTEM (Zenith)
 -- ======================================================================
 do
-    local _db_key = 'zenith_cfgs_v3'
-    local _remote = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
-    local live    = {}
-    local cur_sel = 1
-    local MAX_ROWS = 8  -- visible rows in the fake listbox
+    local _db_key  = 'zenith_cfgs_v3'
+    local _remote  = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
+    local live     = {}
+    local cur_sel  = 1
+    local MAX_ROWS = 8
 
-    -- All menu.new_item so they only show when :display() is called on Configs page
-    local m_header  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','Cloud Configs ─────────────────')
+    local m_header  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles','Cloud Configs ─────────────────')
     local m_rows    = {}
     for i=1,MAX_ROWS do
         m_rows[i] = menu.new_item(ui.new_label, 'AA','Anti-aimbot angles',' ')
     end
-    local m_scroll  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
-    local m_author  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
-    local m_sel_up  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','▲ Previous',   function() end)
-    local m_sel_dn  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','▼ Next',        function() end)
-    local m_load    = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',           function() end)
-    local m_loadaa  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load Anti-Aim's",function() end)
-    local m_savename= menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Save Name')
-    local m_save    = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',           function() end)
-    local m_delete  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete Mine',    function() end)
-    local m_status  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+    local m_scroll  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
+    local m_author  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
+    local m_sel_up  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','▲ Previous',    function() end)
+    local m_sel_dn  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','▼ Next',         function() end)
+    local m_load    = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Load',            function() end)
+    local m_loadaa  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles',"Load Anti-Aim's", function() end)
+    local m_savename= menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','Save Name')
+    local m_save    = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Save',            function() end)
+    local m_delete  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Delete Mine',     function() end)
+    local m_status  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
 
-    local offset = 0  -- scroll offset for list view
+    local offset = 0
 
     local function db_read()
         local ok,v = pcall(database.read, _db_key)
@@ -6822,14 +6821,73 @@ do
         return {}
     end
     local function db_write(t) pcall(database.write, _db_key, json.stringify(t)) end
-    local function set_status(s) pcall(ui.set, m_status.ref, s) end
+    local function set_status(s) pcall(ui.set, m_status.ref, s or ' ') end
     local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
+
+    -- Export: walk records[tab][name] = item, read live UI value
+    local function export_data()
+        local out = {}
+        local ok_r, recs = pcall(menu.get_records)
+        if not ok_r or type(recs) ~= 'table' then return '{}' end
+        for tab, names in pairs(recs) do
+            for name, item in pairs(names) do
+                if item and item.ref then
+                    local ok2, val = pcall(ui.get, item.ref)
+                    if ok2 then
+                        local key = tab .. '::' .. name
+                        -- store as array so unpack works on apply
+                        if type(val) == 'table' then
+                            out[key] = val
+                        else
+                            out[key] = {val}
+                        end
+                    end
+                end
+            end
+        end
+        local ok3, str = pcall(json.stringify, out)
+        return ok3 and str or '{}'
+    end
+
+    -- Apply: set each recorded item from stored data
+    local function apply_data(str, aa_only)
+        local ok, data = pcall(json.parse, str or '{}')
+        if not ok or type(data) ~= 'table' then return false end
+
+        local ok_r, recs = pcall(menu.get_records)
+        if not ok_r or type(recs) ~= 'table' then return false end
+
+        local applied = 0
+        for tab, names in pairs(recs) do
+            for name, item in pairs(names) do
+                if item and item.ref then
+                    local key = tab .. '::' .. name
+                    local v = data[key]
+                    if v ~= nil then
+                        local should = true
+                        if aa_only then
+                            should = tab == 'aa' or tab == 'angles' or tab == 'defensive'
+                        end
+                        if should then
+                            pcall(function()
+                                if type(v) == 'table' then
+                                    ui.set(item.ref, unpack(v))
+                                else
+                                    ui.set(item.ref, v)
+                                end
+                                applied = applied + 1
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+        return applied > 0
+    end
 
     local function refresh_rows()
         local total = #live
-        -- clamp cur_sel
         cur_sel = math.max(1, math.min(cur_sel, math.max(1, total)))
-        -- clamp offset so cur_sel is always visible
         if cur_sel - 1 < offset then offset = cur_sel - 1 end
         if cur_sel - 1 >= offset + MAX_ROWS then offset = cur_sel - MAX_ROWS end
         offset = math.max(0, math.min(offset, math.max(0, total - MAX_ROWS)))
@@ -6838,17 +6896,16 @@ do
             local idx = offset + i
             local cfg = live[idx]
             if cfg then
-                local sel_marker = (idx == cur_sel) and '\a71bc78ff► ' or '  '
+                local marker  = (idx == cur_sel) and '\a71bc78ff► ' or '  '
                 local src_col = cfg.source=='cloud' and '\aff9955ff' or '\a71bc78ff'
-                local tag = cfg.source=='cloud' and '[C]' or '[M]'
+                local tag     = cfg.source=='cloud' and '[C]' or '[M]'
                 pcall(ui.set, m_rows[i].ref,
-                    sel_marker..'\affffffff'..src_col..tag..' \affffffff'..cfg.name)
+                    marker..'\affffffff'..src_col..tag..' \affffffff'..cfg.name)
             else
                 pcall(ui.set, m_rows[i].ref, '  ')
             end
         end
 
-        -- scroll indicator
         if total > MAX_ROWS then
             pcall(ui.set, m_scroll.ref,
                 string.format('\ac8c8c8ff%d / %d  [scroll: ▲▼]', cur_sel, total))
@@ -6857,10 +6914,9 @@ do
                 string.format('\ac8c8c8ff%d / %d', cur_sel, total))
         end
 
-        -- author
         local sel = live[cur_sel]
         if sel then
-            local src = sel.source=='cloud' and '\aff9955ff[Cloud]' or '\a71bc78ff[Mine] '
+            local src = sel.source=='cloud' and '\aff9955ff[Cloud]' or '\a71bc78ff[Mine]'
             pcall(ui.set, m_author.ref,
                 'by \aff9955ff'..(sel.author or '???')..'  '..src)
         else
@@ -6868,72 +6924,32 @@ do
         end
     end
 
-local function export_data()
-        local out = {}
-        for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then
-                -- item.value is always a table {v1,v2,...}; read live from UI
-                local ok, vals = pcall(function()
-                    local v = { ui.get(item.ref) }
-                    return v
-                end)
-                if ok and vals then
-                    -- store as array so unpack works on apply
-                    out[item.record_key] = vals
-                end
-            end
-        end
-        local ok,r = pcall(json.stringify, out)
-        return ok and r or '{}'
-    end
-
-    local function apply_data(str, aa_only)
-        local ok,data = pcall(json.parse, str or '{}')
-        if not ok or type(data)~='table' then return false end
-        for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then
-                local v = data[item.record_key]
-                if v ~= nil then
-                    local should_apply = true
-                    if aa_only then
-                        local k = item.record_key
-                        should_apply = k:find('^aa') or k:find('^angles') or k:find('^defensive')
-                    end
-                    if should_apply then
-                        pcall(function()
-                            if type(v) == 'table' then
-                                item:set(unpack(v))
-                            else
-                                item:set(v)
-                            end
-                        end)
-                    end
-                end
-            end
-        end
-        return true
-    end
-
     local function save_locals()
-        local t={}
-        for _,cfg in ipairs(live) do if cfg.source=='local' then t[#t+1]=cfg end end
+        local t = {}
+        for _, cfg in ipairs(live) do
+            if cfg.source == 'local' then t[#t+1] = cfg end
+        end
         db_write(t)
     end
 
     local function reload()
         live = {}
-        for _,cfg in ipairs(db_read()) do cfg.source='local'; live[#live+1]=cfg end
+        for _, cfg in ipairs(db_read()) do
+            cfg.source = 'local'; live[#live+1] = cfg
+        end
         refresh_rows()
         pcall(function()
-            http.get(_remote, function(ok,res)
+            http.get(_remote, function(ok, res)
                 local body = type(res)=='table' and res.body or res
-                if ok and body and #body>2 then
-                    local ok2,arr = pcall(json.parse, body)
+                if ok and body and #body > 2 then
+                    local ok2, arr = pcall(json.parse, body)
                     if ok2 and type(arr)=='table' then
-                        for _,cfg in ipairs(arr) do
-                            local dup=false
-                            for _,lc in ipairs(live) do
-                                if lc.name==cfg.name and lc.source=='local' then dup=true;break end
+                        for _, cfg in ipairs(arr) do
+                            local dup = false
+                            for _, lc in ipairs(live) do
+                                if lc.name == cfg.name and lc.source == 'local' then
+                                    dup = true; break
+                                end
                             end
                             if not dup then cfg.source='cloud'; live[#live+1]=cfg end
                         end
@@ -6944,54 +6960,101 @@ local function export_data()
         end)
     end
 
+    -- Config string format: "zenith:gs <name>"
+    -- Import from string  
+    local function parse_config_string(s)
+        if type(s) ~= 'string' then return nil end
+        local payload = s:match('^zenith:gs%s+(.+)$')
+        if payload then return payload end
+        return nil
+    end
+
+    local function export_config_string(name)
+        return 'zenith:gs ' .. export_data()
+    end
+
     m_sel_up:set_callback(function()
         cur_sel = math.max(1, cur_sel - 1); refresh_rows()
     end)
     m_sel_dn:set_callback(function()
-        cur_sel = math.min(math.max(1,#live), cur_sel + 1); refresh_rows()
-    end)
-    m_load:set_callback(function()
-        local sel=live[cur_sel]; if not sel then set_status('No config selected.'); return end
-        set_status(apply_data(sel.data,false) and 'Loaded: '..sel.name or 'Load failed.')
-    end)
-    m_loadaa:set_callback(function()
-        local sel=live[cur_sel]; if not sel then set_status('No config selected.'); return end
-        set_status(apply_data(sel.data,true) and "Loaded AA's: "..sel.name or 'Load failed.')
-    end)
-    m_save:set_callback(function()
-        local ok,name=pcall(ui.get, m_savename.ref); name=strip(ok and name or '')
-        -- If a Mine config is selected and name is empty, overwrite it
-        local sel=live[cur_sel]
-        if name=='' and sel and sel.source=='local' then
-            sel.data=export_data(); save_locals()
-            set_status('Saved: '..sel.name); return
-        end
-        if name=='' then set_status('Enter a name to save.'); return end
-        -- Check if name exists (update) or create new
-        for _,cfg in ipairs(live) do
-            if cfg.name==name and cfg.source=='local' then
-                cfg.data=export_data(); save_locals()
-                set_status('Updated: '..name); refresh_rows(); return
-            end
-        end
-        live[#live+1]={name=name,author=USERNAME,source='local',data=export_data()}
-        cur_sel=#live; save_locals(); refresh_rows(); set_status('Saved: '..name)
-    end)
-    m_delete:set_callback(function()
-        local sel=live[cur_sel]
-        if not sel or sel.source=='cloud' then set_status("Can't delete cloud configs."); return end
-        local name=sel.name; table.remove(live,cur_sel); cur_sel=math.max(1,cur_sel-1)
-        save_locals(); refresh_rows(); set_status('Deleted: '..name)
+        cur_sel = math.min(math.max(1, #live), cur_sel + 1); refresh_rows()
     end)
 
-    -- All items to display on Configs page
-    local _all_items = {m_header, m_scroll, m_author, m_sel_up, m_sel_dn,
-                        m_load, m_loadaa, m_savename, m_save, m_delete, m_status}
-    for i=1,MAX_ROWS do _all_items[#_all_items+1] = m_rows[i] end
+    m_load:set_callback(function()
+        local sel = live[cur_sel]
+        if not sel then set_status('No config selected.'); return end
+        local data_str = sel.data
+        -- support "zenith:gs <json>" format
+        local inner = parse_config_string(data_str)
+        if inner then data_str = inner end
+        if apply_data(data_str, false) then
+            set_status('Loaded: ' .. sel.name)
+        else
+            set_status('Load failed - no matching items found.')
+        end
+    end)
+
+    m_loadaa:set_callback(function()
+        local sel = live[cur_sel]
+        if not sel then set_status('No config selected.'); return end
+        local data_str = sel.data
+        local inner = parse_config_string(data_str)
+        if inner then data_str = inner end
+        if apply_data(data_str, true) then
+            set_status("Loaded AA's: " .. sel.name)
+        else
+            set_status('Load failed.')
+        end
+    end)
+
+    m_save:set_callback(function()
+        local ok, name = pcall(ui.get, m_savename.ref)
+        name = strip(ok and name or '')
+        local sel = live[cur_sel]
+        -- overwrite selected Mine config if no name given
+        if name == '' and sel and sel.source == 'local' then
+            sel.data = export_data()
+            save_locals()
+            set_status('Saved: ' .. sel.name)
+            return
+        end
+        if name == '' then set_status('Enter a name to save.'); return end
+        -- update existing
+        for _, cfg in ipairs(live) do
+            if cfg.name == name and cfg.source == 'local' then
+                cfg.data = export_data()
+                save_locals(); refresh_rows()
+                set_status('Updated: ' .. name)
+                return
+            end
+        end
+        -- new config
+        live[#live+1] = {
+            name   = name,
+            author = USERNAME or 'user',
+            source = 'local',
+            data   = export_data()
+        }
+        cur_sel = #live
+        save_locals(); refresh_rows()
+        set_status('Saved: ' .. name)
+    end)
+
+    m_delete:set_callback(function()
+        local sel = live[cur_sel]
+        if not sel or sel.source == 'cloud' then
+            set_status("Can't delete cloud configs."); return
+        end
+        local name = sel.name
+        table.remove(live, cur_sel)
+        cur_sel = math.max(1, cur_sel - 1)
+        save_locals(); refresh_rows()
+        set_status('Deleted: ' .. name)
+    end)
 
     function _G.__configs_show()
         _safe_display(m_header)
-        for i=1,MAX_ROWS do _safe_display(m_rows[i]) end
+        for i = 1, MAX_ROWS do _safe_display(m_rows[i]) end
         _safe_display(m_scroll)
         _safe_display(m_author)
         _safe_display(m_sel_up)
@@ -7004,8 +7067,13 @@ local function export_data()
         _safe_display(m_status)
     end
 
+    -- expose for external use
+    _G._zenith_export_cfg = export_data
+    _G._zenith_import_cfg = apply_data
+
     client.delay_call(1, reload)
 end
+
 
 -- ======================================================================
 --  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
