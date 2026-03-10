@@ -6868,12 +6868,23 @@ do
         end
     end
 
-    local function export_data()
+local function export_data()
         local out = {}
         for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then out[item.record_key]=item.value end
+            if item.is_recorded and item.record_key then
+                -- item.value is always a table {v1,v2,...}; read live from UI
+                local ok, vals = pcall(function()
+                    local v = { ui.get(item.ref) }
+                    return v
+                end)
+                if ok and vals then
+                    -- store as array so unpack works on apply
+                    out[item.record_key] = vals
+                end
+            end
         end
-        local ok,r = pcall(json.stringify,out); return ok and r or '{}'
+        local ok,r = pcall(json.stringify, out)
+        return ok and r or '{}'
     end
 
     local function apply_data(str, aa_only)
@@ -6883,12 +6894,19 @@ do
             if item.is_recorded and item.record_key then
                 local v = data[item.record_key]
                 if v ~= nil then
+                    local should_apply = true
                     if aa_only then
-                        if item.record_key:find('^aa') or item.record_key:find('^angles') or item.record_key:find('^defensive') then
-                            pcall(function() item:set(v) end)
-                        end
-                    else
-                        pcall(function() item:set(v) end)
+                        local k = item.record_key
+                        should_apply = k:find('^aa') or k:find('^angles') or k:find('^defensive')
+                    end
+                    if should_apply then
+                        pcall(function()
+                            if type(v) == 'table' then
+                                item:set(unpack(v))
+                            else
+                                item:set(v)
+                            end
+                        end)
                     end
                 end
             end
