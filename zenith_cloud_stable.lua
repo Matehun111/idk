@@ -6369,172 +6369,6 @@ cvar.developer:set_raw_int(0)
 
 
 
--- ======================================================================
---  CLOUD CONFIG SYSTEM
--- ======================================================================
-do
-    local DB_MY     = 'zenith_my_cfgs_v3'
-    local CLOUD_URL = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
-    local live      = {}
-    local cur_sel   = 0
-    local ME        = USERNAME or 'user'
-
-    local cgrp     = pui.group('AA', 'Anti-aimbot angles')
-    local c_sep    = cgrp:label('\a71bc78ff━━  Cloud Configs  ━━')
-    local c_combo  = cgrp:combobox('\nConfig', {'---'})
-    local c_by     = cgrp:label('\ac8c8c8ffSelect a config above')
-    local c_load   = cgrp:button('Load')
-    local c_loadaa = cgrp:button("Load Anti-Aim's")
-    local c_name   = cgrp:textbox('\nSave Name')
-    local c_save   = cgrp:button('Save Local')
-    local c_delete = cgrp:button('Delete Mine')
-    local c_status = cgrp:label(' ')
-    local _citems  = {c_sep,c_combo,c_by,c_load,c_loadaa,c_name,c_save,c_delete,c_status}
-
-    local function jread(k)
-        local ok,v = pcall(database.read,k)
-        if ok and type(v)=='string' then
-            local ok2,t = pcall(json.parse,v)
-            if ok2 and type(t)=='table' then return t end
-        end
-        return {}
-    end
-    local function jwrite(k,t) pcall(database.write,k,json.stringify(t)) end
-    local function setstatus(s) c_status:set('\ac8c8c8ff'..tostring(s)) end
-    local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
-
-    local function rebuild()
-        local names = {}
-        for i,cfg in ipairs(live) do
-            names[i] = (cfg.source=='local' and '\a71bc78ff[Mine] ' or '\a77ccffff[Cloud] ')..'\affffffff'..cfg.name
-        end
-        if #names == 0 then names = {'no configs yet'} end
-        c_combo:update(names)
-        cur_sel = math.max(0, math.min(cur_sel, #live-1))
-        c_combo:set(cur_sel)
-        local sel = live[cur_sel+1]
-        if sel then
-            c_by:set('\ac8c8c8ffby \aff9955ff'..(sel.author or '?'))
-            c_name:set(sel.name)
-        else
-            c_by:set('\ac8c8c8ffSelect a config above')
-        end
-    end
-
-    local function export_data()
-        local out = {}
-        for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then out[item.record_key]=item.value end
-        end
-        local ok,r = pcall(json.stringify,out); return ok and r or '{}'
-    end
-
-    local function apply_data(str, aa_only)
-        local ok,data = pcall(json.parse, str or '{}')
-        if not ok or type(data)~='table' then return false end
-        for _,item in ipairs(menu.get_items()) do
-            if item.is_recorded and item.record_key then
-                local v = data[item.record_key]
-                if v ~= nil then
-                    if aa_only then
-                        local k = item.record_key
-                        if k:find('^aa') or k:find('^angles') or k:find('^defensive') then
-                            pcall(function() item:set(v) end)
-                        end
-                    else
-                        pcall(function() item:set(v) end)
-                    end
-                end
-            end
-        end
-        return true
-    end
-
-    local function reload()
-        live = {}
-        for _,mine in ipairs(jread(DB_MY)) do
-            mine.source='local'; live[#live+1]=mine
-        end
-        rebuild()
-        setstatus('Fetching cloud configs...')
-        pcall(function()
-            http.get(CLOUD_URL, function(ok, res)
-                local body = type(res)=='table' and res.body or res
-                if ok and body and #body > 2 then
-                    local ok2,arr = pcall(json.parse, body)
-                    if ok2 and type(arr)=='table' then
-                        for _,cfg in ipairs(arr) do
-                            cfg.source='cloud'
-                            local dup=false
-                            for _,lc in ipairs(live) do
-                                if lc.name==cfg.name and lc.author==cfg.author then dup=true;break end
-                            end
-                            if not dup then live[#live+1]=cfg end
-                        end
-                    end
-                end
-                rebuild()
-                setstatus(#live..' config(s) loaded.')
-            end)
-        end)
-    end
-
-    c_combo:set_callback(function(self)
-        cur_sel = self:get() or 0
-        local sel = live[cur_sel+1]
-        if sel then
-            c_by:set('\ac8c8c8ffby \aff9955ff'..(sel.author or '?'))
-            c_name:set(sel.name)
-        end
-    end)
-
-    c_load:set_callback(function()
-        local sel = live[cur_sel+1]
-        if not sel then setstatus('Select a config first.'); return end
-        setstatus(apply_data(sel.data,false) and 'Loaded: '..sel.name or 'Load failed.')
-    end)
-
-    c_loadaa:set_callback(function()
-        local sel = live[cur_sel+1]
-        if not sel then setstatus('Select a config first.'); return end
-        setstatus(apply_data(sel.data,true) and "Loaded AA's: "..sel.name or 'Load failed.')
-    end)
-
-    c_save:set_callback(function()
-        local name = strip(c_name:get())
-        if name=='' then setstatus('Enter a save name first.'); return end
-        local cfg = {name=name, author=ME, source='local', data=export_data()}
-        local saves = jread(DB_MY)
-        local found=false
-        for i,s in ipairs(saves) do if s.name==name then saves[i]=cfg;found=true;break end end
-        if not found then saves[#saves+1]=cfg end
-        jwrite(DB_MY, saves)
-        local lfound=false
-        for i,lc in ipairs(live) do if lc.name==name and lc.source=='local' then live[i]=cfg;lfound=true;break end end
-        if not lfound then live[#live+1]=cfg; cur_sel=#live-1 end
-        rebuild()
-        setstatus('Saved: '..name)
-    end)
-
-    c_delete:set_callback(function()
-        local sel = live[cur_sel+1]
-        if not sel or sel.source~='local' then setstatus("Can only delete your own configs."); return end
-        local name = sel.name
-        local saves = jread(DB_MY)
-        for i,s in ipairs(saves) do if s.name==name then table.remove(saves,i);break end end
-        jwrite(DB_MY, saves)
-        table.remove(live, cur_sel+1)
-        cur_sel = math.max(0, cur_sel-1)
-        rebuild()
-        setstatus('Deleted: '..name)
-    end)
-
-    rawset(_G,'__cfg_show',function()
-        for _,it in ipairs(_citems) do _safe_display(it) end
-    end)
-
-    client.delay_call(1, reload)
-end
 
 -- resolver_show_tab: removed in beta build
 
@@ -6769,7 +6603,7 @@ menu.set_callback(function()
     end
 
     if page == "Configs" then
-        if rawget(_G,"__cfg_show") then __cfg_show() end
+        if _G.__configs_show then _G.__configs_show() end
     end
 end)
 
@@ -6778,6 +6612,144 @@ menu.update()
 
 
 
+
+-- ======================================================================
+--  CONFIG SYSTEM (Zenith)
+-- ======================================================================
+do
+    local _db_key = 'zenith_cfgs_v3'
+    local _remote = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
+    local live    = {}
+    local cur_sel = 1
+
+    local m_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','Config List',{'--'})
+    local m_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Config Name')
+    local m_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',            function() end)
+    local m_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load Anti-Aim's", function() end)
+    local m_save   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',            function() end)
+    local m_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create / Upload', function() end)
+    local m_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete Mine',     function() end)
+    local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+
+    local function db_read()
+        local ok,v = pcall(database.read, _db_key)
+        if ok and type(v)=='string' then
+            local ok2,t = pcall(json.parse, v)
+            if ok2 and type(t)=='table' then return t end
+        end
+        return {}
+    end
+    local function db_write(t) pcall(database.write, _db_key, json.stringify(t)) end
+    local function set_status(s) pcall(ui.set, m_status.ref, s) end
+    local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
+
+    local function refresh_list()
+        local names = {}
+        for i,cfg in ipairs(live) do
+            local pfx = cfg.source=='cloud' and '[Cloud] ' or '[Mine] '
+            names[i] = pfx..cfg.name
+        end
+        if #names==0 then names={'No configs.'} end
+        pcall(ui.set_items, m_list.ref, names)
+        cur_sel = math.max(1, math.min(cur_sel, #live))
+        pcall(ui.set, m_list.ref, cur_sel-1)
+        local sel = live[cur_sel]
+        if sel then pcall(ui.set, m_name.ref, sel.name) end
+    end
+
+    local function export_data()
+        local out = {}
+        for _,item in ipairs(menu.get_items()) do
+            if item.is_recorded and item.record_key then out[item.record_key]=item.value end
+        end
+        local ok,r = pcall(json.stringify,out); return ok and r or '{}'
+    end
+
+    local function apply_data(str, aa_only)
+        local ok,data = pcall(json.parse, str or '{}')
+        if not ok or type(data)~='table' then return false end
+        for _,item in ipairs(menu.get_items()) do
+            if item.is_recorded and item.record_key then
+                local v = data[item.record_key]
+                if v ~= nil then
+                    if aa_only then
+                        if item.record_key:find('^aa') or item.record_key:find('^angles') or item.record_key:find('^defensive') then
+                            pcall(function() item:set(v) end)
+                        end
+                    else
+                        pcall(function() item:set(v) end)
+                    end
+                end
+            end
+        end
+        return true
+    end
+
+    local function save_locals()
+        local t={}
+        for _,cfg in ipairs(live) do if cfg.source=='local' then t[#t+1]=cfg end end
+        db_write(t)
+    end
+
+    local function reload()
+        live = {}
+        for _,cfg in ipairs(db_read()) do cfg.source='local'; live[#live+1]=cfg end
+        refresh_list()
+        pcall(function()
+            http.get(_remote, function(ok,res)
+                local body = type(res)=='table' and res.body or res
+                if ok and body and #body>2 then
+                    local ok2,arr = pcall(json.parse,body)
+                    if ok2 and type(arr)=='table' then
+                        for _,cfg in ipairs(arr) do
+                            local dup=false
+                            for _,lc in ipairs(live) do if lc.name==cfg.name and lc.source=='local' then dup=true;break end end
+                            if not dup then cfg.source='cloud'; live[#live+1]=cfg end
+                        end
+                    end
+                end
+                refresh_list()
+            end)
+        end)
+    end
+
+    m_list:set_callback(function()
+        local ok,v = pcall(ui.get,m_list.ref); cur_sel=(ok and type(v)=='number' and v or 0)+1
+        local sel=live[cur_sel]; if sel then pcall(ui.set,m_name.ref,sel.name) end
+    end)
+    m_load:set_callback(function()
+        local sel=live[cur_sel]; if not sel then set_status('Select a config.'); return end
+        set_status(apply_data(sel.data,false) and 'Loaded: '..sel.name or 'Load failed.')
+    end)
+    m_loadaa:set_callback(function()
+        local sel=live[cur_sel]; if not sel then set_status('Select a config.'); return end
+        set_status(apply_data(sel.data,true) and "Loaded AA's: "..sel.name or 'Load failed.')
+    end)
+    m_save:set_callback(function()
+        local sel=live[cur_sel]
+        if not sel or sel.source=='cloud' then set_status("Can't save cloud configs."); return end
+        sel.data=export_data(); save_locals(); set_status('Saved: '..sel.name)
+    end)
+    m_create:set_callback(function()
+        local ok,name=pcall(ui.get,m_name.ref); name=strip(ok and name or '')
+        if name=='' then set_status('Enter a name first.'); return end
+        live[#live+1]={name=name,author=USERNAME,source='local',data=export_data()}
+        cur_sel=#live; save_locals(); refresh_list(); set_status('Created: '..name)
+    end)
+    m_delete:set_callback(function()
+        local sel=live[cur_sel]
+        if not sel or sel.source=='cloud' then set_status("Can't delete cloud configs."); return end
+        local name=sel.name; table.remove(live,cur_sel)
+        save_locals(); refresh_list(); set_status('Deleted: '..name)
+    end)
+
+    local _cfg_items = {m_list,m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+    function _G.__configs_show()
+        for _,it in ipairs(_cfg_items) do _safe_display(it) end
+    end
+
+    client.delay_call(1, reload)
+end
 
 -- ======================================================================
 --  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
