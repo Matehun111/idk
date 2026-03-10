@@ -6609,12 +6609,11 @@ menu.set_callback(function()
 
     if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
-    else
-        if _G.__configs_hide then _G.__configs_hide() end
     end
 end)
 
 menu.update()
+
 
 
 
@@ -6630,30 +6629,26 @@ do
     local _remote = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
     local live    = {}
     local cur_sel = 1
+    local MAX_ROWS = 8  -- visible rows in the fake listbox
 
-    -- Hidden visibility gate checkbox
-    local _cfg_grp = pui.group('AA', 'Anti-aimbot angles')
-    local _cfg_vis = _cfg_grp:checkbox('\n__cfg_vis__')
-    _cfg_vis:set(false)
+    -- All menu.new_item so they only show when :display() is called on Configs page
+    local m_header  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','Cloud Configs ─────────────────')
+    local m_rows    = {}
+    for i=1,MAX_ROWS do
+        m_rows[i] = menu.new_item(ui.new_label, 'AA','Anti-aimbot angles',' ')
+    end
+    local m_scroll  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+    local m_author  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
+    local m_sel_up  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','▲ Previous',   function() end)
+    local m_sel_dn  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','▼ Next',        function() end)
+    local m_load    = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',           function() end)
+    local m_loadaa  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load Anti-Aim's",function() end)
+    local m_savename= menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Save Name')
+    local m_save    = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',           function() end)
+    local m_delete  = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete Mine',    function() end)
+    local m_status  = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
 
-    -- pui listbox (depends on gate so it hides on other pages)
-    local p_list = _cfg_grp:listbox('\nCloud Configs', {'No configs.'})
-    p_list:depend(_cfg_vis)
-
-    -- menu.new_item items (hidden unless in _cfg_items list and _safe_display called)
-    local m_name   = menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','by matehun')
-    local m_load   = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Load',            function() end)
-    local m_loadaa = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles',"Load Anti-Aim's", function() end)
-    local m_save   = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Save',            function() end)
-    local m_create = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Create / Upload', function() end)
-    local m_delete = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Delete Mine',     function() end)
-    local m_status = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
-
-    p_list:set_callback(function(self)
-        cur_sel = (self:get() or 0) + 1
-        local sel = live[cur_sel]
-        if sel then pcall(ui.set, m_name.ref, 'by '..(sel.author or '???')) end
-    end)
+    local offset = 0  -- scroll offset for list view
 
     local function db_read()
         local ok,v = pcall(database.read, _db_key)
@@ -6667,19 +6662,47 @@ do
     local function set_status(s) pcall(ui.set, m_status.ref, s) end
     local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
 
-    local function refresh_list()
-        local names = {}
-        for i,cfg in ipairs(live) do
-            local pfx = cfg.source=='cloud' and '\aff9955ff[Cloud]\affffffff ' or '\a71bc78ff[Mine]\affffffff  '
-            names[i] = pfx..cfg.name
+    local function refresh_rows()
+        local total = #live
+        -- clamp cur_sel
+        cur_sel = math.max(1, math.min(cur_sel, math.max(1, total)))
+        -- clamp offset so cur_sel is always visible
+        if cur_sel - 1 < offset then offset = cur_sel - 1 end
+        if cur_sel - 1 >= offset + MAX_ROWS then offset = cur_sel - MAX_ROWS end
+        offset = math.max(0, math.min(offset, math.max(0, total - MAX_ROWS)))
+
+        for i = 1, MAX_ROWS do
+            local idx = offset + i
+            local cfg = live[idx]
+            if cfg then
+                local sel_marker = (idx == cur_sel) and '\a71bc78ff► ' or '  '
+                local src_col = cfg.source=='cloud' and '\aff9955ff' or '\a71bc78ff'
+                local tag = cfg.source=='cloud' and '[C]' or '[M]'
+                pcall(ui.set, m_rows[i].ref,
+                    sel_marker..'\affffffff'..src_col..tag..' \affffffff'..cfg.name)
+            else
+                pcall(ui.set, m_rows[i].ref, '  ')
+            end
         end
-        if #names==0 then names={'No configs.'} end
-        p_list:update(names)
-        cur_sel = math.max(1, math.min(cur_sel, #live))
-        p_list:set(cur_sel - 1)
+
+        -- scroll indicator
+        if total > MAX_ROWS then
+            pcall(ui.set, m_scroll.ref,
+                string.format('\ac8c8c8ff%d / %d  [scroll: ▲▼]', cur_sel, total))
+        else
+            pcall(ui.set, m_scroll.ref,
+                string.format('\ac8c8c8ff%d / %d', cur_sel, total))
+        end
+
+        -- author
         local sel = live[cur_sel]
-        if sel then pcall(ui.set, m_name.ref, 'by '..(sel.author or '???'))
-        else pcall(ui.set, m_name.ref, 'by matehun') end
+        if sel then
+            local src = sel.source=='cloud' and '\aff9955ff[Cloud]' or '\a71bc78ff[Mine] '
+            pcall(ui.set, m_author.ref,
+                'by \aff9955ff'..(sel.author or '???')..'  '..src)
+        else
+            pcall(ui.set, m_author.ref, '  ')
+        end
     end
 
     local function export_data()
@@ -6687,7 +6710,7 @@ do
         for _,item in ipairs(menu.get_items()) do
             if item.is_recorded and item.record_key then out[item.record_key]=item.value end
         end
-        local ok,r = pcall(json.stringify, out); return ok and r or '{}'
+        local ok,r = pcall(json.stringify,out); return ok and r or '{}'
     end
 
     local function apply_data(str, aa_only)
@@ -6719,7 +6742,7 @@ do
     local function reload()
         live = {}
         for _,cfg in ipairs(db_read()) do cfg.source='local'; live[#live+1]=cfg end
-        refresh_list()
+        refresh_rows()
         pcall(function()
             http.get(_remote, function(ok,res)
                 local body = type(res)=='table' and res.body or res
@@ -6729,52 +6752,75 @@ do
                         for _,cfg in ipairs(arr) do
                             local dup=false
                             for _,lc in ipairs(live) do
-                                if lc.name==cfg.name and lc.source=='local' then dup=true; break end
+                                if lc.name==cfg.name and lc.source=='local' then dup=true;break end
                             end
                             if not dup then cfg.source='cloud'; live[#live+1]=cfg end
                         end
                     end
                 end
-                refresh_list()
+                refresh_rows()
             end)
         end)
     end
 
+    m_sel_up:set_callback(function()
+        cur_sel = math.max(1, cur_sel - 1); refresh_rows()
+    end)
+    m_sel_dn:set_callback(function()
+        cur_sel = math.min(math.max(1,#live), cur_sel + 1); refresh_rows()
+    end)
     m_load:set_callback(function()
-        local sel=live[cur_sel]; if not sel then set_status('Select a config.'); return end
+        local sel=live[cur_sel]; if not sel then set_status('No config selected.'); return end
         set_status(apply_data(sel.data,false) and 'Loaded: '..sel.name or 'Load failed.')
     end)
     m_loadaa:set_callback(function()
-        local sel=live[cur_sel]; if not sel then set_status('Select a config.'); return end
+        local sel=live[cur_sel]; if not sel then set_status('No config selected.'); return end
         set_status(apply_data(sel.data,true) and "Loaded AA's: "..sel.name or 'Load failed.')
     end)
     m_save:set_callback(function()
+        local ok,name=pcall(ui.get, m_savename.ref); name=strip(ok and name or '')
+        -- If a Mine config is selected and name is empty, overwrite it
         local sel=live[cur_sel]
-        if not sel or sel.source=='cloud' then set_status("Can't save cloud configs."); return end
-        sel.data=export_data(); save_locals(); set_status('Saved: '..sel.name)
-    end)
-    m_create:set_callback(function()
-        local ok,name=pcall(ui.get, m_name.ref); name=strip(ok and name or '')
-        if name=='' or name:sub(1,3)=='by ' then set_status('Enter a name in the box.'); return end
+        if name=='' and sel and sel.source=='local' then
+            sel.data=export_data(); save_locals()
+            set_status('Saved: '..sel.name); return
+        end
+        if name=='' then set_status('Enter a name to save.'); return end
+        -- Check if name exists (update) or create new
+        for _,cfg in ipairs(live) do
+            if cfg.name==name and cfg.source=='local' then
+                cfg.data=export_data(); save_locals()
+                set_status('Updated: '..name); refresh_rows(); return
+            end
+        end
         live[#live+1]={name=name,author=USERNAME,source='local',data=export_data()}
-        cur_sel=#live; save_locals(); refresh_list(); set_status('Created: '..name)
+        cur_sel=#live; save_locals(); refresh_rows(); set_status('Saved: '..name)
     end)
     m_delete:set_callback(function()
         local sel=live[cur_sel]
         if not sel or sel.source=='cloud' then set_status("Can't delete cloud configs."); return end
-        local name=sel.name; table.remove(live,cur_sel)
-        save_locals(); refresh_list(); set_status('Deleted: '..name)
+        local name=sel.name; table.remove(live,cur_sel); cur_sel=math.max(1,cur_sel-1)
+        save_locals(); refresh_rows(); set_status('Deleted: '..name)
     end)
 
-    local _cfg_menu_items = {m_name,m_load,m_loadaa,m_save,m_create,m_delete,m_status}
+    -- All items to display on Configs page
+    local _all_items = {m_header, m_scroll, m_author, m_sel_up, m_sel_dn,
+                        m_load, m_loadaa, m_savename, m_save, m_delete, m_status}
+    for i=1,MAX_ROWS do _all_items[#_all_items+1] = m_rows[i] end
 
     function _G.__configs_show()
-        _cfg_vis:set(true)   -- show pui listbox
-        for _,it in ipairs(_cfg_menu_items) do _safe_display(it) end
-    end
-
-    function _G.__configs_hide()
-        _cfg_vis:set(false)  -- hide pui listbox
+        _safe_display(m_header)
+        for i=1,MAX_ROWS do _safe_display(m_rows[i]) end
+        _safe_display(m_scroll)
+        _safe_display(m_author)
+        _safe_display(m_sel_up)
+        _safe_display(m_sel_dn)
+        _safe_display(m_load)
+        _safe_display(m_loadaa)
+        _safe_display(m_savename)
+        _safe_display(m_save)
+        _safe_display(m_delete)
+        _safe_display(m_status)
     end
 
     client.delay_call(1, reload)
