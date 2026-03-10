@@ -7471,6 +7471,7 @@ end)
 local _res_ui_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Enable Resolver')
     :record('aa', 'res::enabled'):save()
 _res_ui_enabled:set(true)
+_res_ui_enabled:set_callback(function() menu.update() end)
 
 local _res_ui_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles', 'Mode',
     {'Auto', 'Brute', 'Jitter', 'Side'})
@@ -7516,19 +7517,21 @@ end)
 resolver_show_tab = function()
     if not _res_ui_enabled then return end
     _safe_display(_res_ui_enabled)
-    local en = _res_ui_enabled:get()
-    if en then
-        _safe_display(_res_ui_mode)
-        _safe_display(_res_ui_overlap)
-        _safe_display(_res_ui_reset)
-        _safe_display(_res_ui_lby)
-        _safe_display(_res_ui_info)
+    -- always show all settings when on Resolver page (live checkbox read)
+    local ok, en = pcall(ui.get, _res_ui_enabled.ref)
+    if ok and en then
+        if _res_ui_mode    then _safe_display(_res_ui_mode)    end
+        if _res_ui_overlap then _safe_display(_res_ui_overlap) end
+        if _res_ui_reset   then _safe_display(_res_ui_reset)   end
+        if _res_ui_lby     then _safe_display(_res_ui_lby)     end
+        if _res_ui_info    then _safe_display(_res_ui_info)    end
     end
 end
 
 client.set_event_callback('paint_ui', function()
     if _res_ui_enabled then
-        _res.enabled = _res_ui_enabled:get()
+        local ok, v = pcall(ui.get, _res_ui_enabled.ref)
+        _res.enabled = ok and v or false
     end
 end)
 
