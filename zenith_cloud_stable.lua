@@ -6598,14 +6598,14 @@ do
     local cur_sel    = 1
 
     -- ── menu.new_item declarations ────────────────────────────────────
-    local m_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','\nConfig List',{'--'})
+    local m_list   = menu.new_item(ui.new_listbox,  'AA','Anti-aimbot angles','Config List',{'--'})
     local m_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Config Name')
     local m_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',   function() end)
     local m_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load AA's", function() end)
     local m_save   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save',   function() end)
     local m_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Create', function() end)
     local m_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete', function() end)
-    local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','')
+    local m_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
 
     -- ── Helpers ───────────────────────────────────────────────────────
     local function db_read()
