@@ -6693,22 +6693,43 @@ do
         return true
     end
 
-    local function publish(cfg)
-        local pool=jread(DB_ALL); local found=false
-        for i,p in ipairs(pool) do if p.name==cfg.name and p.author==ME then pool[i]=cfg;found=true;break end end
         if not found then table.insert(pool,1,cfg) end
         jwrite(DB_ALL,pool)
     end
 
+    local CLOUD_URL = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
+
     local function reload()
         live={}
-        for _,cfg in ipairs(jread(DB_ALL)) do live[#live+1]=cfg end
+        -- Load local saves first
         for _,mine in ipairs(jread(DB_MY)) do
-            local found=false
-            for i,cfg in ipairs(live) do if cfg.name==mine.name and cfg.author==ME then live[i]=mine;found=true;break end end
-            if not found then table.insert(live,1,mine) end
+            mine.source='local'; live[#live+1]=mine
         end
-        refresh(); setstatus(#live..' config(s).')
+        refresh()
+        setstatus('Fetching cloud configs...')
+        -- Fetch shared configs from GitHub
+        pcall(function()
+            http.get(CLOUD_URL, function(ok, res)
+                local body = type(res)=='table' and res.body or res
+                if ok and body and #body > 2 then
+                    local ok2,arr = pcall(json.parse, body)
+                    if ok2 and type(arr)=='table' then
+                        for _,cfg in ipairs(arr) do
+                            cfg.source='cloud'
+                            local dup=false
+                            for _,lc in ipairs(live) do
+                                if lc.name==cfg.name and lc.author==cfg.author then dup=true;break end
+                            end
+                            if not dup then live[#live+1]=cfg end
+                        end
+                        refresh()
+                        setstatus(#live..' config(s) loaded.')
+                        return
+                    end
+                end
+                setstatus(#live..' local config(s).')
+            end)
+        end)
     end
 
     c_list:set_callback(function()
@@ -6734,14 +6755,14 @@ do
         local saves=jread(DB_MY); local found=false
         for i,s in ipairs(saves) do if s.name==sel.name then saves[i]=sel;found=true;break end end
         if not found then saves[#saves+1]=sel end
-        jwrite(DB_MY,saves); publish(sel); setstatus('Saved: '..sel.name)
+        jwrite(DB_MY,saves); setstatus('Saved locally: '..sel.name)
     end)
     c_create:set_callback(function()
         local ok,name=pcall(ui.get,c_name.ref); name=strip(ok and name or '')
         if name=='' then setstatus('Enter a name.'); return end
         local cfg={name=name,author=ME,data=export_data()}
         local saves=jread(DB_MY); saves[#saves+1]=cfg; jwrite(DB_MY,saves)
-        publish(cfg); live[#live+1]=cfg; cur_sel=#live; refresh(); setstatus('Uploaded: '..name)
+        jwrite(DB_MY, jread(DB_MY)); live[#live+1]=cfg; cur_sel=#live; refresh(); setstatus('Saved locally: '..name..'. Contact owner to add to cloud.')
     end)
     c_delete:set_callback(function()
         local sel=live[cur_sel]

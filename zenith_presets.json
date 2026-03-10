@@ -1,12 +1,8 @@
 [
   {
-    "name": "matehun Default",
+    "name": "matehun default",
     "author": "matehun",
-    "build": "nightly",
-    "relevance": "Updated",
-    "likes": 3,
-    "loads": 8,
-    "updated": "09.03.26 00:00",
+    "source": "cloud",
     "data": "{}"
   }
 ]
