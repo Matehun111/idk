@@ -6614,6 +6614,7 @@ cvar.developer:set_raw_int(0)
 
 
 
+
 -- ======================================================================
 --  CLOUD CONFIG SYSTEM
 -- ======================================================================
@@ -6624,16 +6625,17 @@ do
     local cur_sel   = 0
     local ME        = USERNAME or 'user'
 
-    local c_sep    = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','\xe2\x94\x81\xe2\x94\x81  Cloud Configs  \xe2\x94\x81\xe2\x94\x81')
-    local c_combo  = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles','Config',{'---'})
-    local c_by     = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles','Select a config')
-    local c_load   = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Load',            function()end)
-    local c_loadaa = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles',"Load Anti-Aim's", function()end)
-    local c_name   = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles','Save Name')
-    local c_create = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Save Local',      function()end)
-    local c_delete = menu.new_item(ui.new_button,   'AA','Anti-aimbot angles','Delete Mine',     function()end)
-    local c_status = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles',' ')
-    local _citems  = {c_sep,c_combo,c_by,c_load,c_loadaa,c_name,c_create,c_delete,c_status}
+    local cgrp     = pui.group('AA', 'Anti-aimbot angles')
+    local c_sep    = cgrp:label('\a71bc78ff━━  Cloud Configs  ━━')
+    local c_combo  = cgrp:combobox('\nConfig', {'---'})
+    local c_by     = cgrp:label('\ac8c8c8ffSelect a config above')
+    local c_load   = cgrp:button('Load')
+    local c_loadaa = cgrp:button("Load Anti-Aim's")
+    local c_name   = cgrp:textbox('\nSave Name')
+    local c_save   = cgrp:button('Save Local')
+    local c_delete = cgrp:button('Delete Mine')
+    local c_status = cgrp:label(' ')
+    local _citems  = {c_sep,c_combo,c_by,c_load,c_loadaa,c_name,c_save,c_delete,c_status}
 
     local function jread(k)
         local ok,v = pcall(database.read,k)
@@ -6644,27 +6646,24 @@ do
         return {}
     end
     local function jwrite(k,t) pcall(database.write,k,json.stringify(t)) end
-    local function setstatus(s) pcall(ui.set,c_status.ref,'\xac\x8c\x8c\xff'..tostring(s)) end
+    local function setstatus(s) c_status:set('\ac8c8c8ff'..tostring(s)) end
     local function strip(s) return (s or ''):match('^%s*(.-)%s*$') end
 
-    local function rebuild_combo()
-        if #live == 0 then
-            pcall(ui.set_items, c_combo.ref, {'--- no configs ---'})
-            pcall(ui.set, c_combo.ref, 0)
-            pcall(ui.set, c_by.ref, 'No configs yet.')
-            return
-        end
+    local function rebuild()
         local names = {}
         for i,cfg in ipairs(live) do
-            names[i] = (cfg.source=='local' and '[Mine] ' or '[Cloud] ')..cfg.name
+            names[i] = (cfg.source=='local' and '\a71bc78ff[Mine] ' or '\a77ccffff[Cloud] ')..'\affffffff'..cfg.name
         end
-        pcall(ui.set_items, c_combo.ref, names)
+        if #names == 0 then names = {'no configs yet'} end
+        c_combo:update(names)
         cur_sel = math.max(0, math.min(cur_sel, #live-1))
-        pcall(ui.set, c_combo.ref, cur_sel)
+        c_combo:set(cur_sel)
         local sel = live[cur_sel+1]
         if sel then
-            pcall(ui.set, c_by.ref, 'by '..(sel.author or '?'))
-            pcall(ui.set, c_name.ref, sel.name)
+            c_by:set('\ac8c8c8ffby \aff9955ff'..(sel.author or '?'))
+            c_name:set(sel.name)
+        else
+            c_by:set('\ac8c8c8ffSelect a config above')
         end
     end
 
@@ -6702,7 +6701,7 @@ do
         for _,mine in ipairs(jread(DB_MY)) do
             mine.source='local'; live[#live+1]=mine
         end
-        rebuild_combo()
+        rebuild()
         setstatus('Fetching cloud configs...')
         pcall(function()
             http.get(CLOUD_URL, function(ok, res)
@@ -6720,48 +6719,46 @@ do
                         end
                     end
                 end
-                rebuild_combo()
+                rebuild()
                 setstatus(#live..' config(s) loaded.')
             end)
         end)
     end
 
-    c_combo:set_callback(function()
-        local ok,v = pcall(ui.get, c_combo.ref)
-        cur_sel = (ok and type(v)=='number') and v or 0
+    c_combo:set_callback(function(self)
+        cur_sel = self:get() or 0
         local sel = live[cur_sel+1]
         if sel then
-            pcall(ui.set, c_by.ref, 'by '..(sel.author or '?'))
-            pcall(ui.set, c_name.ref, sel.name)
+            c_by:set('\ac8c8c8ffby \aff9955ff'..(sel.author or '?'))
+            c_name:set(sel.name)
         end
     end)
 
     c_load:set_callback(function()
         local sel = live[cur_sel+1]
         if not sel then setstatus('Select a config first.'); return end
-        setstatus(apply_data(sel.data, false) and 'Loaded: '..sel.name or 'Load failed.')
+        setstatus(apply_data(sel.data,false) and 'Loaded: '..sel.name or 'Load failed.')
     end)
 
     c_loadaa:set_callback(function()
         local sel = live[cur_sel+1]
         if not sel then setstatus('Select a config first.'); return end
-        setstatus(apply_data(sel.data, true) and "Loaded AA's: "..sel.name or 'Load failed.')
+        setstatus(apply_data(sel.data,true) and "Loaded AA's: "..sel.name or 'Load failed.')
     end)
 
-    c_create:set_callback(function()
-        local ok,name = pcall(ui.get, c_name.ref); name=strip(ok and name or '')
+    c_save:set_callback(function()
+        local name = strip(c_name:get())
         if name=='' then setstatus('Enter a save name first.'); return end
         local cfg = {name=name, author=ME, source='local', data=export_data()}
         local saves = jread(DB_MY)
-        local found = false
+        local found=false
         for i,s in ipairs(saves) do if s.name==name then saves[i]=cfg;found=true;break end end
         if not found then saves[#saves+1]=cfg end
         jwrite(DB_MY, saves)
-        -- update live list
         local lfound=false
         for i,lc in ipairs(live) do if lc.name==name and lc.source=='local' then live[i]=cfg;lfound=true;break end end
         if not lfound then live[#live+1]=cfg; cur_sel=#live-1 end
-        rebuild_combo()
+        rebuild()
         setstatus('Saved: '..name)
     end)
 
@@ -6774,7 +6771,7 @@ do
         jwrite(DB_MY, saves)
         table.remove(live, cur_sel+1)
         cur_sel = math.max(0, cur_sel-1)
-        rebuild_combo()
+        rebuild()
         setstatus('Deleted: '..name)
     end)
 
