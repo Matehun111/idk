@@ -1039,8 +1039,8 @@ do
 
     local function _set_online(n)
         if shared.fl_online then
-            local col = n > 0 and '\\affd700ff' or '\\aff6666ff'
-            shared.fl_online:set(string.format('Online: %s%d\\affffffff', col, n))
+            local col = n > 0 and '\affd700ff' or '\aff6666ff'
+            shared.fl_online:set(string.format('Online: %s%d\affffffff', col, n))
         end
     end
 
