@@ -6357,16 +6357,19 @@ do
     local ME      = USERNAME or 'user'
 
     local cgrp   = pui.group('AA', 'Anti-aimbot angles')
-    local c_sep    = cgrp:label('\a71bc78ff\xe2\x94\x81\xe2\x94\x81  Cloud Configs  \xe2\x94\x81\xe2\x94\x81')
-    local c_list   = cgrp:listbox('\nConfig List', {'No configs.'})
-    local c_by     = cgrp:label('\ac8c8c8ffSelect a config')
-    local c_name   = cgrp:textbox('Config Name')
-    local c_load   = cgrp:button('Load')
-    local c_loadaa = cgrp:button("Load Anti-Aim\'s")
-    local c_save   = cgrp:button('Save')
-    local c_create = cgrp:button('Create / Upload')
-    local c_delete = cgrp:button('Delete Mine')
-    local c_status = cgrp:label(' ')
+    -- Visibility gate: this checkbox controls all config items via :depend()
+    local c_vis    = cgrp:checkbox('\n__cfg_vis__')
+    c_vis:set(false)
+    local c_sep    = cgrp:label('\a71bc78ff\xe2\x94\x81\xe2\x94\x81  Cloud Configs  \xe2\x94\x81\xe2\x94\x81'):depend(c_vis)
+    local c_list   = cgrp:listbox('\nConfig List', {'No configs.'}):depend(c_vis)
+    local c_by     = cgrp:label('\ac8c8c8ffSelect a config'):depend(c_vis)
+    local c_name   = cgrp:textbox('Config Name'):depend(c_vis)
+    local c_load   = cgrp:button('Load'):depend(c_vis)
+    local c_loadaa = cgrp:button("Load Anti-Aim\'s"):depend(c_vis)
+    local c_save   = cgrp:button('Save'):depend(c_vis)
+    local c_create = cgrp:button('Create / Upload'):depend(c_vis)
+    local c_delete = cgrp:button('Delete Mine'):depend(c_vis)
+    local c_status = cgrp:label(' '):depend(c_vis)
 
     local _citems = {c_sep,c_list,c_by,c_name,c_load,c_loadaa,c_save,c_create,c_delete,c_status}
 
@@ -6475,17 +6478,12 @@ do
         table.remove(live,cur_sel); cur_sel=math.max(1,cur_sel-1); refresh(); setstatus('Deleted: '..name)
     end)
 
-    -- Hide all config items initially
-    for _,it in ipairs(_citems) do _safe_set_visible(it, false) end
-
     rawset(_G,'__cfg_show',function()
-        for _,it in ipairs(_citems) do
-            _safe_set_visible(it, true)
-            _safe_display(it)
-        end
+        c_vis:set(true)
+        for _,it in ipairs(_citems) do _safe_display(it) end
     end)
     rawset(_G,'__cfg_hide',function()
-        for _,it in ipairs(_citems) do _safe_set_visible(it, false) end
+        c_vis:set(false)
     end)
 
     client.delay_call(1,reload)
