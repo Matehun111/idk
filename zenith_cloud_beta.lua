@@ -1326,7 +1326,7 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc"}
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Misc", "Configs"}
     if _HAS_AIMBOT   then table.insert(pages, 4, "Aimbot")   end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
@@ -6732,7 +6732,6 @@ end
 menu.set_callback(function()
 
     _safe_display(shared.online_label)
-    if rawget(_G,"__cfg_display") then __cfg_display() end
     -- display fake lag info panel every frame
     if shared.fl_whatsup     then _safe_display(shared.fl_whatsup)     end
     if shared.fl_build       then _safe_display(shared.fl_build)       end
@@ -7002,6 +7001,10 @@ menu.set_callback(function()
     -- MISC PAGE
     if page == "Misc" then
         if _G.__misc_page then _G.__misc_page.show() end
+    end
+
+    if page == "Configs" then
+        if rawget(_G,"__cfg_display") then __cfg_display() end
     end
 end)
 
