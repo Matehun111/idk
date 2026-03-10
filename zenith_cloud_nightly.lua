@@ -5902,6 +5902,8 @@ do
     shared.attach = function (condition)
         local enabled = shared.enabled:get() and not condition
 
+        local _ZENITH_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAPW0lEQVR4nO2ZeZBdVZ3HP+cu77799Xvdrzu9pdd0ks6CZJEAiS1rFHCMcZ4wwhQ1CmrJ4jhauASI6FjCOCMORMGlcClApYmi4IAMIYYgxEBCtu6QpTvpTu+vl7dvdznzRxqLspyaNHTGKuxP1a16de87v/M73/v7nd+vzoU55phjjjnmmGOOvw7K9PU3ifhffv9NIAAMw2gyDKPl9K2Y+ufP36F0aLBZ0UPVK5Tqy6aU6vWThmE0nn62Uv+runZ2kYKODg2mX6/S8MyaTz4hV33ySYmr6TV/ReN7AMoXXhCoa788Mj3onRcJ1dUrvaG6VXd76q+Rvzyesp44mrK8y74sXeUrs7jnXdfRcb37tACb3ymboxSAcs76LzTWL7vyn41Q8wFRvUF+4oHd9gN9efn0QFre8VTc8l7yoAzWni9dwaYfvzGyvT3m+uv5PWuczutwy3s+Em5cKwmslO/eeK99QEq55rYX5IZ/PyillPLqb+53fC0x21OxRIbqVv5n9aJ1K6YNnNU0OLth1tDghj1muGr5UrtY2JTLOWa4eqF9290fVQ4PwfFXXmHnf2/nsZMWG9a4RKGkKXpkiSO1mlstM/jUwgs+t6Vm+dULpq2dFSHOproK4BhGqFkNNe/2VzSW50ouuXLthaJi0QKe/vV+TOnCXdGIW3cIWX2YE6cIRkM0NkWLo319xvG9R7ZN9f/mUrlipc6ePTbgzLaTZ0OA0zaj7T6lkNuoGuEvu/zVCy1Xg127bIXqU4apcJdY3trK4gsuo6VtHuW5MSoibpSQj4KhMzwSl5+58evyteeeHNG1wgOlhdX3sGePOW1bzr6zs85KHfaYqr/xEXe45aNKZIV5wc236pn4EDddVcvGZbUYb/xV2vQOJTk5PMFQfIrOXz3LsbEixw6dkHq2T7g9GsX0yCpFr+rLhOMpurtLs+mpNpvGANFwTkeob/+OhOqruVT3hv/OsRUr2rJca6nQ6Rvs58SQ4DM7d5ONjzM6YtO28DwaQxlWtFfywksH6RnLs2xxM8H688Tre/fZWqILVVG26J7QFp/iemKUbpNZjILZjADR2vo+V8lj1uZzpXmZVPIHgYoF7XrbeueK2AeUk3u28dKzL5JPjqJIG2tsjLUbLue+n9xOlUfn7vt/zS8eex6hBth0x3UsPn8R3374hNz+ra8JkTpoSytXl4t3jzC9t8yW07NWBerWrHGnvUNa/8Ftvbn01AeFYrRnjCbr3R0XKxdfVMZAzsAdrKG8zI8oxjl33WJu+s5t9Ok6N97+MPd/4yGK/YdID/bw6JPHUUoW718aFN6GJXYpmxVmIb0eEBCb1bSdNQEGdu3Kjx44kPdXt1UUMgmXpbidssom8YUNZZzo7qf35f2QOkJyYoB5FT4+/I2vcVzz8aMtL7Dt0d8R0KZwZAlRiHPg+Rf41paX+PC7vaxt9Evpr1ekXZwPSOhS/09nZsAs9gEdGuDIgqjWdO/HFMdSSqWMcmqkxLKWCAGfQ2Yqjkezuequb3OMWn7+xZ/x7IO/wfCUYTk+pAgSbWgl7HNobo9yeMTmeFwqwiki9MC1BOsi0O0wi6k7i5vgDgkIyylVoRh+x8xKc7xL3PHgXjZ98QKu//zVbPnUbt5/62bG8lESjz6OPnKIhVd0UFPjI1QZQq+pozg0wETvKdZespj7Hu5lLJNV3CLrFBVjoWGzugi/A1TAng2vZzOfVMBxBeZfIRXXE0L1KC5fhSJ9jbQsW0GZN4FHNTEaNqJgUdXaCg0hQpXgyToMnzzOgZ3PcfQPvcRuv5OJV3fy7HOvYZ98zrFyY4pj5e4x03wF+kqcrgKzUglmS4A/NShasG61cLT7hOY+D8Xt6IZPzVpeVq9eStN7Ps+kWUMwCtlsnJA3id9r8NKjP6Wv62XsQpGr7/kOqcEenn3oJwh70rbzE6pdnPy9lT55keGrv6yYbd4OOxxmqRLMYgS0GhjpGt3lOSgUzYPQhaK5BWqA5atXy0VXfkV0H4tDcjdjx3eSGR/FVqsoSB9+JUE2neG6Wz5GZH4Z9968CUMtYZk5aeWmhJDmoKIZaZDdxcSRDwNaONzsKy9vKxw//kzx7Xj9djdBBdpd9Ss3tLgCVqPmKf8voft9wggKT1mNQPPhMtzSsQs896Nb7H0/+VCxsnRIxjZeRT5lY04cQp/cRXZiiHMvXEe0toEf3rYZipPYZp5ApE4E5rWB5q0VuneRRNmo+pvuU8LtH5ua6k26XAH5dtfw1gbHYmos9pgqhHCE6C4lhgcrJcp9Rln9IlfVuxzNO18UpYdI3buIVDSIrld2i7Gu7Vlh5uSuV49J3VfGh667mlLJxizliMybT+vytWy9/9skx4fQXSAUFSnBUQMY0WVSuCocxRN19HDzLQrOTe7Iguu7uh4zhRBOLPaYGovFVN5CRL/dFFgA4UuE4blZ91Ut0Tw1tnvp36taVQuFvi7E8C5KyV6cUhJVVbFKWaTqk5q/Rqy99FIO7drBeHycyvoWTFOQHOtB2Gmk0NCMIFIL4PJVo9asQUQqcaYGyb7+tO2kj6uOmcMupn+GNXobMPBWFzBDAaQA4Yo2X/FZd6hqbc7Md0jd7ReeMtSyOttTVafWLj2Xjde0sf35YbpefJH8RBwzncMpZFAdk0Ihj26VyIz2U1bfRMFycPIZcPtw6Qam6SBcPoxQFFd5Fd5oOc1L27l4fS2/3zHGyVf+SHpw2FELY05pclDTnOKkoRoHc+OD+0aGXvk6meHx6WWdUZWYUR8Qi31E6ezEDJVVuyzNd+X8eSEZic6z0HyK4narqlcjpJUYPlIgqiksm1eOGQTMIsIu0tc3zIL6Go6eiNM71o9VzLNuVRsTE2lC4SCZnImmqASCfhSPH6EJpF5AzycZ6yrDN9zLZPd+8kOvi2h9o9ba3mBPDg1H8imto6y8YdvI0ScTsVin0tk5Oz3CX0IBCIWMZlfNVaXPfO0hR0rpyGlyZklKKeW/bj0ptx+akH/Op+9+REop5Z4jJ2Ww+QopwmvlwFRK/mDr8/LAsT758FMvyV2HT7xpxGnTe04m5PeeOiInM1npbdogUeudljXXSltK5857H3G0qvfFAc+0jzOK6rfUCSaTxbzbm7N++/QufemSZnlqLENNYw03rD+XVwcSdD7+JNc+eAOPv3iQnz7yO8pCPhKpLKaUxC2bFW0N/MeWL3Fj7HOM5i2Sps1I3kSq8Nk7f0DrgjZuuP5yKiJ+fvjzlxkdHqWutgyvr41IxEWuXxU9R44zkMqJRYuapdT1cKiiZXFyvGcvMzw0makAzunj6q8OCye/YzI++b4bN17nVKy6VH1g6zd5+sQkn7hmE0JY9OtuREsLV376GirnBTi0cx/P/Gob+22VPb8/wCXvX8s/3H4z+ybyjFigpW0c3c3LW3/Jy46gelkT551/DvfeeQ+YcMXHP8BhCXf9+JsUEwmmJpIct8DTVGuXR6u11ND4ZdCzFzqU6UbprAgwHV6yzOX2tyTigyx97zrxpce/y6mRNHfEPkX28E5WfjDGoIC+oyfID53i5BHB3udfxRf0Mygl92++l8HUzVz+6X8kl3PI5faRKEoEOrrXQZoWU4kkWbeXqgqYGBxlbKCfniL4q2qINs2XC304iQKqFVapra0kOeo/B4BYpaTzzBc0wz4gpsBdTmT+BZeYlr5g+epF9j89+H3l6GCGhz67icaAyfKLLiZaWU3vkM1Lu46xbedR9nYlkZ4IkVAFvb0CmRrm4S98if1/HOdYn0IpLZgakXIs7kYTFpaVIzUQZyiu4tIFVn6C7OAp4lMOW7/3M25Y/QFx08U3qL/4/pOkfIaoqo2ArbgBYsRmtKKZRIBgc7uM3N8aLBH5yrtWL5TvvWWz6D7hQWRKXHrTv+GbF6YYHyb+6ssMHVaZv3ID9WsAFbI9x0gceIH+fUls22aq9zC//vqXOf/arzJ5clRGigaWqwzh8kDBJDmWIhNX8AQjoGpkEnF6DimOlDXK2OEdz48dTneiKd9tu+xKEamtw6WxslhX5+nsvDrPDPaBMxcgFlO46y47X3vRpkg4vHTpRbfaPb0BVRXg6BFyThL32Ouc3LedwsgJouNx+oaHSCUy2HaJUi6DtIq4dv2Bkh3CV7eUkZ4+tn3nX7AsS7g8LhRVRY+04fNmOfzaKyQTt5FIl9CDNSQSaXpeeEag2ngqaltL2XRdcXzAGj+k6G7fKjsQ+sX83HBdh83AM6cjtfOMSuGZlgyBEBK/LPeEP3hs3boVoXMujIm9h7rE+OhRkuP9FKcGMdNJTAI40iBfyGNJBUWoOFIgdA+KEUBxh9F8ZThSYPjCSAlmdhLHzCNLaazsOLKURtG8OMUMhteHtFLouoGmWaiagmWq5NNjGIYiV111g1y4eIncsfWHak931xNmfOeHiMVUOmdVgJgKnXaw/sLL3IHGZzyGLRUFNTUxQT6XwsxncRwHNA9GIIo7UkWgspaK6gZCIS+hgI7f78EfCuOPVOEPlRMqC+ELaNiWQ2o8SSadJp2aIJeeIp8vkJpKkJhMMR6PkxgbJz01QTGTRRazIAvStPK22z9PdangDgWkYwlhFQs9k8d+2Y4QJlKeURqcUQp0dLSLHTugPNrWphhhJTk1aOczk450Co4eiIiypuXSX9NEqL5R+Krm4fb7KDN8BFSFVCJBemKMxMAUuWMj0rRfB+FC0ww0twuJgm1a2GYJx86jiRKGS+DzGqIsWkVVUytSc1EUCtlcnlR8hGRfL5nhPpGOn3JKpoOZUKQ3GNUMj+avq6vTBgYGzTN7sTNJAZDB6Lmteat4sUtVm7yBio/7K5qiui+Co7soWiaFbIJCaopiKoVp2kjTBCsPjgnSBiFAUU7XnjfejRDg2NM3BDgSnOljP0UDVQPNje714w4E8ARDuLx+3JqBYpmUMpPkpvpJp8a3OZbVWWz2PMSePRZnuAnOpG2cFmFJS2XD8jppS89A/6H1xWyyDrMgcRxQ1ZDQNFRVzaqKEEKooCgSgYbElJJucHQpZYUCp6RgWArbIxzhOFKUK4qiIsUihMgKIUMIVEdiIGXQse2EbdlF6dhRLCsNionh8ehuH4Fg5Ld+f3j35MTrk5mRY4eZYTc4E/6iYEKcvv6/eGO+2ZjyrdgQp8sMwJiAyjcp3Tn9+88/XrzRmnWcwXw7JMTeNOZPB6DK9P3p/IiJ0/NtBrrFm+af9S/Ic8wxxxxzzDHHHHPMMcccc8wxxzuL/wHaWf7qIX4PFAAAAABJRU5ErkJggg=="
+
         for i = 1, globals.maxplayers() do
             if entity.get_classname(i) ~= 'CCSPlayer' then
                 goto skip
@@ -5914,15 +5916,30 @@ do
                     scoreboard.set_icon(i)
                     shared.icon_data[ steam_id ] = true
                 end
-
                 goto skip
             end
 
-            local logo_id = shared.data[ steam_id ]
+            -- check if this player has Zenith loaded via global flag
+            local has_zenith = false
+            for j = 1, globals.maxplayers() do
+                if entity.get_steam64(j) == steam_id then
+                    -- same machine: check _G flag
+                    if j == entity.get_local_player() then
+                        has_zenith = (_G._auth_ok == true)
+                    end
+                    break
+                end
+            end
+            -- also always show for local player if authenticated
+            if i == entity.get_local_player() and _auth_alive then
+                has_zenith = true
+            end
 
-            if logo_id then
-                scoreboard.set_icon(i, string.format("https://zenith.dev/icons/%s.png", logo_id))
-                shared.icon_data[ steam_id ] = false
+            if has_zenith then
+                if not shared.icon_data[ steam_id ] then
+                    scoreboard.set_icon(i, _ZENITH_ICON)
+                    shared.icon_data[ steam_id ] = true
+                end
             else
                 if not shared.icon_data[ steam_id ] then
                     scoreboard.set_icon(i)
