@@ -10,7 +10,7 @@ local function try_init(attempts)
     attempts = attempts or 0
     if attempts > 60 then return end
     -- Wait until main Zenith script is running and pui is available
-    if not rawget(_G,'_safe_display') or not rawget(_G,'_auth_ok') then
+    if not rawget(_G,'_auth_ok') or not rawget(_G,'menu') then
         client.delay_call(0.5, function() try_init(attempts+1) end)
         return
     end
@@ -195,7 +195,7 @@ function setup()
     -- Use client.set_event_callback on paint to call display every frame
     client.set_event_callback('paint', function()
         for _,it in ipairs(_items) do
-            pcall(function() _safe_display(it) end)
+            pcall(function() it:display() end)
         end
     end)
 
