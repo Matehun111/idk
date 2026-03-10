@@ -1045,17 +1045,16 @@ do
     end
 
     local function _hb_tick()
-        -- write our heartbeat
         local ok_r, tbl = pcall(database.read, _HB_KEY)
         tbl = (ok_r and type(tbl) == 'table') and tbl or {}
-        local now = math.floor(globals.tickcount() / (1/globals.tickinterval()))
+        local now = math.floor(globals.realtime())
         tbl[_my_hb_user] = now
-        -- prune stale entries (> 120s old)
+        -- prune entries older than 120s
         for k, t in pairs(tbl) do
             if (now - t) > 120 then tbl[k] = nil end
         end
         pcall(database.write, _HB_KEY, tbl)
-        -- count online
+        -- count entries seen within last 90s
         local cnt = 0
         for _, t in pairs(tbl) do
             if (now - t) <= 90 then cnt = cnt + 1 end
@@ -1065,7 +1064,6 @@ do
     end
 
     client.set_event_callback('shutdown', function()
-        -- remove our entry on clean exit
         local ok_r, tbl = pcall(database.read, _HB_KEY)
         if ok_r and type(tbl) == 'table' then
             tbl[_my_hb_user] = nil
