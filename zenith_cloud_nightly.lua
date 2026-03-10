@@ -6196,46 +6196,110 @@ do
         {"No", "Yes"})
     : record("aa", "air_tel::cross") : save()
 
-    local _at_was_air   = false
-    local _at_charge    = false
+    local _at_was_air    = false
+    local _at_charge     = false
+    local _at_dt_suppressed = false  -- true while we force DT off mid-air
+    local _at_restore_time  = 0      -- tick to re-enable DT
 
-    client.set_event_callback("setup_command", function(cmd)
-        if not air_tel.enabled:get() then return end
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
-
-        -- weapon check
-        local wpn = entity.get_player_weapon(me)
-        local wpn_class = wpn and entity.get_classname(wpn) or ""
-        local sel = air_tel.weapons:get()
-        local allowed = false
-        if #sel == 0 then allowed = true else
-            for _, w in ipairs(sel) do
-                if (w == "AWP"    and wpn_class:find("awp"))    or
-                   (w == "Scout"  and wpn_class:find("ssg"))    or
-                   (w == "Taser"  and wpn_class:find("taser"))  or
-                   (w == "Pistol" and wpn_class:find("pistol")) or
-                   (w == "Rifle"  and (wpn_class:find("ak47") or wpn_class:find("m4"))) then
-                    allowed = true; break
+    -- helper: is any visible enemy able to shoot us (has LOS, is alive, not dormant)
+    local function _at_enemy_can_shoot(me)
+        local my_pos = entity.get_origin(me)
+        if not my_pos then return false end
+        for _, ent in ipairs(entity.get_players(true)) do
+            if entity.is_alive(ent) and not entity.is_dormant(ent) then
+                local epos = entity.get_origin(ent)
+                if epos then
+                    -- simple distance + LOS check via trace
+                    local dist = (my_pos - epos):length()
+                    if dist < 3000 then
+                        -- trace from enemy eye to our position
+                        local eye = entity.get_prop(ent, 'm_vecOrigin')
+                        if eye then
+                            local trace = engine.trace_line(epos, my_pos, ent)
+                            if trace and trace > 0.97 then
+                                return true  -- clear LOS within range
+                            end
+                        end
+                    end
                 end
             end
         end
-        if not allowed then _at_was_air = false; return end
+        return false
+    end
 
-        local flags     = entity.get_prop(me, "m_fFlags") or 0
+    -- helper: weapon allowed
+    local function _at_weapon_ok(me)
+        local wpn = entity.get_player_weapon(me)
+        local wpn_class = wpn and entity.get_classname(wpn) or ''
+        local sel = air_tel.weapons:get()
+        if #sel == 0 then return true end
+        for _, w in ipairs(sel) do
+            if (w == 'AWP'    and wpn_class:find('awp'))    or
+               (w == 'Scout'  and wpn_class:find('ssg'))    or
+               (w == 'Taser'  and wpn_class:find('taser'))  or
+               (w == 'Pistol' and wpn_class:find('pistol')) or
+               (w == 'Rifle'  and (wpn_class:find('ak47') or wpn_class:find('m4'))) then
+                return true
+            end
+        end
+        return false
+    end
+
+    client.set_event_callback('setup_command', function(cmd)
+        if not air_tel.enabled:get() then
+            -- clean up if disabled mid-flight
+            if _at_dt_suppressed then
+                ui.set(unpack(settings.rage.double_tap))
+                _at_dt_suppressed = false
+            end
+            return
+        end
+        local me = entity.get_local_player()
+        if not me or not entity.is_alive(me) then return end
+        if not _at_weapon_ok(me) then _at_was_air = false; return end
+
+        local flags     = entity.get_prop(me, 'm_fFlags') or 0
         local on_ground = bit.band(flags, 1) ~= 0
         local in_air    = not on_ground
+        local now       = globals.tickcount()
 
-        if in_air then
-            -- build up DT charge while airborne, never shoot
-            _at_charge = software.is_double_tap()
+        -- ── Restore DT after suppression timeout ──────────────────────────
+        if _at_dt_suppressed and now >= _at_restore_time then
+            ui.set(unpack(settings.rage.double_tap))  -- re-enable DT
+            _at_dt_suppressed = false
         end
 
-        -- landed this tick after being in air with DT active → teleport tick
-        -- only press jump to snap position, do NOT set in_attack
-        if _at_was_air and on_ground and _at_charge then
-            cmd.in_jump = true   -- forces a small ground-level snap
-            _at_charge  = false
+        if in_air then
+            _at_charge = software.is_double_tap()
+
+            -- If enemy can shoot us while airborne → suppress DT immediately
+            if _at_charge and not _at_dt_suppressed then
+                local enemy_visible = _at_enemy_can_shoot(me)
+                if enemy_visible then
+                    -- disable DT so we don't shoot mid-air
+                    local dt_ref = settings.rage.double_tap
+                    if dt_ref then
+                        ui.set(dt_ref[1], false)
+                    end
+                    _at_dt_suppressed = true
+                    _at_restore_time  = now + math.floor(globals.tickrate() * 2)  -- 2 seconds
+                end
+            end
+
+            -- block shooting while airborne
+            cmd.in_attack = false
+        end
+
+        -- ── Landed after being airborne → teleport tick ───────────────────
+        if _at_was_air and on_ground then
+            if _at_charge then
+                cmd.in_jump = true   -- ground-snap teleport
+                _at_charge  = false
+            end
+            -- if DT was suppressed, set restore timer from landing moment
+            if _at_dt_suppressed then
+                _at_restore_time = now + math.floor(globals.tickrate() * 2)
+            end
         end
 
         _at_was_air = in_air
