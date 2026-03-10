@@ -7542,10 +7542,20 @@ client.set_event_callback('net_update_end', function()
     end
 end)
 
-client.set_event_callback('aim_miss', function(e)
+-- track last aimed-at target from aim_fire (aim_miss has no fields)
+local _res_last_target = nil
+client.set_event_callback('aim_fire', function(e)
     if not _auth_alive then return end
-    local tgt = client.userid_to_entindex(e.target)
-    if tgt then _res_on_miss(tgt) end
+    if e.target and e.target > 0 then
+        _res_last_target = e.target
+    end
+end)
+
+client.set_event_callback('aim_miss', function()
+    if not _auth_alive then return end
+    if _res_last_target then
+        _res_on_miss(_res_last_target)
+    end
 end)
 
 client.set_event_callback('player_hurt', function(e)
@@ -7554,7 +7564,10 @@ client.set_event_callback('player_hurt', function(e)
     local me = entity.get_local_player()
     if attacker and me and attacker == me then
         local victim = client.userid_to_entindex(e.userid)
-        if victim then _res_on_hit(victim) end
+        if victim then
+            _res_on_hit(victim)
+            _res_last_target = nil  -- clear after confirmed hit
+        end
     end
 end)
 
