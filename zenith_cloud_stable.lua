@@ -6517,6 +6517,7 @@ do
     local m_savename= menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','Save Name')
     local m_save    = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Save',            function() end)
     local m_delete  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Delete Mine',     function() end)
+    local m_export  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Export to Clipboard', function() end)
     local m_status  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
 
     local offset = 0
@@ -6761,6 +6762,34 @@ do
         set_status('Deleted: ' .. name)
     end)
 
+    m_export:set_callback(function()
+        local sel = live[cur_sel]
+        if not sel then set_status('No config selected.'); return end
+        -- build export string: zenith:gs <json>
+        local data_str
+        if sel.source == 'local' then
+            -- re-export current settings live
+            data_str = 'zenith:gs ' .. export_data()
+        else
+            -- cloud config: export as-is
+            data_str = sel.data
+        end
+        -- copy to clipboard via panorama
+        pcall(function()
+            local panorama_api = panorama.open()
+            panorama_api.SteamOverlayAPI.SetClipboardText(data_str)
+        end)
+        -- fallback: client.exec paste trick won't work, so just show the string in status
+        -- and also try the vtable clipboard method
+        pcall(function()
+            local ffi = require 'ffi'
+            local char_array = ffi.typeof 'char[?]'
+            local SetClipboardText = vtable_bind('vgui2.dll','VGUI_System010',9,'void(__thiscall*)(void*, const char*, int)')
+            SetClipboardText(data_str, #data_str)
+        end)
+        set_status('\a71bc78ffCopied! Paste in Discord to share.')
+    end)
+
     function _G.__configs_show()
         _safe_display(m_header)
         for i = 1, MAX_ROWS do _safe_display(m_rows[i]) end
@@ -6773,6 +6802,7 @@ do
         _safe_display(m_savename)
         _safe_display(m_save)
         _safe_display(m_delete)
+        _safe_display(m_export)
         _safe_display(m_status)
     end
 
