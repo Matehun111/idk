@@ -2433,7 +2433,7 @@ do
     : record("settings", "settings::tweaks_enable")
     : save()
 
-    settings.tweaks = menu.new_item(ui.new_multiselect, 'AA', 'Anti-aimbot angles', merge { "- Functions", "\n", "settings::tweaks" }, { 'Log Aimbot Shots', 'Damage Marker' })
+    settings.tweaks = menu.new_item(ui.new_multiselect, 'AA', 'Anti-aimbot angles', merge { "- Functions", "\n", "settings::tweaks" }, { 'Log Aimbot Shots', 'Damage Marker', 'Trashtalk' })
     : record("settings", "settings::tweaks")
     : save()
 end
@@ -7234,8 +7234,6 @@ end
 
 --  CLANTAG SYSTEM (zenith.gs)
 -- ======================================================================
---  CLANTAG SYSTEM (zenith.gs)
--- ======================================================================
 do
     local mp = {}
     _G.__misc_page = mp   -- keep reference so Visual page show_clantag() still works
@@ -7266,8 +7264,10 @@ do
     -- Menu items
     mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff⚡ Clantag')
     mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag'):record('misc','misc::ct_en'):save()
+    mp.ct_en:set_callback(function() menu.update() end)
     mp.ct_mode  = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles', 'Animation',
                     {'Static','Write','Scroll','Bounce','Flicker'}):record('misc','misc::ct_mode'):save()
+    mp.ct_mode:set_callback(function() menu.update() end)
     mp.ct_text  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Custom Text'):record('misc','misc::ct_text'):save()
     mp.ct_speed = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Speed', 1, 20, 5):record('misc','misc::ct_speed'):save()
 
@@ -7282,12 +7282,14 @@ do
     function mp.show_clantag()
         _safe_display(mp.lbl_ct)
         _safe_display(mp.ct_en)
-        if mp.ct_en:get() then
+        local ok_en, en = pcall(ui.get, mp.ct_en.ref)
+        if ok_en and en then
             _safe_display(mp.ct_mode)
-            local mode = mp.ct_mode:get()
+            local ok_m, mode = pcall(ui.get, mp.ct_mode.ref)
+            mode = (ok_m and mode) or 'Static'
             if mode == 'Static' then
                 _safe_display(mp.ct_text)
-            elseif mode == 'Write' or mode == 'Scroll' or mode == 'Bounce' or mode == 'Flicker' then
+            else
                 _safe_display(mp.ct_speed)
             end
         end
@@ -7345,7 +7347,37 @@ do
     end)
 end
 
-client.color_log(113, 152, 255, '[Zenith] Clantag system loaded.')
+
+---region trashtalk
+do
+    local _tt_lines = {
+        'L', 'ez', 'ratio', 'skill issue', 'get recked',
+        'not even close', 'uninstall', 'LOL', 'ggez', 'trash',
+        'outplayed', 'cry about it', 'too easy', 'go next',
+    }
+    local _tt_last = 0
+
+    client.set_event_callback('player_death', function(e)
+        if not _auth_alive then return end
+        if not settings.tweaks_enable or not settings.tweaks_enable:get() then return end
+        local ok, has = pcall(function() return settings.tweaks:have_key('Trashtalk') end)
+        if not ok or not has then return end
+
+        local me = entity.get_local_player()
+        if not me then return end
+        local attacker = client.userid_to_entindex(e.attacker)
+        if attacker ~= me then return end  -- only on our kills
+
+        -- one message per kill, cooldown 3s
+        local now = globals.realtime()
+        if now - _tt_last < 3 then return end
+        _tt_last = now
+
+        local line = _tt_lines[math.random(#_tt_lines)]
+        client.exec('say ' .. line)
+    end)
+end
+---endregion trashtalkclient.color_log(113, 152, 255, '[Zenith] Clantag system loaded.')
 
 
 
