@@ -36,9 +36,22 @@ local function warn(m) clog(255,200,80,m) end
 local function err(m)  clog(255,60,60,m)  end
 
 local function get_hwid()
-    local lp    = entity.get_local_player()
-    local steam = lp and entity.get_steam64(lp) or "0"
-    local raw   = "ZNHWID:"..tostring(steam)..":stable:v"..AUTH_VER
+    -- prefer panorama Steam ID (works in main menu, never nil)
+    local steam = "0"
+    local ok, pan = pcall(panorama.open)
+    if ok and pan then
+        local ok2, xuid = pcall(function() return tostring(pan.MyPersonaAPI.GetXuid()) end)
+        if ok2 and xuid and xuid ~= "0" then steam = xuid end
+    end
+    -- fallback: entity steam64 (only works in-game)
+    if steam == "0" then
+        local lp = entity.get_local_player()
+        if lp then
+            local s = entity.get_steam64(lp)
+            if s then steam = tostring(s) end
+        end
+    end
+    local raw = "ZNHWID:"..steam..":stable:v"..AUTH_VER
     local h = 5381
     for i=1,#raw do h = _band(_bxor(h*33,string.byte(raw,i)),0xFFFFFFFF) end
     local hi = _band(_flr(h/0x10000),0xFFFF)
@@ -172,7 +185,15 @@ local function do_login(name, pw)
     if u.pw_hash ~= hash_pw(pw) then set_status(255,60,60,"Wrong password."); return end
 
     local hwid = get_hwid()
-    if u.hwid ~= hwid then set_status(255,60,60,"Account locked to another machine."); return end
+    -- if hwid is nil (was reset), re-lock to this machine on login
+    if u.hwid == nil then
+        u.hwid = hwid
+        local users2 = db_read(DB_USERS)
+        users2[nl] = u
+        db_write(DB_USERS, users2)
+    elseif u.hwid ~= hwid then
+        set_status(255,60,60,"Account locked to another machine."); return
+    end
     if not key_ok(u.key) then set_status(255,60,60,"Your key is no longer valid."); return end
 
     db_write(DB_SESSION, { user=nl, pw_hash=hash_pw(pw), hwid=hwid, v=AUTH_VER })
@@ -312,7 +333,7 @@ client.set_event_callback("console_input", function(cmd)
     -- Usage: zn_hwid_reset_all   (wipes ALL user HWIDs)
     local reset_target = t:match("^zn_hwid_reset%s+(.+)$")
     if reset_target then
-        if auth_user ~= "matehun" then
+        if auth_user ~= "matehun111" then
             warn("[Zenith] Access denied — admin only."); return true
         end
         local users = db_read(DB_USERS)
@@ -330,7 +351,7 @@ client.set_event_callback("console_input", function(cmd)
     end
 
     if t=="zn_hwid_reset_all" then
-        if auth_user ~= "matehun" then
+        if auth_user ~= "matehun111" then
             warn("[Zenith] Access denied — admin only."); return true
         end
         local users = db_read(DB_USERS)
@@ -348,7 +369,7 @@ client.set_event_callback("console_input", function(cmd)
 
     -- list all users (admin only)
     if t=="zn_users" then
-        if auth_user ~= "matehun" then
+        if auth_user ~= "matehun111" then
             warn("[Zenith] Access denied — admin only."); return true
         end
         local users = db_read(DB_USERS)
