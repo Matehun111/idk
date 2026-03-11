@@ -113,16 +113,13 @@ end
 -- ── KEY CHECK ─────────────────────────────────────────────────────────
 local function key_ok(key)
     if not VALID_KEYS[key] then return false end
-    local hwid = get_hwid()
-    local db   = db_read(DB_KEYS)
+    local db    = db_read(DB_KEYS)
     local saved = db[key]
-    if saved and saved.hwid and saved.hwid ~= "" then
-        return saved.hwid == hwid
+    -- key is valid if: not used, or used by this user (owner check done at register)
+    if saved and saved.used == true and saved.owner then
+        return true  -- already claimed, owner check handled at register/login
     end
-    -- First use: lock to this HWID
-    db[key] = { hwid=hwid, note=VALID_KEYS[key].note }
-    db_write(DB_KEYS, db)
-    return true
+    return true  -- key exists in VALID_KEYS = valid
 end
 
 -- ── REGISTER ──────────────────────────────────────────────────────────
