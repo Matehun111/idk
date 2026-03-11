@@ -3283,799 +3283,271 @@ do
     end
 end
 
---- region log_aimbot_shots
+-- ======================================================================
+--  ZENITH | REWORKED ON-SCREEN EVENT LOG
+--  • Pill/card per entry with rounded accent background
+--  • Slide-in animation (from right)
+--  • Smooth alpha fade-out
+--  • Icons per event type  (✦ hit │ ✖ miss │ ✸ burn │ ↯ unreg)
+--  • Color-coded by category
+--  • Draggable position anchor
+-- ======================================================================
+
+--- region log_aimbot_shots  (REWORKED)
 do
-    local DURATION = 7.0
+    local DURATION    = 6.0
+    local MAX_ENTRIES = 10
 
-    local inferno = { }
-    local regular = { }
+    -- ── Kind definitions ──────────────────────────────────────────────
+    local KIND = {
+        hit      = { icon = '\xe2\x9c\xa6', r=120, g=220, b=120 },
+        headshot = { icon = '\xe2\x9c\xa6', r=255, g=200, b=60  },
+        knife    = { icon = '\xe2\x9c\x82', r=255, g=120, b=60  },
+        nade     = { icon = '\xe2\x9c\xb8', r=255, g=180, b=60  },
+        burn     = { icon = '\xe2\x9c\xb8', r=255, g=100, b=40  },
+        miss     = { icon = '\xe2\x9c\x96', r=220, g=80,  b=80  },
+        spread   = { icon = '\xe2\x9c\x96', r=255, g=200, b=60  },
+        unreg    = { icon = '\xe2\x86\xaf', r=100, g=140, b=255 },
+    }
 
-    local function draw_event_log(...)
-        if not settings.tweaks_enable:get() then
-            return
+    local function resolve_kind(weapon, hitgroup, reason)
+        if reason then
+            if reason == 'spread'                                  then return KIND.spread end
+            if reason == 'death' or reason == 'player death'
+               or reason == 'unregistered shot'                    then return KIND.unreg  end
+            return KIND.miss
         end
-
-        eventlogs.add(...)
+        if weapon == 'inferno'   then return KIND.burn     end
+        if weapon == 'knife'     then return KIND.knife    end
+        if weapon == 'hegrenade' then return KIND.nade     end
+        if hitgroup == 1         then return KIND.headshot end
+        return KIND.hit
     end
 
-    local function push_event_log(data)
-        if #regular > 8 then
-            table.remove(regular, 1)
-        end
+    local HG_NAMES = { [2]='chest',[3]='stomach',[4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg',[8]='neck' }
 
-        regular[#regular + 1] = data
+    local inferno = {}
+    local regular = {}
+
+    local function push_entry(kind, text)
+        if #regular >= MAX_ENTRIES then table.remove(regular, 1) end
+        regular[#regular + 1] = {
+            kind = kind, text = text,
+            lifetime = DURATION, alpha = 0.0, slide = 0.0,
+        }
     end
 
-    local function weapon_to_action(weapon)
-        if weapon == "knife" then
-            return "Knifed"
-        end
-
-        if weapon == "hegrenade" then
-            return "Naded"
-        end
-
-        return "Hit"
-    end
-
-    local function find_inferno_info(ent)
+    local function find_inferno(ent)
         for i = 1, #inferno do
-            local data = inferno[i]
-
-            if data.entity == ent then
-                return data
-            end
-        end
-
-        return nil
-    end
-
-    local function get_miss_color(reason)
-        if reason == "spread" then
-            return eventlogs.spread_color_picker:rawget()
-        end
-
-        if reason == "death" or reason == "unregistered shot" then
-            return eventlogs.unregistered_color_picker:rawget()
-        end
-
-        return eventlogs.miss_color_picker:rawget()
-    end
-
-    local function create_event_message(action, hitgroup, ent, damage)
-        local name = entity.get_player_name(ent)
-        local hitgroup_name = e_hitgroup[hitgroup]
-
-        if action == "Hit" then
-            return f(
-                "%s ${%s} in the ${%s} for ${%s} damage",
-                action, name, hitgroup_name, damage
-            )
-        end
-
-        return f(
-            "%s ${%s} for ${%s} damage",
-            action, name, damage
-        )
-    end
-
-    local function create_inferno_info(ent, damage)
-        local data = { }
-
-        data.entity = ent
-        data.damage = damage
-
-        data.alpha = 0.0
-        data.duration = 7.0
-
-        data.flash_amount = 1.0
-
-        return data
-    end
-
-    local function create_event_info(action, hitgroup, ent, damage)
-        local data = { }
-
-        data.msg = create_event_message(action, hitgroup, ent, damage)
-
-        data.alpha = 0.0
-        data.duration = 7.0
-
-        return data
-    end
-
-    local function create_miss_info(reason)
-        if reason == "?" then
-            reason = "correction"
-        end
-
-        local data = { }
-
-        data.msg = f(
-            "Missed shot due to ${%s}",
-            reason
-        )
-
-        data.reason = reason
-
-        data.alpha = 0.0
-        data.duration = 7.0
-
-        return data
-    end
-
-    local function update_inferno_logs(dt)
-        local r, g, b = widgets.color_picker:rawget()
-
-        for i = #inferno, 1, -1 do
-            local data = inferno[i]
-
-            data.duration = math.max(0, data.duration - dt)
-            data.alpha = motion.interp(data.alpha, data.duration > 0, 0.045)
-
-            if data.alpha <= 0 then
-                table.remove(inferno, i)
-            end
-        end
-
-        for i = 1, #inferno do
-            local data = inferno[i]
-
-            local name = entity.get_player_name(data.entity)
-            local damage = data.damage
-
-            draw_event_log(r, g, b, 255 * data.alpha, f("Burned ${%s} for ${%d} damage", name, damage))
+            if inferno[i].entity == ent then return inferno[i] end
         end
     end
-
-    local function update_regular_logs(dt)
-        local r, g, b = widgets.color_picker:rawget()
-
-        for i = #regular, 1, -1 do
-            local data = regular[i]
-
-            data.duration = math.max(0, data.duration - dt)
-            data.alpha = motion.interp(data.alpha, data.duration > 0, 0.045)
-
-            if data.alpha <= 0 then
-                table.remove(regular, i)
-            end
-        end
-
-        for i = 1, #regular do
-            local data = regular[i]
-
-            local col_r = r
-            local col_g = g
-            local col_b = b
-
-            if data.reason ~= nil then
-                col_r, col_g, col_b = get_miss_color(data.reason)
-            end
-
-            draw_event_log(col_r, col_g, col_b, 255 * data.alpha, data.msg)
-        end
-    end
-
-    local function handle_input()
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if settings.tweaks:have_key('Log Aimbot Shots') then
-            override.set(software.misc.settings.output, false)
-        else
-            override.unset(software.misc.settings.output)
-        end
-    end
-
-    settings.tweaks:set_callback(handle_input)
-    settings.tweaks_enable:set_callback(handle_input)
-    ui.set_callback(software.misc.settings.output, handle_input)
-    handle_input()
 
     function log_aimbot_shots.player_hurt(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        local me = entity.get_local_player()
-
-        local userid = client.userid_to_entindex(e.userid)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local me       = entity.get_local_player()
+        local userid   = client.userid_to_entindex(e.userid)
         local attacker = client.userid_to_entindex(e.attacker)
+        if userid == me or attacker ~= me then return end
 
-        local weapon = e["weapon"]
-        local damage = e["dmg_health"]
+        local weapon = e['weapon']
+        local damage = e['dmg_health']
+        local hg     = e['hitgroup']
+        local name   = entity.get_player_name(userid)
+        local kind   = resolve_kind(weapon, hg, nil)
 
-        local hitgroup = e["hitgroup"]
-
-        if userid == me or attacker ~= me then
+        if weapon == 'inferno' then
+            local d = find_inferno(userid)
+            if d then d.damage = d.damage + damage; d.lifetime = DURATION; return end
+            inferno[#inferno + 1] = {
+                entity = userid, damage = damage, kind = KIND.burn,
+                lifetime = DURATION, alpha = 0.0, slide = 0.0,
+            }
             return
         end
 
-        if weapon == "inferno" then
-            local data = find_inferno_info(userid)
-
-            if data ~= nil then
-                data.damage = data.damage + damage
-                data.duration = DURATION
-
-                data.flash_amount = 1.0
-
-                return
-            end
-
-            inferno[#inferno + 1] = create_inferno_info(userid, damage)
-            return
+        local text
+        if weapon == 'knife' then
+            text = f('Knifed \a[nick]%s\aFFFFFFFF for \a[dmg]%d\aFFFFFFFF dmg', name, damage)
+        elseif weapon == 'hegrenade' then
+            text = f('Naded \a[nick]%s\aFFFFFFFF for \a[dmg]%d\aFFFFFFFF dmg', name, damage)
+        elseif hg == 1 then
+            text = f('\a[hs]HEADSHOT\aFFFFFFFF \a[nick]%s\aFFFFFFFF \a[dmg]%d\aFFFFFFFF dmg', name, damage)
+        else
+            text = f('Hit \a[nick]%s\aFFFFFFFF (%s) \a[dmg]%d\aFFFFFFFF dmg', name, HG_NAMES[hg] or 'body', damage)
         end
-
-        local action = weapon_to_action(weapon)
-        push_event_log(create_event_info(action, hitgroup, userid, damage))
+        push_entry(kind, text)
     end
 
     function log_aimbot_shots.aim_miss(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        push_event_log(create_miss_info(e.reason))
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local reason = e.reason or '?'
+        if reason == '?' then reason = 'correction' end
+        push_entry(resolve_kind(nil, nil, reason), f('Miss  \a[reason]%s', reason))
     end
 
     function log_aimbot_shots.frame()
         local dt = globals.frametime()
-
-        update_inferno_logs(dt)
-        update_regular_logs(dt)
-    end
-end
-
---- region eventlogs
-do
-    local ALPHA_UNIT = 1 / 255
-
-    local queue = { }
-    local preview_alpha = 0.0
-
-    local function replacement(s, col_a, col_b)
-        local hex_a = utils.to_hex(unpack(col_a))
-        local hex_b = utils.to_hex(unpack(col_b))
-
-        local repl = f("\a%s%%1\a%s", hex_a, hex_b)
-        local result = string.gsub(s, "${(.-)}", repl)
-
-        return result
-    end
-
-    local function update_preview()
-        local can_show_preview = widgets.enabled:get() and ui.is_menu_open() and #queue == 0
-        preview_alpha = motion.interp(preview_alpha, can_show_preview, 0.045)
-
-        if preview_alpha > 0.0 then
-            local alpha = 255 * preview_alpha
-
-            -- hit example
-            do
-                local r, g, b = widgets.color_picker:rawget()
-
-                eventlogs.add(r, g, b, alpha, "Hit ${vladislav} for ${10} damage")
-                eventlogs.add(r, g, b, alpha, "Hit ${monster} in the ${head} for ${103} damage")
-            end
-
-            -- miss example
-            do
-                local r, g, b = eventlogs.miss_color_picker:rawget()
-
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${correction}")
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${prediction error}")
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${lagcomp failure}")
-            end
-
-            -- spread example
-            do
-                local r, g, b = eventlogs.spread_color_picker:rawget()
-
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${spread}")
-            end
-
-            -- network example
-            do
-                local r, g, b = eventlogs.unregistered_color_picker:rawget()
-
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${unregistered shot}")
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${player death}")
-                eventlogs.add(r, g, b, alpha, "Missed shot due to ${death}")
-            end
+        for i = #inferno, 1, -1 do
+            local d = inferno[i]
+            d.lifetime = math.max(0, d.lifetime - dt)
+            d.alpha    = motion.interp(d.alpha, d.lifetime > 0 and 1 or 0, 0.06)
+            d.slide    = motion.interp(d.slide, 1.0, 0.10)
+            if d.alpha <= 0.01 and d.lifetime <= 0 then table.remove(inferno, i) end
+        end
+        for i = #regular, 1, -1 do
+            local d = regular[i]
+            d.lifetime = math.max(0, d.lifetime - dt)
+            d.alpha    = motion.interp(d.alpha, d.lifetime > 0 and 1 or 0, 0.06)
+            d.slide    = motion.interp(d.slide, 1.0, 0.10)
+            if d.alpha <= 0.01 and d.lifetime <= 0 then table.remove(regular, i) end
         end
     end
 
-    local widget = windows.new("##Event Logs", .55, 0.78)
-    widget:set_size(vector(330, 125))
+    rawset(_G, '_zn_inferno', inferno)
+    rawset(_G, '_zn_regular', regular)
+end
 
-    local hovered_alpha = 0
+--- region eventlogs  (REWORKED)
+do
+    local CARD_PAD_X  = 8
+    local CARD_PAD_Y  = 4
+    local CARD_GAP    = 3
+    local CARD_RADIUS = 4
+    local ICON_GAP    = 5
+    local SLIDE_RANGE = 140
+
+    local inferno = _G._zn_inferno
+    local regular = _G._zn_regular
+
+    local MACROS = {
+        nick   = '\aFF9955FF',
+        dmg    = '\aFFD700FF',
+        hs     = '\aFFD700FF',
+        reason = '\aFF6666FF',
+    }
+    local function resolve(s)
+        return (s:gsub('\a%[(.-)%]', function(k) return MACROS[k] or '\aFFFFFFFF' end))
+    end
+
+    local PREVIEW = {
+        { kind={ icon='\xe2\x9c\xa6', r=120,g=220,b=120 }, text='Hit \a[nick]vladislav\aFFFFFFFF (chest) \a[dmg]42\aFFFFFFFF dmg',            alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\xa6', r=255,g=200,b=60  }, text='\a[hs]HEADSHOT\aFFFFFFFF \a[nick]monster\aFFFFFFFF \a[dmg]103\aFFFFFFFF dmg', alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x96', r=220,g=80, b=80  }, text='Miss  \a[reason]correction',                                                  alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x96', r=100,g=140,b=255 }, text='Miss  \a[reason]unregistered shot',                                           alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x96', r=255,g=200,b=60  }, text='Miss  \a[reason]spread',                                                      alpha=1, slide=1 },
+    }
+
+    local widget = windows.new('##EventLogsV2', 0.78, 0.70)
+    widget:set_size(vector(220, 20))
+
+    local hovered_alpha = 0.0
+
+    local function draw_card(ox, oy, entry, a_mult)
+        if a_mult < 0.01 then return 0 end
+        local kind    = entry.kind
+        local alpha   = (entry.alpha or 1) * a_mult
+        local slide_t = entry.slide or 1
+        local display = resolve(entry.text or '')
+        local flags   = 'd'
+
+        local icon_w, icon_h = renderer.measure_text(flags, kind.icon)
+        local text_w, text_h = renderer.measure_text(flags, display)
+        local card_w = CARD_PAD_X * 2 + icon_w + ICON_GAP + text_w
+        local card_h = CARD_PAD_Y * 2 + math.max(icon_h, text_h)
+
+        local sx = ox + SLIDE_RANGE * (1.0 - slide_t)
+
+        local br = math.floor(kind.r * 0.10)
+        local bg = math.floor(kind.g * 0.10)
+        local bb = math.floor(kind.b * 0.10)
+        graphics.rectangle(sx, oy, card_w, card_h, br, bg, bb, math.floor(185 * alpha), CARD_RADIUS)
+        renderer.rectangle(sx, oy + CARD_RADIUS, 2, card_h - CARD_RADIUS * 2,
+            kind.r, kind.g, kind.b, math.floor(230 * alpha))
+        renderer.text(sx + CARD_PAD_X, oy + (card_h - icon_h) * 0.5,
+            kind.r, kind.g, kind.b, math.floor(255 * alpha), flags, 0, kind.icon)
+        renderer.text(sx + CARD_PAD_X + icon_w + ICON_GAP, oy + (card_h - text_h) * 0.5,
+            255, 255, 255, math.floor(255 * alpha), flags, 0, display)
+
+        return card_h + CARD_GAP
+    end
 
     local function draw_eventlogs()
-        if not widgets.enabled:get() or not widgets.items:have_key("On-Screen Logs") then
-            return
-        end
+        if not widgets.enabled:get() or not widgets.items:have_key('On-Screen Logs') then return end
 
-        local screen = vector(client.screen_size())
-        local flags = "d"
+        local is_menu    = ui.is_menu_open()
+        local live_count = #regular + #inferno
 
-        local window = widget
-        window.pos.x = screen.x * .5 - 165
-
-        local pos = window.pos:clone()
-        local size = window.size:clone()
-
-        local position = vector(pos.x + size.x / 2, pos.y)
-
-        hovered_alpha = motion.interp(hovered_alpha, ui.is_menu_open() and window:is_hovering(), 0.095)
-        if hovered_alpha ~= 0 then
-            renderer.text(pos.x + size.x * .5, pos.y - 10, 255, 255, 255, 255 * hovered_alpha, 'c', nil, 'You can drag widget vertically.')
-            renderer.rectangle(pos.x + 50, pos.y - 2, size.x - 103, 1, 255, 255, 255, 100 * hovered_alpha)
-        end
-
-        for i = 1, #queue do
-            local log = queue[i]
-
-            local r, g, b, a = log.r, log.g, log.b, log.a
-            local alpha = a * ALPHA_UNIT
-
-            local text = log.msg do
-                text = replacement(text, { r, g, b, 255 }, { 255, 255, 255, 255 })
+        local source, a_mult
+        if is_menu and live_count == 0 then
+            source = PREVIEW; a_mult = 0.55
+        else
+            source = {}
+            for i = #inferno, 1, -1 do
+                local d  = inferno[i]
+                local nm = entity.get_player_name(d.entity) or '?'
+                source[#source + 1] = {
+                    kind = d.kind, alpha = d.alpha, slide = d.slide,
+                    text = f('Burning \a[nick]%s\aFFFFFFFF \a[dmg]%d\aFFFFFFFF dmg', nm, d.damage)
+                }
             end
-
-            local text_size = vector(renderer.measure_text(flags, text))
-            local rect_size = vector(text_size.x, text_size.y)
-
-            local text_position = vector(position.x - text_size.x * 0.5, position.y)
-            -- local rect_position = vector(position.x - rect_size.x * 0.5, position.y + text_size.y * 0.5)
-
-            -- graphics.glow(rect_position.x, rect_position.y - 2, rect_size.x, 4, r, g, b, a * 0.1, 10, 1)
-            -- renderer.rectangle(rect_position.x, rect_position.y - 2, rect_size.x, 4, r, g, b, a * 0.1)
-
-            graphics.text(text_position.x, text_position.y, 255, 255, 255, 255 * alpha, flags, 0, text)
-
-            position.y = position.y + (text_size.y + 1) * alpha
+            for i = #regular, 1, -1 do
+                source[#source + 1] = regular[i]
+            end
+            a_mult = 1.0
         end
 
-        window:update()
+        if #source == 0 then return end
+
+        local pos = widget.pos:clone()
+        hovered_alpha = motion.interp(hovered_alpha, is_menu and widget:is_hovering() and 1 or 0, 0.08)
+        if hovered_alpha > 0.01 then
+            renderer.text(pos.x, pos.y - 14, 255, 255, 255, math.floor(160 * hovered_alpha), 'd', nil, 'Drag to reposition')
+        end
+
+        local total_h = 0
+        for i = 1, #source do
+            total_h = total_h + draw_card(pos.x, pos.y + total_h, source[i], a_mult)
+        end
+
+        widget:set_size(vector(240, math.max(20, total_h)))
+        widget:update()
     end
 
-    local function get_color(self)
-        return self.r, self.g, self.b
-    end
+    eventlogs.add        = function() end
+    eventlogs.pre_frame  = function() end
+    eventlogs.post_frame = function() draw_eventlogs() end
 
-    local wr, wg, wb = widgets.color_picker:rawget()
-
-    eventlogs.hit_color_picker = {
-        r = wr, g = wg, b = wb,
-
-        rawget = get_color
-    }
-
-    eventlogs.spread_color_picker = {
-        r = 255, g = 225, b = 115,
-
-        rawget = get_color
-    }
-
-    eventlogs.miss_color_picker = {
-        r = 255, g = 98, b = 98,
-
-        rawget = get_color
-    }
-
-    eventlogs.unregistered_color_picker = {
-        r = 100, g = 100, b = 255,
-
-        rawget = get_color
-    }
-
-    function eventlogs.add(r, g, b, a, text)
-        local log = { }
-
-        log.r = r
-        log.g = g
-        log.b = b
-        log.a = a
-
-        log.msg = text
-
-        table.insert(queue, log)
-        return log
-    end
-
-    function eventlogs.pre_frame()
-        table.clear(queue)
-    end
-
-    function eventlogs.post_frame()
-        update_preview()
-        draw_eventlogs()
-    end
+    local function col(r,g,b) return { r=r,g=g,b=b, rawget=function(self) return self.r,self.g,self.b end } end
+    eventlogs.hit_color_picker          = col(120,220,120)
+    eventlogs.spread_color_picker       = col(255,200,60)
+    eventlogs.miss_color_picker         = col(220,80,80)
+    eventlogs.unregistered_color_picker = col(100,140,255)
 end
 
-local print_dev do
-    print_dev = {
-        data = { }
-    }
-
-    function print_dev.add(text, time)
-        print_dev.data[#print_dev.data+1] = {
-            text = text,
-            time = time + globals.realtime(),
-            alpha = 0.01,
-            offset = 0
-        }
-    end
-
-    client.set_event_callback('paint', function ()
-        local realtime = globals.realtime()
-        local frametime = globals.frametime()
-        local offset = 0
-
-        for i = #print_dev.data, 1, -1 do
-            local log = print_dev.data[i]
-            if not log then
-                goto skip
-            end
-
-            if log.offset ~= offset then
-                log.offset = utils.clamp(log.offset < offset and log.offset + (200 * frametime) or offset, 0, offset)
-            end
-
-            local difference = log.time - realtime
-            log.alpha = motion.interp(log.alpha, difference > 0, 0.045)
-            if log.alpha <= 0 and difference < 0 then
-                table.remove(print_dev.data, i)
-                goto skip
-            end
-
-            local text_sz = vector(renderer.measure_text('d', log.text))
-
-            graphics.text(8, 5 + log.offset, 255, 255, 255, 255 * log.alpha, 'd', nil, log.text)
-
-            offset = offset + text_sz.y + 1
-            ::skip::
-        end
-
-        for i = 1, #print_dev.data do
-            local log_count = #print_dev.data - i
-
-            if log_count > 7 then
-                print_dev.data[ i ].time = 0
-            end
-        end
-    end)
-
-    client.set_event_callback('round_prestart', function ()
-        print_dev.data = { }
-    end)
-
-    setmetatable(print_dev, {
-        __call = function (self, ...)
-            print_dev.add(...)
-        end
-    })
-end
-
----region log aim 4ots
-do
-    local hitgroup_str = {
-        [0] = 'generic',
-        'head', 'chest', 'stomach',
-        'left arm', 'right arm',
-        'left leg', 'right leg',
-        'neck', 'generic', 'gear'
-    }
-
-    local weapon_verb = {
-        ['hegrenade'] = 'Naded',
-        ['inferno'] = 'Burned',
-        ['knife'] = 'Knifed',
-    }
-
-    local hex_to_rgb = function( hex )
-        hex = hex:gsub('#', '')
-        return tonumber('0x' .. hex:sub(1, 2)), tonumber('0x' .. hex:sub(3, 4)), tonumber('0x' .. hex:sub(5, 6))
-    end
-
-    local function clean_up(str)
-        local text = str:gsub('(\a%x%x%x%x%x%x)%x%x', '%1')
-        return text
-    end
-
-	local function printc(...)
-		for i, v in ipairs{...} do
-			local r = "\aD9D9D9" .. v
-			for col, text in r:gmatch("\a(%x%x%x%x%x%x)([^\a]*)") do
-                local r, g, b = hex_to_rgb(col)
-				client.color_log(r, g, b, string.format('%s\0', text))
-			end
-            client.color_log(255, 255, 255, '\n\0')
-		end
-	end
-
-    local wanted_damage, wanted_hitgroup, backtrack = 0, 0, 0
-
-    client.set_event_callback("aim_fire", function (e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        wanted_damage = e.damage
-        wanted_hitgroup = e.hitgroup
-        backtrack = globals.tickcount() - e.tick
-    end)
-
-    client.set_event_callback('aim_hit', function (shot)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        local target = shot.target
-        if target == nil then
-            return
-        end
-
-        local info = {
-            '\rHit ',
-            f('\a[nick]%s\r\'s ', entity.get_player_name(target)),
-            'in the ',
-            shot.hitgroup ~= wanted_hitgroup and f('\a[highlight]%s\r(\a[highlight]%s\r) ', hitgroup_str[ shot.hitgroup ], hitgroup_str[ wanted_hitgroup ]) or f('\a[highlight]%s\r ', hitgroup_str[ shot.hitgroup ]),
-            'for ',
-            shot.damage ~= wanted_damage and f('\a[highlight]%d\r(\a[highlight]%d\r) ', shot.damage, wanted_damage) or f('\a[highlight]%d\r ', shot.damage),
-            'damage ',
-            f('(hc: \a[highlight]%d%% \a[idle]· \rhistory: \a[highlight]%dt\r)', shot.hit_chance, backtrack)
-        }
-
-        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
-        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
-        print_dev(str, 8)
-    end)
-
-    client.set_event_callback('aim_miss', function (shot)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        local target = shot.target
-        if target == nil then
-            return
-        end
-
-        local info = {
-            '\rMissed ',
-            f('\a[nick]%s\r\'s ', entity.get_player_name(target)),
-            f('\a[highlight]%s\r ', hitgroup_str[ shot.hitgroup ]),
-            'due to ',
-            f('\a[miss]%s\r ', shot.reason),
-            f('(hc: \a[highlight]%d%% \a[idle]· \rhistory: \a[highlight]%dt\r)', shot.hit_chance, backtrack)
-        }
-
-        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
-        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
-        print_dev(str, 8)
-    end)
-
-    client.set_event_callback('player_hurt', function (e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        local lp = entity.get_local_player()
-        local victim = client.userid_to_entindex(e.userid)
-        local attacker = client.userid_to_entindex(e.attacker)
-        if victim == nil or attacker == nil or victim == lp or attacker ~= lp then
-            return
-        end
-
-        local hitgroup = hitgroup_str[ e.hitgroup ]
-
-        local verb = weapon_verb[ e.weapon ]
-        if verb == nil then
-            return
-        end
-
-        local info = {
-            '\r' .. verb,
-            f(' \a[nick]%s\r ', entity.get_player_name(victim)),
-            'for ',
-            f('\a[highlight]%d \rdamage ', e.dmg_health or 0),
-            f('(\a[highlight]%d \rhealth remaining)', e.health or 0)
-        }
-
-        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
-        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
-        print_dev(str, 8)
-    end)
-end
-
--- --region hitchance
--- do
---     hitchance.reset = false
---     hitchance.weapons = { 'G3SG1 / SCAR-20', 'AWP', 'SSG 08', 'R8 Revolver', 'Pistol' }
-
---     hitchance.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Hit Chance")
---     : record("rage", "hitchance::enabled")
---     : save()
-
---     hitchance.weapon_list = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Weapons", hitchance.weapons)
---     : record("rage", "hitchance::weapons")
---     : save()
-
---     for _, weapon in next, hitchance.weapons do
---         hitchance['Enabled_' .. weapon] = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', f('Enable %s', weapon))
---         : record("rage", "hitchance::enable::" .. weapon)
---         : save()
-
---         hitchance['Modes_' .. weapon] = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { 'Modes', '\n', weapon }, { 'No Scope', 'In Air' })
---         : record("rage", "hitchance::modes::" .. weapon)
---         : save()
-
---         hitchance['Distance_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'Distance', '\n', weapon }, 100, 1001, 500, true, 'm', 0.01, { [1001] = 'Inf.' })
---         : record("rage", "hitchance::distance::" .. weapon)
---         : save()
-
---         hitchance['No Scope_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'No Scope', '\n', weapon }, 1, 100, 50, true, '%')
---         : record("rage", "hitchance::noscope::" .. weapon)
---         : save()
-
---         hitchance['In Air_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'In Air', '\n', weapon }, 1, 100, 50, true, '%')
---         : record("rage", "hitchance::inair::" .. weapon)
---         : save()
---     end
-
---     function hitchance.backups()
---         if hitchance.reset then
---             override.unset(software.rage.aimbot.hitchance)
---             override.unset(software.rage.aimbot.auto_scope)
---             hitchance.reset = false
---         end
---     end
-
---     function hitchance.distance(ent, distance)
---         local my_origin = vector(entity.get_origin(ent))
---         if my_origin == nil then
---             return
---         end
-
---         local target = client.current_threat()
---         if target == nil then
---             return
---         end
-
---         local enemy_origin = vector(entity.get_origin(target))
---         if enemy_origin == nil then
---             return
---         end
-
---         if distance == 1001 then
---             return 'Inf.'
---         end
-
---         return my_origin:dist(enemy_origin) <= distance
---     end
-
---     local noscope_ignore = {
---         ['R8 Revolver'] = true,
---         ['Pistol'] = true
---     }
-
---     client.set_event_callback('setup_command', function (cmd)
---         if not hitchance.enabled:get() then
---             return hitchance.backups()
---         end
-
---         local lp = entity.get_local_player()
---         if lp == nil then
---             return hitchance.backups()
---         end
-
---         local wpn = entity.get_player_weapon(lp)
---         if wpn == nil then
---             return hitchance.backups()
---         end
-
---         if ui.is_menu_open() then
---             return hitchance.backups()
---         end
-
---         local weapon = ui.get(software.rage.weapon.weapon_type)
-
---         if not hitchance['Enabled_' .. weapon] then
---             return hitchance.backups()
---         end
-
---         if not hitchance['Enabled_' .. weapon]:get() then
---             return hitchance.backups()
---         end
-
---         local distance = hitchance.distance(lp, hitchance[ 'Distance_' .. weapon ]:get())
---         local conditions = hitchance[ 'Modes_' .. weapon ]
---         local is_pistol = noscope_ignore[ weapon ] or false
-
---         if conditions:have_key('In Air') and localplayer.is_airborne then
---             override.set(software.rage.aimbot.hitchance, hitchance[ 'In Air_' .. weapon]:get())
---         elseif conditions:have_key('No Scope') and entity.get_prop(lp, 'm_bIsScoped') == 0 and distance and not is_pistol then
---             override.set(software.rage.aimbot.hitchance, hitchance[ 'No Scope_' .. weapon]:get())
---             override.set(software.rage.aimbot.auto_scope, false)
---         else
---             return hitchance.backups()
---         end
-
---         if distance == 'Inf.' then
---             override.unset(software.rage.aimbot.auto_scope)
---         end
-
---         hitchance.reset = true
---     end)
--- end
-
----region неопознан
+---region неопознан  (hit-rate counter - kept intact)
 do
     local shots do
-        shots = {
-            total = 0,
-            hits = 0,
-
-            reasons = {
-                ['prediction error'] = true,
-                ['death'] = true
-            }
-        }
-
-        client.set_event_callback('aim_fire', function (shot)
-            shots.total = shots.total + 1
-        end)
-
-        client.set_event_callback('aim_hit', function (shot)
-            shots.hits = shots.hits + 1
-        end)
-
-        client.set_event_callback('player_connect_full', function (e)
-            if client.userid_to_entindex(e['userid']) ~= entity.get_local_player() then
-                return
-            end
-
-            shots.hits = 0
-            shots.total = 0
+        shots = { total = 0, hits = 0 }
+        client.set_event_callback('aim_fire', function() shots.total = shots.total + 1 end)
+        client.set_event_callback('aim_hit',  function() shots.hits  = shots.hits  + 1 end)
+        client.set_event_callback('player_connect_full', function(e)
+            if client.userid_to_entindex(e['userid']) ~= entity.get_local_player() then return end
+            shots.hits = 0; shots.total = 0
         end)
     end
 
-    client.set_event_callback('paint_ui', function ()
+    client.set_event_callback('paint_ui', function()
         local lp = entity.get_local_player()
-        if lp == nil then
-            return
-        end
-
-        if not widgets.enabled:get() or not widgets.items:have_key('Hit Rate') then
-            return
-        end
-
+        if lp == nil then return end
+        if not widgets.enabled:get() or not widgets.items:have_key('Hit Rate') then return end
         local hit_rate = shots.total ~= 0 and (shots.hits / shots.total * 100) or 100
-
         renderer.indicator(255, 255, 255, 200, f('%s%d%%', hit_rate <= 50 and '◣_◢ ' or '', hit_rate))
     end)
-
 end
+
 
 
 ---region autopeek
