@@ -6301,8 +6301,10 @@ do
                 end
             end
 
-            -- block shooting while airborne
-            cmd.in_attack = false
+            -- block shooting while airborne (only if air_tel enabled)
+            if air_tel.enabled:get() then
+                cmd.in_attack = false
+            end
         end
 
         -- ── Landed after being airborne → teleport tick ───────────────────
@@ -7477,6 +7479,13 @@ end
 local function _res_apply(ent, p)
     if not p.first_seen then return end
 
+    -- if player has no desync (afk, low flip count, small deltas) → clear offset
+    if p.flip_count == 0 or (p.misses == 0 and p.flip_count < 2) then
+        plist.set(ent, 'Y offset', 0)
+        p.resolved_yaw = 0
+        return
+    end
+
     local mode = 'Auto'
     local ok, m = pcall(ui.get, _res_ui_mode and _res_ui_mode.ref)
     if ok and m then mode = m end
@@ -7511,10 +7520,6 @@ local function _res_on_miss(ent)
     p.misses = p.misses + 1
     p.stage  = (p.stage  % #_res_brute_stages)  + 1
     p.jstage = (p.jstage % #_res_jitter_stages) + 1
-    -- also flip side assumption on repeated misses
-    if p.misses % 4 == 0 then
-        p.side = -p.side
-    end
 end
 
 local function _res_on_hit(ent)
