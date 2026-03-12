@@ -4540,6 +4540,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
+end)()
 
 --- hit marker zenith
 do
