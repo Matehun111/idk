@@ -2533,197 +2533,8 @@ do
     end)
 end
 
+
 --- region defensive
-do
-    local function get_statement()
-        if localplayer.is_airborne then
-            return "Air";
-        end
-
-        if localplayer.is_crouched then
-            return "Crouched";
-        end
-
-        if localplayer.is_moving then
-            if software.is_slow_motion() then
-                return "Slow Walk";
-            end
-
-            return "Moving";
-        end
-
-        return "Standing"
-    end
-
-    defensive.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Defensive AA")
-    : record("aa", "defensive::enabled")
-    : save()
-
-    defensive.mode = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- Mode", "\n", "defensive::mode" }, { "On Shot Anti Aim", "Double Tap" })
-    : record("aa", "defensive::mode")
-    : save()
-
-    defensive.state = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- State", "\n", "defensive::state" }, { "Air", "Standing", "Moving", "Slow Walk", "Crouched", "On Peek" })
-    : record("aa", "defensive::state")
-    : save()
-
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random" })
-    : record("aa", "defensive::pitch")
-    : save()
-
-    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "Random" })
-    : record("aa", "defensive::pitch")
-    : save()
-
-    local modes = {
-        ['Double Tap'] = software.is_double_tap,
-        ['On Shot Anti Aim'] = software.is_on_shot_antiaim
-    }
-
-    local manual_bebra = {
-        [0] = 90,
-        [1] = -90,
-        [2] = 0
-    }
-
-    local defensive_3_way = { 90, 180, -90, 180, 90 }
-    local defensive_5_way = { 90, 135, 180, 225, 270 }
-
-    function defensive.handle(cmd, ctx)
-        if not defensive.enabled:get() then
-            return
-        end
-
-        local lp = entity.get_local_player()
-        if lp == nil then
-            return
-        end
-
-        local work_on_mode = false
-        for idx, mode in next, defensive.mode:get() do
-            if modes[ mode ] and modes[ mode ]() then
-                work_on_mode = true
-                break
-            end
-        end
-
-        local double_tap = exploit.get()
-        if not work_on_mode or not double_tap.shift then
-            return
-        end
-
-        local lp_state = get_statement()
-
-        local should_work = false
-        local on_peek = false
-        for _, condition in next, defensive.state:get() do
-            if condition == 'On Peek' then
-                should_work = true
-                on_peek = true
-                break
-            else
-                if condition == lp_state then
-                    should_work = true
-                    break
-                end
-            end
-        end
-
-        if not should_work then
-            return
-        end
-
-        local weapon = entity.get_player_weapon(lp)
-        if weapon == nil then
-            return
-        end
-
-        local wpn_info = csgo_weapons(weapon)
-        if wpn_info == nil then
-            return
-        end
-
-        if wpn_info.is_revolver then
-            return
-        end
-
-        if not on_peek then
-            cmd.force_defensive = true
-        end
-
-        local freestanding = yaw_direction.is_freestanding
-        local manual_yaw = manual_direction.get()
-        local should_flick = lp_state == 'Crouched' and manual_direction.options:have_key('Duck Exploit')
-        local should_ignore = freestanding or (manual_yaw ~= nil and not should_flick)
-
-        if should_flick then
-            ctx.body_yaw = 'Static'
-            ctx.body_yaw_offset = 180
-        end
-
-        local pitch_value, pitch_mode = 0, 'Default'
-        do
-            local val = defensive.pitch:get()
-            if val == 'Zero' then
-                pitch_value, pitch_mode = 0, 'Custom'
-            elseif val == 'Up' then
-                pitch_value, pitch_mode = 0, 'Up'
-            elseif val == 'Up Switch' then
-                pitch_value, pitch_mode = client.random_float(45, 60) * -1, 'Custom'
-            elseif val == 'Down Switch' then
-                pitch_value, pitch_mode = client.random_float(45, 60), 'Custom'
-            elseif val == 'Random' then
-                pitch_value, pitch_mode = client.random_float(-89, 89), 'Custom'
-            end
-
-            if manual_yaw ~= nil and should_flick then
-                pitch_value, pitch_mode = client.random_float(-5, 10), 'Custom'
-            end
-        end
-
-        local yaw_value, yaw_mode = 0, '180'
-        do
-            local val = defensive.yaw:get()
-            if val == 'Sideways' then
-                yaw_value = localplayer.choking * 90 + client.random_float(-30, 30)
-            elseif val == 'Forward' then
-                yaw_value = localplayer.choking * 180 + client.random_float(-30, 30)
-            elseif val == 'Spinbot' then
-                yaw_value = -180 + (globals.tickcount() % 9) * 40 + client.random_float(-30, 30)
-            elseif val == '3-Way' then
-                yaw_value = defensive_3_way[localplayer.packets % 5 + 1] + client.random_float(-15, 15)
-            elseif val == '5-Way' then
-                yaw_value = defensive_5_way[localplayer.packets % 5 + 1] + client.random_float(-15, 15)
-            elseif val == 'Random' then
-                yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
-            end
-
-            if manual_yaw ~= nil and should_flick then
-                yaw_value = manual_bebra[ manual_yaw ] + client.random_float(0, 10)
-            end
-        end
-
-        -- client.color_log(255, 255, 255, f('\nDefensive: %s\nShould Ignore: %s\nAvoid Backstab: %s\nForce Defensive: %s\nFreestanding: %s', globals.tickcount() > double_tap.defensive_tk - 2, should_ignore, avoid_backstab.get(), cmd.force_defensive, software.is_freestanding()))
-
-        if globals.tickcount() > double_tap.defensive_tk - 2 then
-            return
-        end
-
-        if avoid_backstab.get() or should_ignore then
-            return
-        end
-
-        ctx.pitch = pitch_mode
-        ctx.pitch_offset = pitch_value
-        ctx.yaw = yaw_mode
-        ctx.yaw_offset = yaw_value
-    end
-end
-
-
---- region hyst_defensive  (ported from hysteria by enQ.)
--- Full anti-aim builder: per-state yaw+body, defensive snap pitch/yaw,
--- fake lag control, safe head, manual yaw — all using Zenith's UI + ctx API.
 do
     -- ── helpers ───────────────────────────────────────────────────────────
     local function norm_yaw(a) return ((a + 180) % 360) - 180 end
@@ -2754,7 +2565,7 @@ do
     local ui_gr = "Anti-aimbot angles"
 
     -- Master enable
-    hd.ui_enable = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "Hysteria AA")
+    hd.ui_enable = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "Zenith AA")
     : record("aa", "hd::enable") : save()
 
     -- Inverter hotkey
@@ -3182,13 +2993,8 @@ do
         apply_safe_head(ctx)
     end
 
-    -- hook into existing setup_command pipeline
-    -- (zenith fires antiaim.update(e, ctx) which calls defensive.handle, then applies ctx)
-    -- We wrap defensive.handle to also run our logic
-
-    local _orig_defensive_handle = defensive.handle
+    -- register as the defensive handler
     function defensive.handle(cmd, ctx)
-        _orig_defensive_handle(cmd, ctx)
         hd_setup_command(cmd, ctx)
     end
 
@@ -6386,16 +6192,7 @@ menu.set_callback(function()
 
     -- ── DEFENSIVE ────────────────────────────────────────────────────
     if page == "Defensive" then
-        -- Original defensive AA
-        _safe_display(defensive.enabled)
-        if defensive.enabled:get() then
-            _safe_display(defensive.mode)
-            _safe_display(defensive.state)
-            _safe_display(defensive.pitch)
-            _safe_display(defensive.yaw)
-        end
-
-        -- ── Hysteria AA (ported) ─────────────────────────────────
+        -- ── Zenith AA ────────────────────────────────────────────────
         local hd = _G._hd_state
         if hd then
             _safe_display(hd.ui_enable)
