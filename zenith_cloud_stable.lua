@@ -2543,8 +2543,7 @@ end
 
 --- region defensive
 do
-    -- -- helpers ------------------------------------------------------------
-    local function norm_yaw(a)   return ((a + 180) % 360) - 180 end
+    local function norm_yaw(a)    return ((a + 180) % 360) - 180 end
     local function clamp(v,lo,hi) return v < lo and lo or v > hi and hi or v end
     local function lerp(a,b,t)    return a + (b-a)*t end
     local function has(list, val)
@@ -2554,49 +2553,90 @@ do
     end
 
     local hd = {}
-    hd.lifetime   = 0
-    hd.switch     = false
-    hd.jitter_t   = 0
-    hd.delay_t    = 0    -- tick delay counter
+    hd.lifetime    = 0
+    hd.switch      = false
+    hd.jitter_t    = 0
+    hd.delay_t     = 0
     hd.manual_side = nil
 
-    -- -- UI references ------------------------------------------------------
     local G  = "AA"
     local GR = "Anti-aimbot angles"
 
-    -- -------------------- LEFT PANEL (per-state builder) ------------------
+    -- =========================================================
+    --  STATE LIST  (id = runtime key,  label = UI display name)
+    -- =========================================================
+    local STATES = {
+        { id="stand",   label="Standing"   },
+        { id="run",     label="Moving"     },
+        { id="walk",    label="Slow Walk"  },
+        { id="crouch",  label="Crouching"  },
+        { id="air",     label="In-Air"     },
+        { id="airduck", label="Air-Crouch" },
+    }
+    local STATE_LABELS = {}
+    for i,s in ipairs(STATES) do STATE_LABELS[i] = s.label end
 
-    -- State + Team selectors (mirror the native sub-page header)
+    -- =========================================================
+    --  DEFAULT PRESET  (template for each state)
+    -- =========================================================
+    local function default_preset()
+        return {
+            -- yaw
+            yaw_left       = -19,
+            yaw_right      = 36,
+            yaw_rnd_mode   = "Off",
+            yaw_rnd_left   = 0,
+            yaw_rnd_right  = 0,
+            yaw_jitter     = "Off",
+            yaw_jitter_deg = 0,
+            randomization  = 0,
+            switch_chance  = 100,
+            -- pitch
+            pitch          = "Down",   -- Down / Up / Custom / Zero
+            pitch_custom   = -89,
+            -- body yaw
+            body_yaw       = "Off",
+            body_yaw_deg   = 60,
+            -- delay
+            delay_from     = 0,
+            delay_to       = 0,
+            delay_count    = 1,
+            delay_tick1    = 0,
+            delay_rnd      = 0,
+        }
+    end
+
+    -- per-state preset table
+    hd.presets = {}
+    for _,s in ipairs(STATES) do hd.presets[s.id] = default_preset() end
+
+    -- =========================================================
+    --  UI  --  GLOBAL (not per-state)
+    -- =========================================================
+
+    -- master enable
+    hd.ui_enable = menu.new_item(ui.new_checkbox, G, GR, "Zenith AA")
+    : record("aa","hd::enable") : save()
+
+    -- state picker  (the editor "page selector")
     hd.ui_state = menu.new_item(ui.new_combobox, G, GR,
-        merge{"State", "\n", "hd::state"},
-        {"Standing","Moving","Slow Walk","Crouching","In-Air","Air-Crouch"})
+        merge{"Edit state", "\n", "hd::state"}, STATE_LABELS)
     : record("aa","hd::state") : save()
 
-    hd.ui_team = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Team", "\n", "hd::team"},
-        {"Both","Terrorist","Counter-Terrorist"})
-    : record("aa","hd::team") : save()
+    -- =========================================================
+    --  UI  --  PER-STATE EDITOR WIDGETS
+    --  (shared controls; values swapped on state change)
+    -- =========================================================
 
-    -- Force defensive block
-    hd.ui_force_def = menu.new_item(ui.new_checkbox, G, GR, "Force defensive")
-    : record("aa","hd::force_def") : save()
+    -- Pitch
+    hd.ui_pitch = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Pitch", "\n", "hd::pitch"},
+        {"Down","Up","Custom","Zero"})
+    : record("aa","hd::pitch") : save()
 
-    hd.ui_def_on = menu.new_item(ui.new_multiselect, G, GR,
-        merge{"Defensive on", "\n", "hd::def_on"},
-        {"Double tap","Hide shots","On shot"})
-    : record("aa","hd::def_on") : save()
-
-    hd.ui_def_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Defensive mode", "\n", "hd::def_mode"},
-        {"Always on","While shooting","On peek"})
-    : record("aa","hd::def_mode") : save()
-
-    hd.ui_custom_ticks = menu.new_item(ui.new_checkbox, G, GR, "Custom ticks")
-    : record("aa","hd::custom_ticks") : save()
-
-    -- Override state (master toggle)
-    hd.ui_enable = menu.new_item(ui.new_checkbox, G, GR, "Override state")
-    : record("aa","hd::enable") : save()
+    hd.ui_pitch_custom = menu.new_item(ui.new_slider, G, GR,
+        merge{"  Custom pitch", "\n", "hd::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::pitch_custom") : save()
 
     -- Yaw left / right
     hd.ui_yaw_left = menu.new_item(ui.new_slider, G, GR,
@@ -2607,18 +2647,17 @@ do
         merge{"Yaw right", "\n", "hd::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
     : record("aa","hd::yaw_right") : save()
 
-    -- Yaw random mode + sliders
+    -- Yaw random
     hd.ui_yaw_rnd_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Yaw random mode", "\n", "hd::yaw_rnd_mode"},
-        {"Off","Percent","Range"})
+        merge{"Yaw random mode", "\n", "hd::yaw_rnd_mode"}, {"Off","Percent","Range"})
     : record("aa","hd::yaw_rnd_mode") : save()
 
     hd.ui_yaw_rnd_left = menu.new_item(ui.new_slider, G, GR,
-        merge{"Yaw left random", "\n", "hd::yaw_rnd_left"}, 0, 100, 0, true, "%")
+        merge{"  Yaw left random", "\n", "hd::yaw_rnd_left"}, 0, 100, 0, true, "%")
     : record("aa","hd::yaw_rnd_left") : save()
 
     hd.ui_yaw_rnd_right = menu.new_item(ui.new_slider, G, GR,
-        merge{"Yaw right random", "\n", "hd::yaw_rnd_right"}, 0, 100, 0, true, "%")
+        merge{"  Yaw right random", "\n", "hd::yaw_rnd_right"}, 0, 100, 0, true, "%")
     : record("aa","hd::yaw_rnd_right") : save()
 
     -- Yaw jitter
@@ -2628,12 +2667,16 @@ do
     : record("aa","hd::yaw_jitter") : save()
 
     hd.ui_yaw_jitter_deg = menu.new_item(ui.new_slider, G, GR,
-        merge{"\n", "\n", "hd::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+        merge{"  Jitter degree", "\n", "hd::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
     : record("aa","hd::yaw_jitter_deg") : save()
 
     hd.ui_randomization = menu.new_item(ui.new_slider, G, GR,
         merge{"Randomization", "\n", "hd::randomization"}, 0, 100, 0, true, "%")
     : record("aa","hd::randomization") : save()
+
+    hd.ui_switch_chance = menu.new_item(ui.new_slider, G, GR,
+        merge{"Switch chance", "\n", "hd::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::switch_chance") : save()
 
     -- Body yaw
     hd.ui_body_yaw = menu.new_item(ui.new_combobox, G, GR,
@@ -2642,10 +2685,10 @@ do
     : record("aa","hd::body_yaw") : save()
 
     hd.ui_body_yaw_deg = menu.new_item(ui.new_slider, G, GR,
-        merge{"\n", "\n", "hd::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+        merge{"  Body yaw degree", "\n", "hd::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
     : record("aa","hd::body_yaw_deg") : save()
 
-    -- Delay system
+    -- Delay
     hd.ui_delay_from = menu.new_item(ui.new_slider, G, GR,
         merge{"Delay from", "\n", "hd::delay_from"}, 0, 14, 0, true, "t")
     : record("aa","hd::delay_from") : save()
@@ -2666,65 +2709,63 @@ do
         merge{"Delay randomization", "\n", "hd::delay_rnd"}, 0, 100, 0, true, "%")
     : record("aa","hd::delay_rnd") : save()
 
-    hd.ui_switch_chance = menu.new_item(ui.new_slider, G, GR,
-        merge{"Switch chance", "\n", "hd::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::switch_chance") : save()
+    -- =========================================================
+    --  UI  --  FAKE LAG  (global, not per-state)
+    -- =========================================================
 
-    -- -------------------- RIGHT PANEL (Fake lag column) -------------------
-
-    -- Fake lag settings preset selector
     hd.ui_fl_settings = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Settings", "\n", "hd::fl_settings"},
-        {"Main","Aggressive","Passive","Custom"})
+        merge{"Settings", "\n", "hd::fl_settings"}, {"Main","Aggressive","Passive","Custom"})
     : record("aa","hd::fl_settings") : save()
 
-    -- Break LC triggers
     hd.ui_vulnlc = menu.new_item(ui.new_multiselect, G, GR,
         merge{"Break LC triggers", "\n", "hd::vulnlc"},
         {"Can't shoot","Jumping","Crouching"})
     : record("aa","hd::vulnlc") : save()
 
-    -- Edge yaw hotkey
     hd.ui_edge_yaw = menu.new_item(ui.new_hotkey, G, GR,
         merge{"Edge yaw", "\n", "hd::edge_yaw"})
     : record("aa","hd::edge_yaw") : save()
 
-    -- Freestanding hotkey
     hd.ui_freestanding = menu.new_item(ui.new_hotkey, G, GR,
         merge{"Freestanding", "\n", "hd::freestanding"})
     : record("aa","hd::freestanding") : save()
 
-    -- Manual yaw
     hd.ui_manual = menu.new_item(ui.new_checkbox, G, GR, "Manual Yaw")
     : record("aa","hd::manual") : save()
 
     hd.ui_man_left  = menu.new_item(ui.new_hotkey, G, GR, merge{"  Left",  "\n","hd::man_left"})
     : record("aa","hd::man_left") : save()
-
     hd.ui_man_right = menu.new_item(ui.new_hotkey, G, GR, merge{"  Right", "\n","hd::man_right"})
     : record("aa","hd::man_right") : save()
-
     hd.ui_man_reset = menu.new_item(ui.new_hotkey, G, GR, merge{"  Reset", "\n","hd::man_reset"})
     : record("aa","hd::man_reset") : save()
 
-    -- Avoid backstab (delegates to existing avoid_backstab region)
     hd.ui_avoid_bs = menu.new_item(ui.new_checkbox, G, GR, "Avoid backstab")
     : record("aa","hd::avoid_bs") : save()
 
-    -- Safe head
     hd.ui_safehead = menu.new_item(ui.new_multiselect, G, GR,
-        merge{"Safe head", "\n", "hd::safehead"},
-        {"Air melee","Height difference"})
+        merge{"Safe head", "\n", "hd::safehead"}, {"Air melee","Height difference"})
     : record("aa","hd::safehead") : save()
 
-    -- Fake lag enable + Amount + Variance + Limit
+    hd.ui_force_def = menu.new_item(ui.new_checkbox, G, GR, "Force defensive")
+    : record("aa","hd::force_def") : save()
+
+    hd.ui_def_on = menu.new_item(ui.new_multiselect, G, GR,
+        merge{"Defensive on", "\n", "hd::def_on"},
+        {"Double tap","Hide shots","On shot"})
+    : record("aa","hd::def_on") : save()
+
+    hd.ui_def_mode = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Defensive mode", "\n", "hd::def_mode"},
+        {"Always on","While shooting","On peek"})
+    : record("aa","hd::def_mode") : save()
+
     hd.ui_fl_on = menu.new_item(ui.new_checkbox, G, GR,
         merge{"Enabled", "\n", "hd::fl_on"})
     : record("aa","hd::fl_on") : save()
 
     hd.ui_fl_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Amount", "\n", "hd::fl_mode"},
-        {"Dynamic","Maximum","Fluctuate"})
+        merge{"Amount", "\n", "hd::fl_mode"}, {"Dynamic","Maximum","Fluctuate"})
     : record("aa","hd::fl_mode") : save()
 
     hd.ui_fl_variance = menu.new_item(ui.new_slider, G, GR,
@@ -2735,100 +2776,198 @@ do
         merge{"Limit", "\n", "hd::fl_limit"}, 1, 14, 13, true, "t")
     : record("aa","hd::fl_limit") : save()
 
-    -- -- Snap / Inverter (unchanged from hysteria system) ------------------
     hd.ui_inverter = menu.new_item(ui.new_hotkey, G, GR,
         merge{"Inverter", "\n", "hd::inverter"})
     : record("aa","hd::inverter") : save()
 
-    -- -- Logic helpers -----------------------------------------------------
+    -- =========================================================
+    --  PRESET SAVE / LOAD   (editor <-> presets table)
+    -- =========================================================
 
-    local function get_state_id()
-        if not entity.is_alive(entity.get_local_player()) then return "default" end
+    local function get_selected_id()
+        local label = hd.ui_state:get()
+        for _,s in ipairs(STATES) do
+            if s.label == label then return s.id end
+        end
+        return STATES[1].id
+    end
+
+    -- read widgets -> save into preset for current state
+    local function preset_save()
+        local p = hd.presets[get_selected_id()]
+        if not p then return end
+        p.yaw_left       = hd.ui_yaw_left:get()
+        p.yaw_right      = hd.ui_yaw_right:get()
+        p.yaw_rnd_mode   = hd.ui_yaw_rnd_mode:get()
+        p.yaw_rnd_left   = hd.ui_yaw_rnd_left:get()
+        p.yaw_rnd_right  = hd.ui_yaw_rnd_right:get()
+        p.yaw_jitter     = hd.ui_yaw_jitter:get()
+        p.yaw_jitter_deg = hd.ui_yaw_jitter_deg:get()
+        p.randomization  = hd.ui_randomization:get()
+        p.switch_chance  = hd.ui_switch_chance:get()
+        p.pitch          = hd.ui_pitch:get()
+        p.pitch_custom   = hd.ui_pitch_custom:get()
+        p.body_yaw       = hd.ui_body_yaw:get()
+        p.body_yaw_deg   = hd.ui_body_yaw_deg:get()
+        p.delay_from     = hd.ui_delay_from:get()
+        p.delay_to       = hd.ui_delay_to:get()
+        p.delay_count    = hd.ui_delay_count:get()
+        p.delay_tick1    = hd.ui_delay_tick1:get()
+        p.delay_rnd      = hd.ui_delay_rnd:get()
+    end
+
+    -- load preset for current state -> push into widgets
+    local function preset_load()
+        local p = hd.presets[get_selected_id()]
+        if not p then return end
+        hd.ui_yaw_left:set(p.yaw_left)
+        hd.ui_yaw_right:set(p.yaw_right)
+        hd.ui_yaw_rnd_mode:set(p.yaw_rnd_mode)
+        hd.ui_yaw_rnd_left:set(p.yaw_rnd_left)
+        hd.ui_yaw_rnd_right:set(p.yaw_rnd_right)
+        hd.ui_yaw_jitter:set(p.yaw_jitter)
+        hd.ui_yaw_jitter_deg:set(p.yaw_jitter_deg)
+        hd.ui_randomization:set(p.randomization)
+        hd.ui_switch_chance:set(p.switch_chance)
+        hd.ui_pitch:set(p.pitch)
+        hd.ui_pitch_custom:set(p.pitch_custom)
+        hd.ui_body_yaw:set(p.body_yaw)
+        hd.ui_body_yaw_deg:set(p.body_yaw_deg)
+        hd.ui_delay_from:set(p.delay_from)
+        hd.ui_delay_to:set(p.delay_to)
+        hd.ui_delay_count:set(p.delay_count)
+        hd.ui_delay_tick1:set(p.delay_tick1)
+        hd.ui_delay_rnd:set(p.delay_rnd)
+    end
+
+    -- wire up: any editor widget change -> auto-save current state preset
+    local editor_widgets = {
+        hd.ui_yaw_left, hd.ui_yaw_right,
+        hd.ui_yaw_rnd_mode, hd.ui_yaw_rnd_left, hd.ui_yaw_rnd_right,
+        hd.ui_yaw_jitter, hd.ui_yaw_jitter_deg, hd.ui_randomization,
+        hd.ui_switch_chance,
+        hd.ui_pitch, hd.ui_pitch_custom,
+        hd.ui_body_yaw, hd.ui_body_yaw_deg,
+        hd.ui_delay_from, hd.ui_delay_to, hd.ui_delay_count,
+        hd.ui_delay_tick1, hd.ui_delay_rnd,
+    }
+    for _, w in ipairs(editor_widgets) do
+        if w and w.set_callback then w:set_callback(preset_save) end
+    end
+
+    -- state combobox change -> save old, load new
+    hd.ui_state:set_callback(function()
+        preset_load()
+    end)
+
+    -- initial load
+    preset_load()
+
+    -- =========================================================
+    --  RUNTIME: get the active preset for the current game state
+    -- =========================================================
+    local function get_active_id()
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return "stand" end
         if localplayer.is_airborne then
             return localplayer.is_crouched and "airduck" or "air"
         end
         if localplayer.is_crouched then return "crouch" end
-        if localplayer.is_moving   then
+        if localplayer.is_moving then
             return software.is_slow_motion() and "walk" or "run"
         end
         return "stand"
     end
 
-    -- -- Jitter helpers ----------------------------------------------------
-    local function get_jitter_offset()
-        local mode = hd.ui_yaw_jitter:get()
-        local deg  = hd.ui_yaw_jitter_deg:get()
+    local function get_active_preset()
+        return hd.presets[get_active_id()] or hd.presets["stand"]
+    end
+
+    -- =========================================================
+    --  RUNTIME: per-preset logic helpers
+    -- =========================================================
+
+    local function get_jitter(p)
+        local mode = p.yaw_jitter
+        local deg  = p.yaw_jitter_deg
         if mode == "Off"    then return 0 end
         if mode == "Offset" then return hd.switch and deg or -deg end
         if mode == "Switch" then return hd.switch and deg or 0 end
-        if mode == "Random" then return math.random(-deg, deg) end
+        if mode == "Random" then return math.random(-math.abs(deg), math.abs(deg)) end
         if mode == "Spin"   then return lerp(-deg, deg, globals.curtime() * 3 % 2 - 1) end
         return 0
     end
 
-    local function get_body_yaw_offset()
-        local mode = hd.ui_body_yaw:get()
-        local deg  = hd.ui_body_yaw_deg:get()
-        if mode == "Off"        then return nil, nil end
-        if mode == "Static"     then return "Static", deg end
+    local function get_body(p)
+        local mode = p.body_yaw
+        local deg  = p.body_yaw_deg
+        if mode == "Off"          then return nil, nil end
+        if mode == "Static"       then return "Static", deg end
         if mode == "Freestanding" then return "Freestanding", deg end
-        if mode == "Jitter"     then return "Static", hd.switch and deg or -deg end
-        if mode == "X-way"      then
+        if mode == "Jitter"       then return "Static", hd.switch and deg or -deg end
+        if mode == "X-way"        then
             hd.jitter_t = (hd.jitter_t + 1) % 2
             return "Static", hd.jitter_t == 0 and deg or -deg
         end
-        if mode == "Spin"       then
+        if mode == "Spin" then
             return "Static", lerp(-deg, deg, globals.curtime() * 3 % 2 - 1)
         end
         return nil, nil
     end
 
-    -- -- Delay system ------------------------------------------------------
-    local function get_delay()
-        local from  = hd.ui_delay_from:get()
-        local to    = hd.ui_delay_to:get()
+    local function get_pitch_value(p)
+        local mode = p.pitch
+        if mode == "Down"   then return "Custom", -89 end
+        if mode == "Up"     then return "Custom",  89 end
+        if mode == "Zero"   then return "Custom",   0 end
+        if mode == "Custom" then return "Custom", clamp(p.pitch_custom, -89, 89) end
+        return "Custom", -89
+    end
+
+    local function get_delay(p)
+        local from = p.delay_from
+        local to   = p.delay_to
         if from == 0 and to == 0 then return 0 end
-        local count = hd.ui_delay_count:get()
-        local rnd   = hd.ui_delay_rnd:get()
-        local base  = (from == to) and from or math.random(math.min(from,to), math.max(from,to))
-        if rnd > 0 and math.random(100) <= rnd then
-            base = base + hd.ui_delay_tick1:get()
+        local base = (from == to) and from or math.random(math.min(from,to), math.max(from,to))
+        if p.delay_rnd > 0 and math.random(100) <= p.delay_rnd then
+            base = base + p.delay_tick1
         end
         return clamp(base, 0, 14)
     end
 
-    -- -- Fake lag apply ----------------------------------------------------
+    local function should_switch(p)
+        local chance = p.switch_chance
+        if chance >= 100 then return true end
+        if chance <= 0   then return false end
+        return math.random(100) <= chance
+    end
+
+    -- =========================================================
+    --  RUNTIME: global feature helpers
+    -- =========================================================
+
     local fl_overridden = false
     local function apply_fakelag()
-        local refs_en  = pui.reference("AA", "Fake lag", "Enabled")
-        local refs_amt = pui.reference("AA", "Fake lag", "Amount")
-        local refs_var = pui.reference("AA", "Fake lag", "Variance")
-        local refs_lim = pui.reference("AA", "Fake lag", "Limit")
+        local re  = pui.reference("AA", "Fake lag", "Enabled")
+        local ra  = pui.reference("AA", "Fake lag", "Amount")
+        local rv  = pui.reference("AA", "Fake lag", "Variance")
+        local rl  = pui.reference("AA", "Fake lag", "Limit")
 
         if not hd.ui_fl_on:get() then
             if fl_overridden then
-                refs_en:override()
-                refs_amt:override()
-                refs_var:override()
-                refs_lim:override()
+                re:override(); ra:override()
+                rv:override(); rl:override()
                 fl_overridden = false
             end
             return
         end
-
-        fl_overridden  = true
-        local mode  = hd.ui_fl_mode:get()
-        local limit = hd.ui_fl_limit:get()
-        local var   = hd.ui_fl_variance:get()
-
-        refs_en:override(true)
-        refs_amt:override(mode)
-        refs_lim:override(limit)
-        -- Variance is a slider reference
-        pcall(function() refs_var:override(var) end)
+        fl_overridden = true
+        re:override(true)
+        ra:override(hd.ui_fl_mode:get())
+        rl:override(hd.ui_fl_limit:get())
+        pcall(function() rv:override(hd.ui_fl_variance:get()) end)
     end
 
-    -- -- LC Breaker --------------------------------------------------------
     local function apply_vulnlc(cmd)
         local items = hd.ui_vulnlc:get()
         if not items or #items == 0 then return end
@@ -2836,27 +2975,24 @@ do
         if not (dt and dt.shift) then return end
         local lp = entity.get_local_player()
         if not lp then return end
-
-        if has(items, "Can't shoot") then
+        if has(items,"Can't shoot") then
             local wpn  = entity.get_player_weapon(lp)
             local info = wpn and csgo_weapons(wpn)
             if info and info.weapon_type_int ~= 9 then
                 local na   = entity.get_prop(lp,"m_flNextAttack") or 0
                 local st   = entity.get_prop(lp,"m_flSimulationTime") or 0
-                local diff = toticks(na - st - 1)
-                if diff > 0 then cmd.force_defensive = true; return end
+                if toticks(na - st - 1) > 0 then
+                    cmd.force_defensive = true; return
+                end
             end
         end
-
         if has(items,"Jumping")   and localplayer.is_airborne then
-            cmd.force_defensive = true
-        end
-        if has(items,"Crouching") and localplayer.is_crouched and not localplayer.is_airborne then
-            cmd.force_defensive = true
-        end
+            cmd.force_defensive = true end
+        if has(items,"Crouching") and localplayer.is_crouched
+           and not localplayer.is_airborne then
+            cmd.force_defensive = true end
     end
 
-    -- -- Safe head ---------------------------------------------------------
     local function apply_safe_head(ctx)
         local sh = hd.ui_safehead:get()
         if not sh or #sh == 0 then return end
@@ -2864,145 +3000,126 @@ do
         if not lp then return end
         local threat = client.current_threat()
         if not threat or entity.is_dormant(threat) then return end
-
-        local my_org = vector(entity.get_prop(lp,"m_vecOrigin"))
-        local th_org = vector(entity.get_origin(threat))
-        local hdiff  = my_org.z - th_org.z
-        local dist   = my_org:dist(th_org)
+        local my = vector(entity.get_prop(lp,"m_vecOrigin"))
+        local th = vector(entity.get_origin(threat))
+        local hdiff = my.z - th.z
+        local dist  = my:dist(th)
         local ex,ey,ez = client.eye_position()
-        local _,tent = client.trace_line(lp, ex,ey,ez,
-            th_org.x, th_org.y, th_org.z + 56)
-        local visible = tent == threat
-
-        local wpn    = entity.get_player_weapon(lp)
-        local wpn_i  = wpn and csgo_weapons(wpn)
-        local melee  = wpn_i and wpn_i.weapon_type_int == 0
-
-        if (has(sh,"Air melee") and localplayer.is_airborne and melee and hdiff > -32)
-        or (has(sh,"Height difference") and hdiff > 64 and (visible or dist < 1024)) then
-            ctx.yaw_offset      = 20
-            ctx.body_yaw        = "Static"
-            ctx.body_yaw_offset = 1
-            ctx.pitch           = "Custom"
-            ctx.pitch_offset    = 89
+        local _,tent = client.trace_line(lp,ex,ey,ez,th.x,th.y,th.z+56)
+        local vis = tent == threat
+        local wpn = entity.get_player_weapon(lp)
+        local wi  = wpn and csgo_weapons(wpn)
+        local mel = wi and wi.weapon_type_int == 0
+        if (has(sh,"Air melee") and localplayer.is_airborne and mel and hdiff > -32)
+        or (has(sh,"Height difference") and hdiff > 64 and (vis or dist < 1024)) then
+            ctx.yaw_offset=20; ctx.body_yaw="Static"; ctx.body_yaw_offset=1
+            ctx.pitch="Custom"; ctx.pitch_offset=89
         end
     end
 
-    -- -- Manual yaw --------------------------------------------------------
-    local function update_manual()
-        if not hd.ui_manual:get() then hd.manual_side = nil; return end
-        if hd.ui_man_reset:get() then hd.manual_side = nil; return end
-        if hd.ui_man_left:get()  then hd.manual_side =  1; return end
-        if hd.ui_man_right:get() then hd.manual_side = -1 end
-    end
-
-    -- -- Edge yaw / freestanding forwarding -------------------------------
-    local function apply_edge_freestand(ctx)
-        if hd.ui_edge_yaw:rawget() then
-            ctx.edge_yaw = true
-        end
-        if hd.ui_freestanding:rawget() then
-            ctx.freestanding = true
-        end
-    end
-
-    -- -- Random switch chance ----------------------------------------------
-    local function should_switch()
-        local chance = hd.ui_switch_chance:get()
-        if chance >= 100 then return true end
-        if chance <= 0   then return false end
-        return math.random(100) <= chance
-    end
-
-    -- -- Force defensive check ---------------------------------------------
-    local function check_force_def(cmd)
+    local function apply_force_def(cmd)
         if not hd.ui_force_def:get() then return end
-        local on_items = hd.ui_def_on:get()
-        if not on_items or #on_items == 0 then
+        local on  = hd.ui_def_on:get()
+        local mode= hd.ui_def_mode:get()
+        local dt  = software.is_double_tap()
+        local os  = software.is_on_shot_antiaim()
+        if mode == "Always on"
+        or (has(on,"Double tap") and dt)
+        or (has(on,"On shot")    and os)
+        or (has(on,"Hide shots") and (dt or os)) then
             cmd.force_defensive = true
-            return
         end
-        local mode = hd.ui_def_mode:get()
-        local dt   = software.is_double_tap()
-        local os   = software.is_on_shot_antiaim()
-
-        local trigger = false
-        if has(on_items,"Double tap")   and dt then trigger = true end
-        if has(on_items,"On shot")      and os then trigger = true end
-        if has(on_items,"Hide shots")   and (dt or os) then trigger = true end
-
-        if mode == "Always on" then trigger = true end
-
-        if trigger then cmd.force_defensive = true end
     end
 
-    -- -- Main AA application -----------------------------------------------
+    local function update_manual()
+        if not hd.ui_manual:get() then hd.manual_side=nil; return end
+        if hd.ui_man_reset:get()  then hd.manual_side=nil; return end
+        if hd.ui_man_left:get()   then hd.manual_side= 1; return end
+        if hd.ui_man_right:get()  then hd.manual_side=-1 end
+    end
+
+    -- =========================================================
+    --  MAIN CALLBACK
+    -- =========================================================
     local function hd_setup_command(cmd, ctx)
         if not hd.ui_enable:get() then return end
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        -- tick advance
         hd.lifetime = hd.lifetime + 1
-        if should_switch() then hd.switch = not hd.switch end
 
-        -- manual yaw
+        -- get active preset for current movement state
+        local p = get_active_preset()
+
+        -- switch / jitter tick
+        if should_switch(p) then hd.switch = not hd.switch end
+
+        -- manual yaw update
         update_manual()
 
         -- force defensive
-        check_force_def(cmd)
+        apply_force_def(cmd)
 
         -- LC breaker
         apply_vulnlc(cmd)
 
-        -- fake lag
+        -- fake lag (global, not per-state)
         apply_fakelag()
 
-        -- apply delay override
-        local delay = get_delay()
+        -- delay
+        local delay = get_delay(p)
         if delay > 0 then
             hd.delay_t = (hd.delay_t + 1) % delay
-            if hd.delay_t ~= 0 then
-                ctx.defensive_ticks = delay
-            end
+            if hd.delay_t ~= 0 then ctx.defensive_ticks = delay end
         end
 
-        -- manual yaw override
+        -- pitch (from preset)
+        local pitch_mode, pitch_val = get_pitch_value(p)
+        ctx.pitch        = pitch_mode
+        ctx.pitch_offset = pitch_val
+
+        -- yaw
         if hd.manual_side then
             ctx.yaw_base   = "Local view"
             ctx.yaw_offset = hd.manual_side * 90
             ctx.yaw_jitter = "Off"
             ctx.body_yaw   = "Static"
         else
-            -- yaw left/right with random spread
-            local left  = hd.ui_yaw_left:get()
-            local right = hd.ui_yaw_right:get()
-            local rnd_l = hd.ui_yaw_rnd_left:get()
-            local rnd_r = hd.ui_yaw_rnd_right:get()
-
-            if rnd_l > 0 then left  = left  + math.random(0, rnd_l)  end
-            if rnd_r > 0 then right = right + math.random(0, rnd_r) end
+            local left  = p.yaw_left
+            local right = p.yaw_right
+            if p.yaw_rnd_mode ~= "Off" then
+                left  = left  + math.random(0, math.abs(p.yaw_rnd_left))
+                right = right + math.random(0, math.abs(p.yaw_rnd_right))
+            end
 
             local base = hd.switch and norm_yaw(right) or norm_yaw(left)
-            local jit  = get_jitter_offset()
-            local rnd  = hd.ui_randomization:get()
-            if rnd > 0 then jit = jit + math.random(-rnd/2, rnd/2) end
+            local jit  = get_jitter(p)
+            if p.randomization > 0 then
+                jit = jit + math.random(
+                    -math.floor(p.randomization/2),
+                     math.floor(p.randomization/2))
+            end
 
             ctx.yaw        = "180"
             ctx.yaw_offset = norm_yaw(base + jit)
 
-            -- body yaw
-            local byaw_mode, byaw_deg = get_body_yaw_offset()
-            if byaw_mode then
-                ctx.body_yaw        = byaw_mode
-                ctx.body_yaw_offset = byaw_deg or 0
+            local bmode, bdeg = get_body(p)
+            if bmode then
+                ctx.body_yaw        = bmode
+                ctx.body_yaw_offset = bdeg or 0
             end
         end
 
-        -- edge yaw / freestanding
-        apply_edge_freestand(ctx)
+        -- edge yaw / freestanding hotkeys
+        if hd.ui_edge_yaw:rawget()    then ctx.edge_yaw    = true end
+        if hd.ui_freestanding:rawget() then ctx.freestanding = true end
 
-        -- safe head (overwrites if triggered)
+        -- inverter
+        if hd.ui_inverter:rawget() then
+            ctx.yaw_offset = norm_yaw(ctx.yaw_offset + 180)
+        end
+
+        -- safe head (may override above)
         apply_safe_head(ctx)
     end
 
@@ -3012,6 +3129,8 @@ do
 
     rawset(_G, "_hd_state", hd)
 end
+
+
 
 
 
@@ -3936,6 +4055,7 @@ LPH_NO_VIRTUALIZE(function ()
         local last_framerate        = 1 / globals.absoluteframetime()
         local last_server_framerate = 0.0
         local last_server_var       = 0.0
+        local glow_t    = 0.0
 
         local texture do
             local _b64 = "iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAC/UlEQVR4nO1USUxTURQ99w+dPh1oSxWI1gGVCKiBqMQqRWMMJBhXf6NRYyIYCWp0r+BaN+7UhQtduPimiRpt4kaJEUIUp6SoGJAmVaAMMraF9ve6KAGNRRcS48KTvLd4991zzrv35gH/AGhuLS0p0dwGCEtFKs75XAbAQwTA75f+lJQEQQAAT03jlbaapmvdAEoyIVX8VeKvlAlEbDabPUZP5TPnuooiRXFg9bYjTyg5faL3lRYAmgXgYjpb8mL1IjQ3E5jNcbsvuP3wmaItBVJq7xpTquFcvXtSl69bXWUbmFsYizR0EWJV4JYWlhxbzu47ero8HOpKdjxvl0KRXun2zfvJuuNNrhRZjxER4PdnLUl2YhUQBGKSjAcK88wsxMeE1MoqBJ72IJljF3JsVhYMYhmIGKhe5MnZ1AhYnw9X93D+i7z1Pu+2A2d5KhUXktMR2GyWdGfwnhB9EwxweuQQERLMvyemiooGqbPzuhd23w1lbfmumYFu3WKR4ch1iyOjCcjiLMYGBllZs5l4ItwW6+1o8npL3oXDrTMA+GdiVRVJ03SXt7bWt7cqUFq5yyR5y7j/5ROajH7B+9BH5Be44XS7Ubi2GLK3hG9dvkQrbHqypzuyvz90+xFUVYCm6cD346ZlZIbDwb6pWImpYJmujwy0i7496zAS9WB73Q7YHQ50PAjCIn/F0Ov7dPLUnrTR4JTPN14wAWBEo/NGpQXDKjRNQ1HFwRpPVX3y4ZtPrI8PoS0iYbSni4c+96F0Zy2eBx4jx+kCpXUq/ropYnZ7c8sqd29t73t4119djdbW1h9KQUTEy8vrLVaj+MWct8o+OTEIWcmFQTZBNhigOAvBuo7Y2GfMxsYRS8xiOPwBNnseZJlCn9qvloKZMpOy4JiZmZRxo94ff9WE8Ns6KdejyJODEFMzSCXiccloSYCQSiamrKIoWmBUBLPNhOnRXn1meuIOQAAt+ef3M7JIqCJUQIU6f6JBA6IbM3c9XQwsxDVomcYjMw3/8ffwDeRqFtr3d6CrAAAAAElFTkSuQmCC"
@@ -3981,6 +4101,27 @@ LPH_NO_VIRTUALIZE(function ()
             timer = timer + 1.0
         end
 
+        -- draw a single stat chip: [label value]
+        local function draw_chip(x, y, label, value, r, g, b, a, flags)
+            local lw, lh = renderer.measure_text(flags, label)
+            local vw, vh = renderer.measure_text(flags, value)
+            local PAD = 5
+            local IGAP = 3
+            local chip_w = PAD*2 + lw + IGAP + vw
+            local chip_h = math.max(lh, vh) + PAD
+
+            -- chip background
+            graphics.rectangle(x, y, chip_w, chip_h, 14, 14, 18, math.floor(160 * a), 3)
+            -- label (dim)
+            renderer.text(x + PAD, y + (chip_h - lh)*0.5,
+                140, 140, 155, math.floor(220 * a), flags, 0, label)
+            -- value (accent)
+            renderer.text(x + PAD + lw + IGAP, y + (chip_h - vh)*0.5,
+                r, g, b, math.floor(255 * a), flags, 0, value)
+
+            return chip_w + 4  -- advance
+        end
+
         function watermark.frame()
             local can_show = widgets.enabled:get() and widgets.items:have_key("Watermark")
             alpha = motion.interp(alpha, can_show, 0.045)
@@ -3993,73 +4134,109 @@ LPH_NO_VIRTUALIZE(function ()
             update_timer(nci, globals.frametime())
             if nci == nil then return end
 
+            local clock = globals.realtime()
+            glow_t = glow_t + globals.frametime()
+
             local flags  = "d"
             local r, g, b = widgets.color_picker:rawget()
-            local a      = math.floor(255 * alpha)
+            local a      = alpha
 
-            -- ── build info tokens ────────────────────────────────────
-            local tokens = {}
+            local screen = vector(client.screen_size())
 
+            -- animated glow pulse (0..1)
+            local pulse = (math.sin(glow_t * 1.6) + 1) * 0.5
+
+            -- -- collect display tokens --------------------------------
+            local nick = nil
             if widgets.display:have_key("Username") then
-                local nick = USERNAME
+                nick = USERNAME
                 if widgets.custom_name:get() then
                     local cn = ui.get(widgets.custom_name_value:get_ref())
                     if #cn ~= 0 then nick = cn end
                 end
-                tokens[#tokens+1] = nick
-            end
-            if widgets.display:have_key("Latency") then
-                local p = get_ping(nci)
-                if p then tokens[#tokens+1] = p end
-            end
-            if widgets.display:have_key("FPS") then
-                tokens[#tokens+1] = f("%dfps", math.floor(1 / get_framerate()))
-            end
-            if widgets.display:have_key("Time") then
-                tokens[#tokens+1] = f("%02d:%02d", client.system_time())
             end
 
-            -- ── layout ───────────────────────────────────────────────
-            local screen   = vector(client.screen_size())
-            local PAD_X, PAD_Y = 10, 6
-            local RADIUS   = 4
-            local SEP      = "  ·  "
+            local ping_str = widgets.display:have_key("Latency") and get_ping(nci) or nil
+            local fps_str  = widgets.display:have_key("FPS")
+                             and f("%dfps", math.floor(1 / get_framerate())) or nil
+            local time_str = widgets.display:have_key("Time")
+                             and f("%02d:%02d", client.system_time()) or nil
 
-            -- brand line:  "Zenith  ·  <tokens>"
-            local brand    = "Zenith"
-            local info_str = #tokens > 0 and (SEP .. merge(tokens, SEP)) or ""
-            local full_str = brand .. info_str
+            -- -- layout constants -------------------------------------
+            local PAD_X  = 10
+            local PAD_Y  = 7
+            local RADIUS = 5
+            local SEP    = 6     -- gap between chips
+            local LOGO_W = texture ~= nil and 26 or 0
 
-            local tw, th = renderer.measure_text(flags, full_str)
-            local bw, _  = renderer.measure_text(flags, brand)
+            -- measure brand text
+            local brand = "Zenith"
+            local bw, bh = renderer.measure_text(flags, brand)
+            local box_h  = bh + PAD_Y * 2
 
-            local logo_w  = texture ~= nil and 26 or 0
-            local box_w   = logo_w + PAD_X * 2 + tw
-            local box_h   = PAD_Y * 2 + th
+            -- build right-side chip list
+            local chips = {}
+            if nick      then chips[#chips+1] = { label="user", value=nick } end
+            if fps_str   then chips[#chips+1] = { label="fps",  value=fps_str } end
+            if ping_str  then chips[#chips+1] = { label="ping", value=ping_str } end
+            if time_str  then chips[#chips+1] = { label="time", value=time_str } end
 
+            -- measure chip total width
+            local chips_w = 0
+            for _, ch in ipairs(chips) do
+                local lw = renderer.measure_text(flags, ch.label)
+                local vw = renderer.measure_text(flags, ch.value)
+                chips_w = chips_w + 5*2 + lw + 3 + vw + 4
+            end
+            if chips_w > 0 then chips_w = chips_w + SEP end
+
+            -- total box
+            local box_w = LOGO_W + PAD_X * 2 + bw + (chips_w > 0 and PAD_X + chips_w or 0)
             local px = screen.x - 9 - box_w
             local py = 9
 
-            -- background pill
-            graphics.rectangle(px, py, box_w, box_h, 10, 10, 12, math.floor(180 * alpha), RADIUS)
+            -- -- draw outer card ---------------------------------------
+            -- main bg
+            graphics.rectangle(px, py, box_w, box_h, 10, 10, 14, math.floor(195 * a), RADIUS)
 
-            -- accent top bar (2px, accent colour)
-            renderer.rectangle(px + RADIUS, py - 1, box_w - RADIUS * 2, 1, r, g, b, a)
+            -- glow layer (accent colour, pulsing)
+            local glow_a = math.floor(22 * a * pulse)
+            renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, box_h, r, g, b, glow_a)
+            renderer.rectangle(px, py + RADIUS, box_w, box_h - RADIUS*2, r, g, b, glow_a)
 
-            -- logo
+            -- top accent bar (full glow width, 2px)
+            local bar_a = math.floor((180 + 60 * pulse) * a)
+            renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, 2, r, g, b, bar_a)
+
+            -- bottom accent bar (dim, 1px)
+            renderer.rectangle(px + RADIUS, py + box_h - 1, box_w - RADIUS*2, 1,
+                r, g, b, math.floor(50 * a))
+
+            -- -- logo --------------------------------------------------
             if texture ~= nil then
-                renderer.texture(texture, px + PAD_X, py + (box_h - 22) * 0.5, 22, 22, 255, 255, 255, a, "f")
+                renderer.texture(texture,
+                    px + PAD_X, py + (box_h - 22) * 0.5,
+                    22, 22, 255, 255, 255, math.floor(255 * a), "f")
             end
 
-            local tx = px + logo_w + PAD_X
-            local ty = py + (box_h - th) * 0.5
+            -- -- brand name --------------------------------------------
+            local tx = px + LOGO_W + PAD_X
+            local ty = py + (box_h - bh) * 0.5
+            renderer.text(tx, ty, r, g, b, math.floor(255 * a), flags, 0, brand)
 
-            -- brand in accent colour
-            renderer.text(tx, ty, r, g, b, a, flags, 0, brand)
+            -- separator line between brand and chips
+            if #chips > 0 then
+                local sep_x = tx + bw + SEP - 1
+                renderer.rectangle(sep_x, py + PAD_Y, 1, box_h - PAD_Y*2,
+                    r, g, b, math.floor(55 * a))
 
-            -- info tokens in white (dimmed)
-            if #info_str > 0 then
-                renderer.text(tx + bw, ty, 200, 200, 200, math.floor(210 * alpha), flags, 0, info_str)
+                -- -- chips row -----------------------------------------
+                local cx = sep_x + SEP
+                local cy = py + (box_h - (bh + PAD_Y - 2)) * 0.5
+                for _, ch in ipairs(chips) do
+                    local adv = draw_chip(cx, cy, ch.label, ch.value, r, g, b, a, flags)
+                    cx = cx + adv
+                end
             end
         end
     end
@@ -4145,7 +4322,7 @@ LPH_NO_VIRTUALIZE(function ()
 
     		{
     			ref = { ui.reference("AA", "Other", "On shot anti-aim") },
-    			name = "On Shot Anti-aim",
+    			name = "On Shot AA",
     			offset = 2
     		},
 
@@ -4181,7 +4358,7 @@ LPH_NO_VIRTUALIZE(function ()
 
     		{
     			ref = { ui.reference("Misc", "Miscellaneous", "Last second defuse") },
-    			name = "Last Second Defuse",
+    			name = "Last Sec Defuse",
     			offset = 1
     		},
 
@@ -4199,7 +4376,7 @@ LPH_NO_VIRTUALIZE(function ()
 
     		{
     			ref = { ui.reference("Misc", "Miscellaneous", "Automatic grenade release") },
-    			name = "Grenade Release",
+    			name = "Nade Release",
     			offset = 2
     		},
 
@@ -4214,10 +4391,17 @@ LPH_NO_VIRTUALIZE(function ()
         local hotkey_modes  = { "holding", "toggled", "disabled" }
         local flags         = "d"
 
+        -- mode label -> short badge text + colour modifier
+        local MODE_BADGE = {
+            ["holding"]  = { text = "HOLD",   dr=0,   dg=30,  db=50  },
+            ["toggled"]  = { text = "ON",     dr=0,   dg=50,  db=0   },
+            ["disabled"] = { text = "OFF",    dr=50,  dg=0,   db=0   },
+        }
+
         local function get_handle()
             local existent_keys = {}
             local all_active    = false
-            local name_width, mode_width = 0, 0
+            local name_width, badge_width = 0, 0
 
             for i = 1, #all_hotkeys do
                 local hotkey    = all_hotkeys[i]
@@ -4238,20 +4422,25 @@ LPH_NO_VIRTUALIZE(function ()
                 if mode == 0 then goto continue end
 
                 mode = hotkey_modes[mode] or "~"
-                mode = "[" .. mode .. "]"
+                local badge_info = MODE_BADGE[mode] or MODE_BADGE["holding"]
 
                 if active_keys[unique_id] == nil then
-                    active_keys[unique_id] = { alpha=0, height=0, name_width=0, mode_width=0, name=name, mode=mode }
+                    active_keys[unique_id] = {
+                        alpha=0, height=0,
+                        name_width=0, badge_width=0,
+                        name=name, mode=mode, badge=badge_info
+                    }
                 end
 
                 local value = active_keys[unique_id]
                 local nw, nh = renderer.measure_text(flags, name)
-                local mw, mh = renderer.measure_text(flags, mode)
-                value.name       = name
-                value.mode       = mode
-                value.height     = math.max(nh, mh)
-                value.name_width = nw
-                value.mode_width = mw
+                local bw2, bh2 = renderer.measure_text(flags, badge_info.text)
+                value.name        = name
+                value.mode        = mode
+                value.badge       = badge_info
+                value.height      = math.max(nh, bh2)
+                value.name_width  = nw
+                value.badge_width = bw2 + 8  -- badge pill padding
 
                 ::continue::
             end
@@ -4262,12 +4451,12 @@ LPH_NO_VIRTUALIZE(function ()
                 if v.alpha <= 0 then
                     active_keys[k] = nil
                 elseif active or v.alpha >= 0.25 then
-                    if name_width < v.name_width then name_width = v.name_width end
-                    if mode_width < v.mode_width then mode_width = v.mode_width end
+                    if name_width  < v.name_width  then name_width  = v.name_width  end
+                    if badge_width < v.badge_width then badge_width = v.badge_width end
                 end
             end
 
-            return active_keys, all_active, name_width, mode_width
+            return active_keys, all_active, name_width, badge_width
         end
 
         keybinds.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Keybinds")
@@ -4275,17 +4464,19 @@ LPH_NO_VIRTUALIZE(function ()
         : save()
 
         keybinds.window = windows.new("##keybinds", 0.025, 0.415)
-        keybinds.window:set_size(vector(125, 22))
+        keybinds.window:set_size(vector(130, 24))
 
         function keybinds.frame()
             local me = entity.get_local_player()
             if me == nil then return end
 
             local window   = keybinds.window
-            local hotkeys, all_active, name_width, mode_width = get_handle()
+            local hotkeys, all_active, name_width, badge_width = get_handle()
 
-            local menu_check    = ui.is_menu_open() or (next(hotkeys) ~= nil and all_active)
-            local can_show      = widgets.enabled:get() and widgets.items:have_key("Keybinds") and menu_check
+            local menu_check = ui.is_menu_open() or (next(hotkeys) ~= nil and all_active)
+            local can_show   = widgets.enabled:get()
+                               and widgets.items:have_key("Keybinds")
+                               and menu_check
 
             alpha   = motion.interp(alpha,   can_show, 0.045)
             holding = motion.interp(holding, (can_show and window:is_dragging()) and 0.6 or 1.0, 0.045)
@@ -4293,57 +4484,80 @@ LPH_NO_VIRTUALIZE(function ()
             if alpha <= 0 then return end
 
             local r, g, b = widgets.color_picker:get()
-            local a       = 255
             local PAD_X   = 10
             local PAD_Y   = 5
-            local RADIUS  = 4
-            local GAP     = 20
+            local RADIUS  = 5
+            local DOT_R   = 3
+            local ROW_H   = 18
+            local DOT_GAP = 8
 
-            local pos     = window.pos
+            -- measure header "keybinds"
+            local hw, hh = renderer.measure_text(flags, "keybinds")
 
-            -- measure header
-            local hw, hh  = renderer.measure_text(flags, "keybinds")
+            local min_w  = PAD_X * 4 + hw
+            local row_w  = DOT_R * 2 + DOT_GAP + name_width + 6 + badge_width + PAD_X * 2
+            width = motion.interp(width, math.max(min_w, row_w, 130), 0.045)
 
-            width = motion.interp(width, math.max(
-                PAD_X * 4 + hw,
-                RADIUS * 2 + name_width + mode_width + GAP,
-                125
-            ), 0.045)
-
-            local box_w   = math.floor(width + 0.85)
-            local box_h   = hh + PAD_Y * 2
+            local box_w = math.floor(width + 0.85)
+            local box_h = hh + PAD_Y * 2
 
             local ha = math.floor(255 * alpha * holding)
+            local pos = window.pos
 
-            -- background
-            graphics.rectangle(pos.x, pos.y, box_w, box_h, 10, 10, 12, math.floor(180 * alpha * holding), RADIUS)
-            -- accent bar
-            renderer.rectangle(pos.x + RADIUS, pos.y - 1, box_w - RADIUS * 2, 1, r, g, b, ha)
-
-            -- header label (accent colour)
+            -- -- header card -------------------------------------------
+            graphics.rectangle(pos.x, pos.y, box_w, box_h, 10, 10, 14, math.floor(190 * alpha * holding), RADIUS)
+            -- top accent bar
+            renderer.rectangle(pos.x + RADIUS, pos.y, box_w - RADIUS*2, 2, r, g, b, ha)
+            -- header label centred
             renderer.text(
                 pos.x + (box_w - hw) * 0.5,
                 pos.y + (box_h - hh) * 0.5,
                 r, g, b, ha, flags, 0, "keybinds"
             )
 
-            -- rows
-            local row_y = pos.y + box_h + 3
+            -- -- rows --------------------------------------------------
+            local row_y = pos.y + box_h + 2
 
             for _, v in pairs(active_keys) do
-                local row_a    = math.floor(255 * alpha * v.alpha * holding)
+                local row_a  = math.floor(255 * alpha * v.alpha * holding)
                 if row_a < 4 then goto skip end
 
-                local fade_a   = math.min(1.0, utils.map(alpha * v.alpha, 0.25, 1.0, 0.0, 1.2))
-                local val_a    = utils.map(box_w - RADIUS * 2 - v.name_width, 0.0, GAP, 0.0, 1.0, true)
+                local fade_a = math.min(1.0, (alpha * v.alpha - 0.0) / 0.8)
+                local rh     = utils.round(ROW_H * fade_a)
+                if rh < 2 then goto skip end
 
-                -- subtle row bg
-                graphics.rectangle(pos.x, row_y, box_w, v.height + 4, 15, 15, 18, math.floor(120 * fade_a * holding), 2)
+                -- row background (glass card)
+                graphics.rectangle(pos.x, row_y, box_w, rh, 14, 14, 20,
+                    math.floor(145 * fade_a * holding), 3)
 
-                renderer.text(pos.x + RADIUS, row_y + 2, 220, 220, 220, row_a, flags, 0, v.name)
-                renderer.text(pos.x + box_w - RADIUS - v.mode_width, row_y + 2, r, g, b, math.floor(row_a * val_a), flags, 0, v.mode)
+                -- left accent stripe
+                renderer.rectangle(pos.x, row_y + 2, 2, rh - 4, r, g, b,
+                    math.floor(200 * fade_a * holding))
 
-                row_y = row_y + math.floor(fade_a * (v.height + 3))
+                -- status dot
+                local dot_x = pos.x + PAD_X
+                local dot_y = row_y + rh * 0.5
+                local dr = math.min(255, r + v.badge.dr)
+                local dg = math.min(255, g + v.badge.dg)
+                local db = math.min(255, b + v.badge.db)
+                graphics.circle(dot_x + DOT_R, dot_y, DOT_R,
+                    dr, dg, db, math.floor(230 * fade_a * holding))
+
+                -- key name
+                local text_y = row_y + (rh - v.height) * 0.5
+                renderer.text(dot_x + DOT_R * 2 + DOT_GAP, text_y,
+                    230, 230, 235, row_a, flags, 0, v.name)
+
+                -- badge pill
+                local bp_w = v.badge_width
+                local bp_x = pos.x + box_w - PAD_X - bp_w
+                graphics.rectangle(bp_x, row_y + (rh - ROW_H * 0.7) * 0.5,
+                    bp_w, math.floor(ROW_H * 0.7),
+                    dr, dg, db, math.floor(40 * fade_a * holding), 2)
+                renderer.text(bp_x + 4, text_y,
+                    dr, dg, db, math.floor(row_a * 0.9), flags, 0, v.badge.text)
+
+                row_y = row_y + rh + 1
                 ::skip::
             end
 
@@ -4367,19 +4581,19 @@ LPH_NO_VIRTUALIZE(function ()
         window:set_size(vector(22, 22))
 
         local features = {
-            { get = software.is_double_tap,            text = "DT",  alpha = 0 },
-            { get = software.is_on_shot_antiaim,       text = "OS",  alpha = 0 },
-            { get = software.is_duck_peek_assist,      text = "FD",  alpha = 0 },
-            { get = software.is_minimum_damage_override, text = "DMG", alpha = 0 },
+            { get = software.is_double_tap,              text = "DT",  alpha = 0, hold_a = 0 },
+            { get = software.is_on_shot_antiaim,         text = "OS",  alpha = 0, hold_a = 0 },
+            { get = software.is_duck_peek_assist,        text = "FD",  alpha = 0, hold_a = 0 },
+            { get = software.is_minimum_damage_override, text = "DMG", alpha = 0, hold_a = 0 },
         }
 
         local function get_statement()
-            if software.is_edge()         then return "EDGE"   end
-            if safe_head.get()            then return "SAFE"   end
-            if localplayer.is_airborne    then return "AIR"    end
-            if localplayer.is_crouched    then return "CROUCH" end
-            if localplayer.is_moving      then
-                return software.is_slow_motion() and "S.WALK" or "RUN"
+            if software.is_edge()      then return "EDGE"   end
+            if safe_head.get()         then return "SAFE"   end
+            if localplayer.is_airborne then return "AIR"    end
+            if localplayer.is_crouched then return "CROUCH" end
+            if localplayer.is_moving   then
+                return software.is_slow_motion() and "WALK" or "RUN"
             end
             return "STAND"
         end
@@ -4395,16 +4609,21 @@ LPH_NO_VIRTUALIZE(function ()
             local wpn_info = csgo_weapons(wpn)
             if wpn_info == nil then return end
 
-            local menu_check   = ui.is_menu_open()
+            local clock        = globals.realtime()
             local alive_check  = entity.is_alive(me)
             local scoped_check = entity.get_prop(me, "m_bIsScoped")
-            local grenade_check = wpn_info.weapon_type_int == 9
-            local damage        = software.get_minimum_damage()
+            local grenade_check= wpn_info.weapon_type_int == 9
+            local menu_check   = ui.is_menu_open()
+            local damage       = software.get_minimum_damage()
 
-            local can_show_ind  = widgets.enabled:get() and widgets.items:have_key("Crosshair Indicator") and alive_check
-            local can_show_dmg  = widgets.enabled:get() and widgets.items:have_key("Damage Indicator")
-                                  and not (wpn_info.weapon_type_int == 0 or grenade_check) or menu_check
-            local can_move_dmg  = can_show_dmg and menu_check
+            local can_show_ind = widgets.enabled:get()
+                                 and widgets.items:have_key("Crosshair Indicator")
+                                 and alive_check
+            local can_show_dmg = (widgets.enabled:get()
+                                 and widgets.items:have_key("Damage Indicator")
+                                 and not (wpn_info.weapon_type_int == 0 or grenade_check))
+                                 or menu_check
+            local can_move_dmg = can_show_dmg and menu_check
 
             alpha         = motion.interp(alpha,         can_show_ind and (grenade_check and 0.4 or 1.0) or 0.0, 0.045)
             align         = motion.interp(align,         can_show_ind and scoped_check == 1 or false, 0.045)
@@ -4414,7 +4633,6 @@ LPH_NO_VIRTUALIZE(function ()
             damage_holding= motion.interp(damage_holding,(can_move_dmg and window:is_dragging()) and 0.6 or 1.0, 0.045)
 
             local flags  = "-d"
-            local clock  = globals.realtime()
             local screen = vector(client.screen_size())
             local center = screen * 0.5
 
@@ -4425,27 +4643,39 @@ LPH_NO_VIRTUALIZE(function ()
                 utils.breathe(clock + 0.5 - 0.5 * align)
             )
 
-            -- ── damage indicator ─────────────────────────────────────
+            -- -- damage indicator (draggable pill) ---------------------
             if damage_alpha > 0 then
                 local val   = utils.round(damage_value)
                 local text  = f("%d", val)
-                if damage == 0    then text = "AUTO" end
-                if val > 100      then text = f("HP +%d", val - 100) end
+                if damage == 0 then text = "AUTO" end
+                if val > 100   then text = f("HP +%d", val - 100) end
 
-                local mw, mh = renderer.measure_text(flags, text)
+                local dflags   = "d"
+                local mw, mh   = renderer.measure_text(dflags, text)
                 mw = mw + 1
                 local pos      = window.pos:clone()
-                local rect_sz  = vector(mw + 18, mh + 16)
+                local PAD      = 9
+                local rect_sz  = vector(mw + PAD*2, mh + 10)
                 local tx       = pos.x + (rect_sz.x - mw) * 0.5
                 local ty       = pos.y + (rect_sz.y - mh) * 0.5
+                local da       = damage_alpha * damage_holding
+
+                -- pill background
+                graphics.rectangle(pos.x, pos.y, rect_sz.x, rect_sz.y,
+                    12, 12, 16, math.floor(180 * da), 4)
+
+                -- top accent bar on pill
+                renderer.rectangle(pos.x + 4, pos.y, rect_sz.x - 8, 2,
+                    r1, g1, b1, math.floor(200 * da))
 
                 if damage_moving > 0 then
                     graphics.rectangle_outline(pos.x, pos.y, rect_sz.x, rect_sz.y,
-                        255, 255, 255, math.floor(128 * damage_moving * damage_holding), 7)
+                        255, 255, 255, math.floor(90 * damage_moving * damage_holding), 4)
                 end
 
                 local dr, dg, db = can_show_ind and r or r1, can_show_ind and g or g1, can_show_ind and b or b1
-                renderer.text(tx - 1, ty, dr, dg, db, math.floor(a * damage_alpha * damage_holding), flags, 0, text)
+                renderer.text(tx, ty, dr, dg, db,
+                    math.floor(a * damage_alpha * damage_holding), dflags, 0, text)
 
                 window:set_size(rect_sz)
                 window:update()
@@ -4453,45 +4683,77 @@ LPH_NO_VIRTUALIZE(function ()
 
             if alpha <= 0 then return end
 
-            -- ── crosshair block ──────────────────────────────────────
+            -- -- crosshair block --------------------------------------
             local cx = center.x + utils.round(10 * align)
-            local cy = center.y + 20
+            local cy = center.y + 22
 
-            -- Name line: "Z E N I T H" in accent with wave
+            -- "Z E N I T H" wave brand line
             do
                 local text   = "Z E N I T H"
                 local tw, th = renderer.measure_text(flags, text)
                 tw = tw + 1
-                local ox     = (tw * 0.5) * (1 - align)
+                local ox = (tw * 0.5) * (1 - align)
                 text = decorations.wave(text, clock, r1, g1, b1, 255, 255, 255, 255, 255)
-                graphics.text(cx - utils.round(ox), cy, r, g, b, math.floor(a * alpha), flags, 0, text)
-                cy = cy + th
+                graphics.text(cx - utils.round(ox), cy, r, g, b,
+                    math.floor(a * alpha), flags, 0, text)
+                cy = cy + th + 1
             end
 
-            -- State line
+            -- state badge (pill background)
             do
-                local text   = get_statement()
-                local tw, th = renderer.measure_text(flags, text)
+                local state  = get_statement()
+                local dflags = "d"
+                local tw, th = renderer.measure_text(dflags, state)
                 tw = tw + 1
-                local ox     = (tw * 0.5) * (1 - align)
-                renderer.text(cx - utils.round(ox), cy, 180, 180, 180, math.floor(a * alpha), flags, 0, text)
-                cy = cy + th
+                local BPAD   = 5
+                local bw     = tw + BPAD * 2
+                local bh     = th + 4
+                local bx     = cx - utils.round((bw * 0.5) * (1 - align * 0.5) + (tw * 0.5) * align)
+                local by     = cy
+
+                -- pill bg
+                graphics.rectangle(bx, by, bw, bh, 14, 14, 20,
+                    math.floor(140 * alpha), 3)
+                -- left glow stripe
+                renderer.rectangle(bx, by + 1, 2, bh - 2, r, g, b,
+                    math.floor(180 * alpha))
+
+                renderer.text(bx + BPAD, by + (bh - th) * 0.5,
+                    185, 185, 195, math.floor(220 * alpha), dflags, 0, state)
+                cy = cy + bh + 3
             end
 
-            -- Feature pills (DT / OS / FD / DMG)
+            -- feature pills (DT / OS / FD / DMG) -- each with background
             for i = 1, #features do
                 local feat = features[i]
-                feat.alpha = motion.interp(feat.alpha, can_show_ind and feat.get() or false, 0.045)
-                if feat.alpha <= 0 then goto cont end
+                feat.alpha  = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
+                feat.hold_a = motion.interp(feat.hold_a, feat.alpha > 0.5 and 1 or 0, 0.08)
+                if feat.alpha <= 0.02 then goto cont end
 
-                local fa     = feat.alpha * alpha
-                local text   = feat.text
-                local tw, th = renderer.measure_text(flags, text)
-                tw = tw + 1
-                local ox     = (tw * 0.5) * (1 - align)
+                do
+                    local fa     = feat.alpha * alpha
+                    local dflags = "d"
+                    local tw, th = renderer.measure_text(dflags, feat.text)
+                    tw = tw + 1
+                    local BPAD = 5
+                    local bw   = tw + BPAD * 2
+                    local bh   = th + 4
+                    local ox   = (bw * 0.5) * (1 - align)
+                    local bx   = cx - utils.round(ox)
+                    local by   = cy
 
-                renderer.text(cx - utils.round(ox), cy, r, g, b, math.floor(a * fa), flags, 0, text)
-                cy = cy + utils.round(th * feat.alpha)
+                    -- pill bg (accent tinted)
+                    graphics.rectangle(bx, by, bw, bh,
+                        math.floor(r * 0.12), math.floor(g * 0.12), math.floor(b * 0.12),
+                        math.floor(160 * fa), 3)
+                    renderer.rectangle(bx, by + 1, 2, bh - 2, r, g, b,
+                        math.floor(200 * fa))
+
+                    renderer.text(bx + BPAD, by + (bh - th) * 0.5,
+                        r, g, b, math.floor(255 * fa), dflags, 0, feat.text)
+
+                    cy = cy + utils.round((bh + 2) * feat.alpha)
+                end
                 ::cont::
             end
         end
@@ -5678,41 +5940,65 @@ client.set_event_callback("shutdown", antiaim.shutdown)
 
 
 -- ======================================================================
---  BRAND HEADER (paint_ui) — "Zenith · Elegance in Execution."
---  Drawn at the top of the AA column on every page, Umbrella-style
+--  BRAND HEADER -- animated Zenith � Elegance in Execution.
 -- ======================================================================
 do
     local _bh_alpha = 0.0
+    local _bh_t     = 0.0
+
     client.set_event_callback('paint_ui', function()
         local is_open = ui.is_menu_open()
         _bh_alpha = motion.interp(_bh_alpha, is_open and 1 or 0, 0.055)
         if _bh_alpha <= 0.01 then return end
 
+        _bh_t = _bh_t + globals.frametime()
+
         local r, g, b = widgets.color_picker:rawget()
         local a       = math.floor(255 * _bh_alpha)
         local flags   = "d"
 
-        -- position: top-left of the Anti-aimbot angles group area
-        -- offset ~12px from left edge, ~45px from top
-        local sx, sy = client.screen_size()
-        local px = math.floor(sx * 0.012)
-        local py = math.floor(sy * 0.048)
+        local sx, sy  = client.screen_size()
+        local px      = math.floor(sx * 0.012)
+        local py      = math.floor(sy * 0.048)
 
-        -- "Zenith" in accent colour, "· Elegance in Execution." in dim white
         local brand   = "Zenith"
-        local tagline = " · Elegance in Execution."
+        local tagline = "  Elegance in Execution."
 
-        local bw, bh = renderer.measure_text(flags, brand)
-        local tw, _  = renderer.measure_text(flags, tagline)
+        local bw, bh  = renderer.measure_text(flags, brand)
+        local tw, _   = renderer.measure_text(flags, tagline)
+        local sep_w   = bw + tw
 
+        -- animated shimmer: a bright vertical band scrolls across the brand text
+        local shimmer  = (_bh_t * 0.8) % 1.0
+        local shimmer_x = px + shimmer * sep_w
+        local shimmer_a = math.floor(28 * _bh_alpha * (1 - math.abs(shimmer - 0.5) * 2))
+
+        -- glow bar behind separator line
+        renderer.rectangle(px, py + bh + 2, sep_w, 2, r, g, b, math.floor(18 * _bh_alpha))
+
+        -- separator line  (1px, accent)
+        renderer.rectangle(px, py + bh + 3, sep_w, 1, r, g, b, math.floor(90 * _bh_alpha))
+
+        -- shimmer band (bright white vertical slice)
+        if shimmer_a > 0 then
+            renderer.rectangle(math.floor(shimmer_x - 2), py, 4, bh,
+                255, 255, 255, shimmer_a)
+        end
+
+        -- "�" separator between brand and tagline (accent colour)
+        renderer.text(px + bw, py, r, g, b,
+            math.floor(180 * _bh_alpha), flags, 0, "  \xc2\xb7")
+        local dot_w = renderer.measure_text(flags, "  \xc2\xb7")
+
+        -- brand name (accent)
         renderer.text(px, py, r, g, b, a, flags, 0, brand)
-        renderer.text(px + bw, py, 160, 160, 160, math.floor(200 * _bh_alpha), flags, 0, tagline)
 
-        -- thin separator line
-        local line_w = bw + tw
-        renderer.rectangle(px, py + bh + 3, line_w, 1, r, g, b, math.floor(80 * _bh_alpha))
+        -- tagline (dim grey, fades in slightly delayed)
+        renderer.text(px + bw + dot_w, py,
+            155, 155, 165, math.floor(190 * _bh_alpha), flags, 0, tagline)
     end)
 end
+
 
 client.set_event_callback("paint_ui", function() if gui and gui.frame then gui.frame() end end)
 client.set_event_callback("paint_ui", windows.frame)
@@ -5837,23 +6123,21 @@ menu.set_callback(function()
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     -- ── DEFENSIVE ────────────────────────────────────────────────────
     if page == "Builder" then
-        -- Zenith AA (screenshot layout)
         local hd = _G._hd_state
         if hd then
-            -- LEFT PANEL: Per-state AA config
-            _safe_display(hd.ui_state)
-            _safe_display(hd.ui_team)
-
-            _safe_display(hd.ui_force_def)
-            if hd.ui_force_def:get() then
-                _safe_display(hd.ui_def_on)
-                _safe_display(hd.ui_def_mode)
-            end
-
-            _safe_display(hd.ui_custom_ticks)
             _safe_display(hd.ui_enable)
-
             if hd.ui_enable:get() then
+
+                -- State editor selector
+                _safe_display(hd.ui_state)
+
+                -- Pitch
+                _safe_display(hd.ui_pitch)
+                if hd.ui_pitch:get() == "Custom" then
+                    _safe_display(hd.ui_pitch_custom)
+                end
+
+                -- Yaw
                 _safe_display(hd.ui_yaw_left)
                 _safe_display(hd.ui_yaw_right)
 
@@ -5868,20 +6152,22 @@ menu.set_callback(function()
                     _safe_display(hd.ui_yaw_jitter_deg)
                 end
                 _safe_display(hd.ui_randomization)
+                _safe_display(hd.ui_switch_chance)
 
+                -- Body yaw
                 _safe_display(hd.ui_body_yaw)
                 if hd.ui_body_yaw:get() ~= "Off" then
                     _safe_display(hd.ui_body_yaw_deg)
                 end
 
+                -- Delay
                 _safe_display(hd.ui_delay_from)
                 _safe_display(hd.ui_delay_to)
                 _safe_display(hd.ui_delay_count)
                 _safe_display(hd.ui_delay_tick1)
                 _safe_display(hd.ui_delay_rnd)
-                _safe_display(hd.ui_switch_chance)
 
-                -- RIGHT PANEL: Fake lag column
+                -- Fake lag (right panel / global)
                 _safe_display(hd.ui_fl_settings)
                 _safe_display(hd.ui_vulnlc)
                 _safe_display(hd.ui_edge_yaw)
@@ -5897,6 +6183,12 @@ menu.set_callback(function()
                 _safe_display(hd.ui_avoid_bs)
                 _safe_display(hd.ui_safehead)
 
+                _safe_display(hd.ui_force_def)
+                if hd.ui_force_def:get() then
+                    _safe_display(hd.ui_def_on)
+                    _safe_display(hd.ui_def_mode)
+                end
+
                 _safe_display(hd.ui_fl_on)
                 if hd.ui_fl_on:get() then
                     _safe_display(hd.ui_fl_mode)
@@ -5904,7 +6196,6 @@ menu.set_callback(function()
                     _safe_display(hd.ui_fl_limit)
                 end
 
-                -- Inverter hotkey
                 _safe_display(hd.ui_inverter)
             end
         end
