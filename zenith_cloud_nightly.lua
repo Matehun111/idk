@@ -4967,15 +4967,6 @@ do
 
     shared.socket = nil
     shared.data = { }
-
---- region shared
-do
-    shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
-    :record('settings', 'shared::enabled')
-    :save()
-
-    shared.socket = nil
-    shared.data = { }
     shared.icon_data = { }
     shared.link = "wss://zenith.dev/ws"
     shared.failed_connections = 0
