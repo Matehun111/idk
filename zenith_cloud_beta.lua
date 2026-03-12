@@ -4883,6 +4883,81 @@ do
 end
 
 
+--- hit marker zenith
+do
+    local ctx = {
+        target = 0,
+        pos = vector()
+    }
+
+    local pending_markers = { }
+
+    function hit_marker.frame()
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        local realtime = globals.realtime()
+        for i, data in ipairs(pending_markers) do
+            local diff = data[3] - realtime
+
+            local alpha = math.min(1, diff)--diff < 1 and math.max(0, diff) or 1
+
+            local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
+
+            local r, g, b = unpack(data[4])
+            renderer.text(x, y, r, g, b, 255 * alpha, "c", nil, data[2])
+
+            if data[3] < realtime then
+                table.remove(pending_markers, i)
+            end
+        end
+    end
+
+    function hit_marker.aim_fire(e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        ctx.target = e.target
+        ctx.pos = vector(e.x, e.y, e.z)
+    end
+
+    function hit_marker.aim_hit(e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        if ctx.target == e.target then
+            table.insert(
+                pending_markers,
+                {
+                    ctx.pos, tostring(e.damage),
+                    globals.realtime() + 3,
+                    e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
+                }
+            )
+        end
+    end
+
+    function hit_marker.round_prestart()
+        table.clear(pending_markers)
+    end
+end
+
+
 --- region shared
 do
     shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
