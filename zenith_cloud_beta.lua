@@ -979,7 +979,7 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label = group_fakelag:label('\affffffff Zenith \aaaaaaaaff· \a999999ff Elegance in Execution.')
+    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff�  \a666666ffElegance in Execution.')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -1007,10 +1007,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup = group_fakelag:label(string.format('\aaaaaaaaff• \affffffffUser \aaaaaaaaff~ \a71bc78ff%s', USERNAME))
-shared.fl_build = group_fakelag:label('\aaaaaaaaff• \affffffffBranch \aaaaaaaaff~ \a71bc78ffBeta')
-shared.fl_version = group_fakelag:label('\aaaaaaaaff• \affffffffVersion \aaaaaaaaff~ \a71bc78ff3.0')
-shared.fl_online = group_fakelag:label('\aaaaaaaaff• \affffffffOnline \aaaaaaaaff~ \affd700ff...')
+shared.fl_whatsup = group_fakelag:label(string.format('\a888888ff | \affffffffUser   \a888888ff> \a71bc78ff%s', USERNAME))
+shared.fl_build = group_fakelag:label('\a888888ff | \affffffffBranch  \a888888ff> \a71bc78ffBeta')
+shared.fl_version = group_fakelag:label('\a888888ff | \affffffffVersion  \a888888ff> \a71bc78ff3.0')
+shared.fl_online = group_fakelag:label('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff...')
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1040,7 +1040,7 @@ do
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('\\aaaaaaaffâ¢ \\affffffff Online \\aaaaaaaff~ %s%d', col, n))
+            shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> %s%d', col, n))
         end
     end
 
@@ -4707,7 +4707,7 @@ do
 
             shared.online_label:set(string.format('\\aaaaaaaffâ¢ \\affffffff Online \\aaaaaaaff~ \\affd700ff%d', online))
             if shared.fl_online then
-                shared.fl_online:set(string.format('\aaaaaaaaff• \affffffffOnline \aaaaaaaaff~ \affd700ff%d', online))
+                shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff%d', online))
             end
             -- leaderboard from data if available
             if shared.fl_leaderboard and shared.data then
