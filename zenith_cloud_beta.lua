@@ -2873,8 +2873,8 @@ do
 
     -- save current builder values back to preset when state changes
     local function builder_save()
-        local idx  = hd.ui_builder_state:get_index and hd.ui_builder_state:get_index() or 1
-        local sid  = STATES[idx] and STATES[idx].id or "default"
+        local sel  = hd.ui_builder_state:get()
+        local sid  = (function() for _,s in ipairs(STATES) do if s.label==sel then return s.id end end return "default" end)()
         local p    = hd.presets[sid]
         if not p then return end
         p.yaw_offset   = hd.ui_b_yoff:get()
@@ -2889,8 +2889,8 @@ do
     end
 
     local function builder_load()
-        local idx = hd.ui_builder_state:get_index and hd.ui_builder_state:get_index() or 1
-        local sid = STATES[idx] and STATES[idx].id or "default"
+        local sel = hd.ui_builder_state:get()
+        local sid = (function() for _,s in ipairs(STATES) do if s.label==sel then return s.id end end return "default" end)()
         local p   = hd.presets[sid]
         if not p then return end
         hd.ui_b_yoff:set(p.yaw_offset)
