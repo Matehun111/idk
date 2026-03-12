@@ -2319,6 +2319,12 @@ do
 
         if ctx.pitch ~= nil then
             override.set(software.aa.angles.pitch[1], ctx.pitch)
+            -- apply custom offset immediately, don't rely on ui.get to see the override
+            if ctx.pitch_offset ~= nil then
+                override.set(software.aa.angles.pitch[2], utils.clamp(ctx.pitch_offset, -89, 89))
+            else
+                override.unset(software.aa.angles.pitch[2])
+            end
         end
 
         if ctx.yaw_base ~= nil then
@@ -2347,15 +2353,8 @@ do
             override.set(software.aa.angles.roll, ctx.roll)
         end
 
-        local pitch_value = ui.get(software.aa.angles.pitch[1])
         local yaw_value = ui.get(software.aa.angles.yaw[1])
         local body_yaw_value = ui.get(software.aa.angles.body_yaw[1])
-
-        if pitch_value == "Custom" then
-            if ctx.pitch_offset ~= nil then
-                override.set(software.aa.angles.pitch[2], utils.clamp(ctx.pitch_offset, -89, 89))
-            end
-        end
 
         if yaw_value ~= "Off" then
             if ctx.yaw_offset ~= nil then
@@ -2632,7 +2631,7 @@ do
     -- Pitch
     hd.ui_pitch = menu.new_item(ui.new_combobox, G, GR,
         merge{"Pitch", "\n", "hd::pitch"},
-        {"Down","Up","Custom","Zero"})
+        {"Down","Up","Minimal","Zero","Random","Custom"})
     : record("aa","hd::pitch") : save()
 
     hd.ui_pitch_custom = menu.new_item(ui.new_slider, G, GR,
@@ -2917,12 +2916,15 @@ do
     end
 
     local function get_pitch_value(p)
+        -- returns native GS pitch[1] string + optional pitch[2] offset (nil = don't set)
         local mode = p.pitch
-        if mode == "Down"   then return "Custom", -89 end
-        if mode == "Up"     then return "Custom",  89 end
-        if mode == "Zero"   then return "Custom",   0 end
-        if mode == "Custom" then return "Custom", clamp(p.pitch_custom, -89, 89) end
-        return "Custom", -89
+        if mode == "Down"    then return "Down",    nil end
+        if mode == "Up"      then return "Up",      nil end
+        if mode == "Minimal" then return "Minimal", nil end
+        if mode == "Random"  then return "Random",  nil end
+        if mode == "Zero"    then return "Custom",  0   end
+        if mode == "Custom"  then return "Custom",  clamp(p.pitch_custom, -89, 89) end
+        return "Down", nil
     end
 
     local function get_delay(p)
@@ -3816,70 +3818,71 @@ end
 
 --- region evaded_shot_log
 do
-    -- Detect when an ENEMY shoots near local player but misses (evaded shot).
-    -- Method: bullet_impact event fires at the world hit position.
-    -- If distance from impact to local player's origin is within EVADE_RADIUS,
-    -- and the bullet was fired by an enemy, we count it as an evaded shot.
+    -- Detect when an ENEMY bullet passes near local player but does NOT hit them.
+    -- player_hurt tracks actual hits so we can exclude them from "evaded" counts.
 
-    local EVADE_RADIUS    = 96   -- units - within ~3 player widths
-    local EVADE_DURATION  = 4.0
-    local KIND_EVADE      = { icon = '\xe2\x9c\x93', r = 90, g = 200, b = 255 }  -- ✓ teal
+    local EVADE_RADIUS   = 80
+    local EVADE_DURATION = 4.0
+    local KIND_EVADE     = { icon = '\xe2\x9c\x93', r = 90, g = 200, b = 255 }
 
-    local function push_evade()
+    local last_hurt_tick = -999
+
+    client.set_event_callback('player_hurt', function(e)
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local uid = e['userid']
+        if uid and client.userid_to_entindex(uid) == lp then
+            last_hurt_tick = globals.tickcount()
+        end
+    end)
+
+    local function push_evade(shooter)
         local reg = _G._zn_regular
         if not reg then return end
+        local name = entity.get_player_name(shooter) or '?'
         local MAX = 10
         if #reg >= MAX then table.remove(reg, 1) end
         reg[#reg + 1] = {
             kind     = KIND_EVADE,
-            text     = 'Evaded shot',
+            text     = 'Evaded  \a[nick]' .. name .. '\aFFFFFFFF',
             lifetime = EVADE_DURATION,
             alpha    = 0.0,
             slide    = 0.0,
         }
+        client.color_log(90, 200, 255, '[Zenith]\0')
+        client.color_log(180, 180, 180, ' Evaded shot from \0')
+        client.color_log(255, 180, 80, name)
     end
 
     client.set_event_callback('bullet_impact', function(e)
-        -- only care if the AA log feature is enabled
         if not settings.tweaks_enable:get() then return end
         if not settings.tweaks:have_key('Log Aimbot Shots') then return end
 
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        -- the userid who fired the shot
+        -- bullet actually hit the player this tick = not an evade
+        if globals.tickcount() == last_hurt_tick then return end
+
         local shooter_id = e['userid']
         if not shooter_id then return end
         local shooter = client.userid_to_entindex(shooter_id)
-        if not shooter or shooter == lp then return end  -- ignore own shots
-        if not entity.is_enemy(shooter) then return end   -- ignore teammates
+        if not shooter or shooter == lp then return end
+        if not entity.is_enemy(shooter) then return end
 
-        -- get impact position
-        local ix = e['x']
-        local iy = e['y']
-        local iz = e['z']
+        local ix, iy, iz = e['x'], e['y'], e['z']
         if not (ix and iy and iz) then return end
 
-        -- get local player position
         local ox, oy, oz = entity.get_prop(lp, 'm_vecOrigin')
         if not (ox and oy and oz) then return end
+        oz = oz + 54  -- approximate center-mass height
 
-        -- distance check (squared for performance)
         local dx, dy, dz = ix-ox, iy-oy, iz-oz
-        local dist_sq = dx*dx + dy*dy + dz*dz
-        if dist_sq > EVADE_RADIUS * EVADE_RADIUS then return end
+        if (dx*dx + dy*dy + dz*dz) > EVADE_RADIUS * EVADE_RADIUS then return end
 
-        -- Log to on-screen event log
-        push_evade()
-
-        -- Log to console
-        local name = entity.get_player_name(shooter) or '?'
-        client.color_log(90, 200, 255, '[Zenith]\0')
-        client.color_log(180, 180, 180, ' Evaded shot from \0')
-        client.color_log(255, 180, 80,  name)
+        push_evade(shooter)
     end)
 end
-
 
 --- region eventlogs  (REWORKED)
 do
@@ -3909,6 +3912,7 @@ do
         { kind={ icon='\xe2\x9c\x96', r=220,g=80, b=80  }, text='Miss  \a[reason]correction',                                                  alpha=1, slide=1 },
         { kind={ icon='\xe2\x9c\x96', r=100,g=140,b=255 }, text='Miss  \a[reason]unregistered shot',                                           alpha=1, slide=1 },
         { kind={ icon='\xe2\x9c\x96', r=255,g=200,b=60  }, text='Miss  \a[reason]spread',                                                      alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x93', r=90, g=200,b=255 }, text='Evaded  \a[nick]xXsniper420Xx\aFFFFFFFF',                                    alpha=1, slide=1 },
     }
 
     local widget = windows.new('##EventLogsV2', 0.78, 0.70)
@@ -4144,104 +4148,70 @@ LPH_NO_VIRTUALIZE(function ()
 
             local screen = vector(client.screen_size())
 
-            -- animated glow pulse (0..1)
-            local pulse = (math.sin(glow_t * 1.6) + 1) * 0.5
-
-            -- -- collect display tokens --------------------------------
-            local nick = nil
-            if widgets.display:have_key("Username") then
-                nick = USERNAME
-                if widgets.custom_name:get() then
-                    local cn = ui.get(widgets.custom_name_value:get_ref())
-                    if #cn ~= 0 then nick = cn end
-                end
+            -- collect display tokens
+        local tokens = {}
+        if widgets.display:have_key("Username") then
+            local nick = USERNAME
+            if widgets.custom_name:get() then
+                local cn = ui.get(widgets.custom_name_value:get_ref())
+                if #cn ~= 0 then nick = cn end
             end
+            tokens[#tokens+1] = nick
+        end
+        if widgets.display:have_key("Latency") then
+            local p = get_ping(nci)
+            if p then tokens[#tokens+1] = p end
+        end
+        if widgets.display:have_key("FPS") then
+            tokens[#tokens+1] = f("%dfps", math.floor(1 / get_framerate()))
+        end
+        if widgets.display:have_key("Time") then
+            tokens[#tokens+1] = f("%02d:%02d", client.system_time())
+        end
 
-            local ping_str = widgets.display:have_key("Latency") and get_ping(nci) or nil
-            local fps_str  = widgets.display:have_key("FPS")
-                             and f("%dfps", math.floor(1 / get_framerate())) or nil
-            local time_str = widgets.display:have_key("Time")
-                             and f("%02d:%02d", client.system_time()) or nil
+        -- layout
+        local PAD_X  = 10
+        local PAD_Y  = 6
+        local RADIUS = 4
+        local SEP    = "  |  "
+        local LOGO_W = texture ~= nil and 26 or 0
 
-            -- -- layout constants -------------------------------------
-            local PAD_X  = 10
-            local PAD_Y  = 7
-            local RADIUS = 5
-            local SEP    = 6     -- gap between chips
-            local LOGO_W = texture ~= nil and 26 or 0
+        local brand    = "Zenith"
+        local info_str = #tokens > 0 and (SEP .. table.concat(tokens, SEP)) or ""
+        local full_str = brand .. info_str
 
-            -- measure brand text
-            local brand = "Zenith"
-            local bw, bh = renderer.measure_text(flags, brand)
-            local box_h  = bh + PAD_Y * 2
+        local bw, bh  = renderer.measure_text(flags, brand)
+        local tw, th  = renderer.measure_text(flags, full_str)
 
-            -- build right-side chip list
-            local chips = {}
-            if nick      then chips[#chips+1] = { label="user", value=nick } end
-            if fps_str   then chips[#chips+1] = { label="fps",  value=fps_str } end
-            if ping_str  then chips[#chips+1] = { label="ping", value=ping_str } end
-            if time_str  then chips[#chips+1] = { label="time", value=time_str } end
+        local box_w   = LOGO_W + PAD_X * 2 + tw
+        local box_h   = PAD_Y * 2 + bh
 
-            -- measure chip total width
-            local chips_w = 0
-            for _, ch in ipairs(chips) do
-                local lw = renderer.measure_text(flags, ch.label)
-                local vw = renderer.measure_text(flags, ch.value)
-                chips_w = chips_w + 5*2 + lw + 3 + vw + 4
-            end
-            if chips_w > 0 then chips_w = chips_w + SEP end
+        local px = screen.x - 9 - box_w
+        local py = 9
+        local ia = math.floor(255 * a)
 
-            -- total box
-            local box_w = LOGO_W + PAD_X * 2 + bw + (chips_w > 0 and PAD_X + chips_w or 0)
-            local px = screen.x - 9 - box_w
-            local py = 9
+        -- background
+        graphics.rectangle(px, py, box_w, box_h, 10, 10, 13, math.floor(185 * a), RADIUS)
+        -- top accent bar
+        renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, 2, r, g, b, ia)
 
-            -- -- draw outer card ---------------------------------------
-            -- main bg
-            graphics.rectangle(px, py, box_w, box_h, 10, 10, 14, math.floor(195 * a), RADIUS)
+        -- logo
+        if texture ~= nil then
+            renderer.texture(texture, px + PAD_X, py + (box_h - 22) * 0.5,
+                22, 22, 255, 255, 255, ia, "f")
+        end
 
-            -- glow layer (accent colour, pulsing)
-            local glow_a = math.floor(22 * a * pulse)
-            renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, box_h, r, g, b, glow_a)
-            renderer.rectangle(px, py + RADIUS, box_w, box_h - RADIUS*2, r, g, b, glow_a)
+        local tx = px + LOGO_W + PAD_X
+        local ty = py + (box_h - bh) * 0.5
 
-            -- top accent bar (full glow width, 2px)
-            local bar_a = math.floor((180 + 60 * pulse) * a)
-            renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, 2, r, g, b, bar_a)
+        -- brand in accent
+        renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
 
-            -- bottom accent bar (dim, 1px)
-            renderer.rectangle(px + RADIUS, py + box_h - 1, box_w - RADIUS*2, 1,
-                r, g, b, math.floor(50 * a))
-
-            -- -- logo --------------------------------------------------
-            if texture ~= nil then
-                renderer.texture(texture,
-                    px + PAD_X, py + (box_h - 22) * 0.5,
-                    22, 22, 255, 255, 255, math.floor(255 * a), "f")
-            end
-
-            -- -- brand name --------------------------------------------
-            local tx = px + LOGO_W + PAD_X
-            local ty = py + (box_h - bh) * 0.5
-            renderer.text(tx, ty, r, g, b, math.floor(255 * a), flags, 0, brand)
-
-            -- separator line between brand and chips
-            if #chips > 0 then
-                local sep_x = tx + bw + SEP - 1
-                renderer.rectangle(sep_x, py + PAD_Y, 1, box_h - PAD_Y*2,
-                    r, g, b, math.floor(55 * a))
-
-                -- -- chips row -----------------------------------------
-                local cx = sep_x + SEP
-                local cy = py + (box_h - (bh + PAD_Y - 2)) * 0.5
-                for _, ch in ipairs(chips) do
-                    local adv = draw_chip(cx, cy, ch.label, ch.value, r, g, b, a, flags)
-                    cx = cx + adv
-                end
-            end
+        -- info tokens dim white
+        if #info_str > 0 then
+            renderer.text(tx + bw, ty, 180, 180, 185, math.floor(200 * a), flags, 0, info_str)
         end
     end
-
         --- region keybinds
     do
         local alpha   = 0.0
@@ -4393,12 +4363,6 @@ LPH_NO_VIRTUALIZE(function ()
         local flags         = "d"
 
         -- mode label -> short badge text + colour modifier
-        local MODE_BADGE = {
-            ["holding"]  = { text = "HOLD",   dr=0,   dg=30,  db=50  },
-            ["toggled"]  = { text = "ON",     dr=0,   dg=50,  db=0   },
-            ["disabled"] = { text = "OFF",    dr=50,  dg=0,   db=0   },
-        }
-
         local function get_handle()
             local existent_keys = {}
             local all_active    = false
@@ -4423,25 +4387,24 @@ LPH_NO_VIRTUALIZE(function ()
                 if mode == 0 then goto continue end
 
                 mode = hotkey_modes[mode] or "~"
-                local badge_info = MODE_BADGE[mode] or MODE_BADGE["holding"]
+                mode = "[" .. mode .. "]"
 
                 if active_keys[unique_id] == nil then
                     active_keys[unique_id] = {
                         alpha=0, height=0,
-                        name_width=0, badge_width=0,
-                        name=name, mode=mode, badge=badge_info
+                        name_width=0, mode_width=0,
+                        name=name, mode=mode
                     }
                 end
 
                 local value = active_keys[unique_id]
                 local nw, nh = renderer.measure_text(flags, name)
-                local bw2, bh2 = renderer.measure_text(flags, badge_info.text)
+                local mw, mh = renderer.measure_text(flags, mode)
                 value.name        = name
                 value.mode        = mode
-                value.badge       = badge_info
-                value.height      = math.max(nh, bh2)
+                value.height      = math.max(nh, mh)
                 value.name_width  = nw
-                value.badge_width = bw2 + 8  -- badge pill padding
+                value.mode_width  = mw
 
                 ::continue::
             end
@@ -4453,7 +4416,7 @@ LPH_NO_VIRTUALIZE(function ()
                     active_keys[k] = nil
                 elseif active or v.alpha >= 0.25 then
                     if name_width  < v.name_width  then name_width  = v.name_width  end
-                    if badge_width < v.badge_width then badge_width = v.badge_width end
+                    if badge_width < v.mode_width  then badge_width = v.mode_width  end
                 end
             end
 
@@ -4487,16 +4450,14 @@ LPH_NO_VIRTUALIZE(function ()
             local r, g, b = widgets.color_picker:get()
             local PAD_X   = 10
             local PAD_Y   = 5
-            local RADIUS  = 5
-            local DOT_R   = 3
+            local RADIUS  = 4
             local ROW_H   = 18
-            local DOT_GAP = 8
 
             -- measure header "keybinds"
             local hw, hh = renderer.measure_text(flags, "keybinds")
 
             local min_w  = PAD_X * 4 + hw
-            local row_w  = DOT_R * 2 + DOT_GAP + name_width + 6 + badge_width + PAD_X * 2
+            local row_w  = name_width + 12 + badge_width + PAD_X * 2
             width = motion.interp(width, math.max(min_w, row_w, 130), 0.045)
 
             local box_w = math.floor(width + 0.85)
@@ -4516,47 +4477,27 @@ LPH_NO_VIRTUALIZE(function ()
                 r, g, b, ha, flags, 0, "keybinds"
             )
 
-            -- -- rows --------------------------------------------------
-            local row_y = pos.y + box_h + 2
+            -- rows
+            local row_y = pos.y + box_h + 1
 
             for _, v in pairs(active_keys) do
-                local row_a  = math.floor(255 * alpha * v.alpha * holding)
+                local fade_a = math.min(1.0, alpha * v.alpha * 1.25)
+                local row_a  = math.floor(255 * fade_a * holding)
                 if row_a < 4 then goto skip end
 
-                local fade_a = math.min(1.0, (alpha * v.alpha - 0.0) / 0.8)
-                local rh     = utils.round(ROW_H * fade_a)
+                local rh = utils.round(ROW_H * fade_a)
                 if rh < 2 then goto skip end
 
-                -- row background (glass card)
-                graphics.rectangle(pos.x, row_y, box_w, rh, 14, 14, 20,
-                    math.floor(145 * fade_a * holding), 3)
+                graphics.rectangle(pos.x, row_y, box_w, rh, 12, 12, 16,
+                    math.floor(160 * fade_a * holding), 3)
+                renderer.rectangle(pos.x, row_y + 2, 2, rh - 4,
+                    r, g, b, math.floor(210 * fade_a * holding))
 
-                -- left accent stripe
-                renderer.rectangle(pos.x, row_y + 2, 2, rh - 4, r, g, b,
-                    math.floor(200 * fade_a * holding))
-
-                -- status dot
-                local dot_x = pos.x + PAD_X
-                local dot_y = row_y + rh * 0.5
-                local dr = math.min(255, r + v.badge.dr)
-                local dg = math.min(255, g + v.badge.dg)
-                local db = math.min(255, b + v.badge.db)
-                graphics.circle(dot_x + DOT_R, dot_y, DOT_R,
-                    dr, dg, db, math.floor(230 * fade_a * holding))
-
-                -- key name
-                local text_y = row_y + (rh - v.height) * 0.5
-                renderer.text(dot_x + DOT_R * 2 + DOT_GAP, text_y,
-                    230, 230, 235, row_a, flags, 0, v.name)
-
-                -- badge pill
-                local bp_w = v.badge_width
-                local bp_x = pos.x + box_w - PAD_X - bp_w
-                graphics.rectangle(bp_x, row_y + (rh - ROW_H * 0.7) * 0.5,
-                    bp_w, math.floor(ROW_H * 0.7),
-                    dr, dg, db, math.floor(40 * fade_a * holding), 2)
-                renderer.text(bp_x + 4, text_y,
-                    dr, dg, db, math.floor(row_a * 0.9), flags, 0, v.badge.text)
+                local ty2 = row_y + (rh - v.height) * 0.5
+                renderer.text(pos.x + PAD_X, ty2,
+                    220, 220, 225, row_a, flags, 0, v.name)
+                renderer.text(pos.x + box_w - PAD_X - v.mode_width, ty2,
+                    r, g, b, math.floor(row_a * 0.9), flags, 0, v.mode)
 
                 row_y = row_y + rh + 1
                 ::skip::
