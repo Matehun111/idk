@@ -4212,6 +4212,8 @@ LPH_NO_VIRTUALIZE(function ()
             renderer.text(tx + bw, ty, 180, 180, 185, math.floor(200 * a), flags, 0, info_str)
         end
     end
+    end
+
         --- region keybinds
     do
         local alpha   = 0.0
