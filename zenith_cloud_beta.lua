@@ -979,7 +979,7 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
+    vars.selection.label = group_fakelag:label('\affffffff Zenith \aaaaaaaaff· \a999999ff Elegance in Execution.')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -1007,10 +1007,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup     = group_fakelag:label(string.format('\a77ff99ffWelcome, \aff9955ff%s\affffffff!', USERNAME))
-shared.fl_build       = group_fakelag:label(string.format('Build: \a77ccffff%s', BUILD))
-shared.fl_online      = group_fakelag:label('Online: \affd700ff...')
-shared.fl_leaderboard = group_fakelag:label('Leaderboard: ...')
+shared.fl_whatsup = group_fakelag:label(string.format('\aaaaaaaaff• \affffffffUser \aaaaaaaaff~ \a71bc78ff%s', USERNAME))
+shared.fl_build = group_fakelag:label('\aaaaaaaaff• \affffffffBranch \aaaaaaaaff~ \a71bc78ffBeta')
+shared.fl_version = group_fakelag:label('\aaaaaaaaff• \affffffffVersion \aaaaaaaaff~ \a71bc78ff3.0')
+shared.fl_online = group_fakelag:label('\aaaaaaaaff• \affffffffOnline \aaaaaaaaff~ \affd700ff...')
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1040,7 +1040,7 @@ do
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('Online: %s%d\affffffff', col, n))
+            shared.fl_online:set(string.format('\\aaaaaaaffâ¢ \\affffffff Online \\aaaaaaaff~ %s%d', col, n))
         end
     end
 
@@ -1311,8 +1311,6 @@ client.set_event_callback('paint_ui', function()
 
     local ref = software.misc.settings.menu_color
     local r, g, b, a = ui.get(ref)
-    local water_ui = helpers['functions']:fade_handle2(-globals.curtime(), '  Z  E  N  I  T  H', r, g, b)
-    vars.selection.label:set("                    "..table.concat(water_ui))
 end)
 
 client.set_event_callback('shutdown', function()
@@ -3858,20 +3856,15 @@ LPH_NO_VIRTUALIZE(function ()
         --- region watermark
     do
         local FRAMERATE_AVG_FRAC = 0.9
-
         local cl_updaterate = cvar["cl_updaterate"]
 
-        local alpha = 0.0
-        local offset = vector(6, 5)
-
-        local timer = 0.0
+        local alpha     = 0.0
         local framerate = 0.0
-
+        local timer     = 0.0
         local last_ping = 0.0
-        local last_framerate = 1 / globals.absoluteframetime()
-
+        local last_framerate        = 1 / globals.absoluteframetime()
         local last_server_framerate = 0.0
-        local last_server_var = 0.0
+        local last_server_var       = 0.0
 
         local texture do
             local _b64 = "iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAC/UlEQVR4nO1USUxTURQ99w+dPh1oSxWI1gGVCKiBqMQqRWMMJBhXf6NRYyIYCWp0r+BaN+7UhQtduPimiRpt4kaJEUIUp6SoGJAmVaAMMraF9ve6KAGNRRcS48KTvLd4991zzrv35gH/AGhuLS0p0dwGCEtFKs75XAbAQwTA75f+lJQEQQAAT03jlbaapmvdAEoyIVX8VeKvlAlEbDabPUZP5TPnuooiRXFg9bYjTyg5faL3lRYAmgXgYjpb8mL1IjQ3E5jNcbsvuP3wmaItBVJq7xpTquFcvXtSl69bXWUbmFsYizR0EWJV4JYWlhxbzu47ero8HOpKdjxvl0KRXun2zfvJuuNNrhRZjxER4PdnLUl2YhUQBGKSjAcK88wsxMeE1MoqBJ72IJljF3JsVhYMYhmIGKhe5MnZ1AhYnw9X93D+i7z1Pu+2A2d5KhUXktMR2GyWdGfwnhB9EwxweuQQERLMvyemiooGqbPzuhd23w1lbfmumYFu3WKR4ch1iyOjCcjiLMYGBllZs5l4ItwW6+1o8npL3oXDrTMA+GdiVRVJ03SXt7bWt7cqUFq5yyR5y7j/5ROajH7B+9BH5Be44XS7Ubi2GLK3hG9dvkQrbHqypzuyvz90+xFUVYCm6cD346ZlZIbDwb6pWImpYJmujwy0i7496zAS9WB73Q7YHQ50PAjCIn/F0Ov7dPLUnrTR4JTPN14wAWBEo/NGpQXDKjRNQ1HFwRpPVX3y4ZtPrI8PoS0iYbSni4c+96F0Zy2eBx4jx+kCpXUq/ropYnZ7c8sqd29t73t4119djdbW1h9KQUTEy8vrLVaj+MWct8o+OTEIWcmFQTZBNhigOAvBuo7Y2GfMxsYRS8xiOPwBNnseZJlCn9qvloKZMpOy4JiZmZRxo94ff9WE8Ns6KdejyJODEFMzSCXiccloSYCQSiamrKIoWmBUBLPNhOnRXn1meuIOQAAt+ef3M7JIqCJUQIU6f6JBA6IbM3c9XQwsxDVomcYjMw3/8ffwDeRqFtr3d6CrAAAAAElFTkSuQmCC"
@@ -3895,19 +3888,9 @@ LPH_NO_VIRTUALIZE(function ()
             end
         end
 
-        local function get_flags()
-            return "d"
-        end
-
         local function get_ping(nci)
-            if inetchannel.is_loopback(nci) then
-                return nil
-            end
-
-            local ping = math.max(0, last_ping * 1000)
-            ping = math.floor(ping)
-
-            return f("%dms", ping)
+            if inetchannel.is_loopback(nci) then return nil end
+            return f("%dms", math.floor(math.max(0, last_ping * 1000)))
         end
 
         local function get_framerate()
@@ -3915,147 +3898,105 @@ LPH_NO_VIRTUALIZE(function ()
             return last_framerate
         end
 
-        local function get_remote_framerate()
-            return last_server_framerate, last_server_var
-        end
-
         local function update_timer(nci, dt)
             timer = timer - dt
             if timer > 0 then return end
-
-            do
-                local latency = inetchannel.get_latency(nci, 0)
-                local update_rate = cl_updaterate:get_float()
-
-                if update_rate > 0.001 then
-                    local adjustment = -0.5 / update_rate
-                    latency = latency + adjustment
-                end
-
-                last_ping = latency
-            end
-
+            local latency = inetchannel.get_latency(nci, 0)
+            local update_rate = cl_updaterate:get_float()
+            if update_rate > 0.001 then latency = latency - 0.5 / update_rate end
+            last_ping = latency
             last_server_framerate, last_server_var = inetchannel.get_remote_framerate(nci)
             last_framerate = framerate > 0 and framerate or 1
-
             timer = timer + 1.0
         end
 
         function watermark.frame()
-            local can_show_watermark = widgets.enabled:get() and widgets.items:have_key("Watermark")
-            alpha = motion.interp(alpha, can_show_watermark, 0.045)
-
-            if alpha <= 0 then
-                return
-            end
+            local can_show = widgets.enabled:get() and widgets.items:have_key("Watermark")
+            alpha = motion.interp(alpha, can_show, 0.045)
+            if alpha <= 0 then return end
 
             local lp = entity.get_local_player()
-            if lp == nil then
-                return
-            end
+            if lp == nil then return end
 
             local nci = iengineclient.get_net_channel_info()
             update_timer(nci, globals.frametime())
+            if nci == nil then return end
 
-            if nci == nil then
-                return
-            end
-
-            local screen = vector(client.screen_size())
-            local pos = vector(screen.x - 9, 9)
-
-            local flags = get_flags()
+            local flags  = "d"
             local r, g, b = widgets.color_picker:rawget()
+            local a      = math.floor(255 * alpha)
 
-            local a = 255
-
-            local radius = 5
-
-            local drawlist = { }
-
-            do
-                local label = "Zenith"
-                local build = BUILD
-
-                if texture ~= nil then
-                    label = ""
-                end
-
-                if build ~= nil then
-                    build = f("[%s]", build)
-
-                    build = decorations.wave(build, globals.realtime(), 255, 255, 255, 255, r, g, b, a)
-                    build = f("%s\affffffff", build)
-                end
-
-                drawlist[#drawlist + 1] = merge({ label, build }, "\x20")
-            end
+            -- ── build info tokens ────────────────────────────────────
+            local tokens = {}
 
             if widgets.display:have_key("Username") then
-                local nickname = USERNAME
-
+                local nick = USERNAME
                 if widgets.custom_name:get() then
-                    local chosen_nickname = ui.get(widgets.custom_name_value:get_ref())
-
-                    if #chosen_nickname ~= 0 then
-                        nickname = chosen_nickname
-                    end
+                    local cn = ui.get(widgets.custom_name_value:get_ref())
+                    if #cn ~= 0 then nick = cn end
                 end
-
-                drawlist[#drawlist + 1] = nickname
+                tokens[#tokens+1] = nick
             end
-
             if widgets.display:have_key("Latency") then
-                drawlist[#drawlist + 1] = get_ping(nci)
+                local p = get_ping(nci)
+                if p then tokens[#tokens+1] = p end
             end
-
             if widgets.display:have_key("FPS") then
-                drawlist[#drawlist + 1] = f("%dfps", 1 / get_framerate())
+                tokens[#tokens+1] = f("%dfps", math.floor(1 / get_framerate()))
             end
-
-            if widgets.display:have_key("Server frametime") then
-                drawlist[#drawlist + 1] = f("sv: %.1f (%.1fms)", get_remote_framerate())
-            end
-
             if widgets.display:have_key("Time") then
-                drawlist[#drawlist + 1] = f("%02d:%02d", client.system_time())
+                tokens[#tokens+1] = f("%02d:%02d", client.system_time())
             end
 
-            local left_padding = 0
+            -- ── layout ───────────────────────────────────────────────
+            local screen   = vector(client.screen_size())
+            local PAD_X, PAD_Y = 10, 6
+            local RADIUS   = 4
+            local SEP      = "  ·  "
 
+            -- brand line:  "Zenith  ·  <tokens>"
+            local brand    = "Zenith"
+            local info_str = #tokens > 0 and (SEP .. merge(tokens, SEP)) or ""
+            local full_str = brand .. info_str
+
+            local tw, th = renderer.measure_text(flags, full_str)
+            local bw, _  = renderer.measure_text(flags, brand)
+
+            local logo_w  = texture ~= nil and 26 or 0
+            local box_w   = logo_w + PAD_X * 2 + tw
+            local box_h   = PAD_Y * 2 + th
+
+            local px = screen.x - 9 - box_w
+            local py = 9
+
+            -- background pill
+            graphics.rectangle(px, py, box_w, box_h, 10, 10, 12, math.floor(180 * alpha), RADIUS)
+
+            -- accent top bar (2px, accent colour)
+            renderer.rectangle(px + RADIUS, py - 1, box_w - RADIUS * 2, 1, r, g, b, a)
+
+            -- logo
             if texture ~= nil then
-                left_padding = 22
+                renderer.texture(texture, px + PAD_X, py + (box_h - 22) * 0.5, 22, 22, 255, 255, 255, a, "f")
             end
 
-            local text = merge(drawlist, " ∙ ")
-            local text_size = vector(renderer.measure_text(flags, text))
+            local tx = px + logo_w + PAD_X
+            local ty = py + (box_h - th) * 0.5
 
-            local rect_size = vector(text_size.x + offset.x * 2, text_size.y + offset.y * 2)
-            rect_size.x = rect_size.x + left_padding
+            -- brand in accent colour
+            renderer.text(tx, ty, r, g, b, a, flags, 0, brand)
 
-            pos.x = pos.x - rect_size.x
-
-            graphics.header(pos.x, pos.y, rect_size.x, 2, 5, r, g, b, a * alpha)
-            --graphics.glow(pos.x, pos.y, rect_size.x, rect_size.y, r, g, b, a * 0.3 * alpha, thickness, radius)
-            graphics.rectangle(pos.x, pos.y, rect_size.x, rect_size.y, 0, 0, 0, 100 * alpha, radius)
-
-            if texture ~= nil then
-                renderer.texture(texture, pos.x + offset.x - 1, pos.y + (rect_size.y - 22) * 0.5, 22, 22, 255, 255, 255, 255 * alpha, "f")
+            -- info tokens in white (dimmed)
+            if #info_str > 0 then
+                renderer.text(tx + bw, ty, 200, 200, 200, math.floor(210 * alpha), flags, 0, info_str)
             end
-
-            graphics.text(
-                pos.x + left_padding + offset.x - 1,
-                pos.y + (rect_size.y - text_size.y) * 0.5,
-                255, 255, 255, 255 * alpha,
-                flags, 0, text
-            )
         end
     end
 
         --- region keybinds
     do
-        local alpha = 0.0
-        local width = 0.0
+        local alpha   = 0.0
+        local width   = 0.0
         local holding = 0.0
 
         local all_hotkeys = {
@@ -4198,96 +4139,60 @@ LPH_NO_VIRTUALIZE(function ()
     		}
         }
 
-        local active_keys = { }
-        local hotkey_modes = { "holding", "toggled", "disabled" }
-
-        local function get_flags()
-            return "d"
-        end
+        local active_keys   = {}
+        local hotkey_modes  = { "holding", "toggled", "disabled" }
+        local flags         = "d"
 
         local function get_handle()
-            local flags = get_flags()
-            local existent_keys = { }
-
-            local all_active = false
+            local existent_keys = {}
+            local all_active    = false
             local name_width, mode_width = 0, 0
 
             for i = 1, #all_hotkeys do
-                local hotkey = all_hotkeys[i]
+                local hotkey    = all_hotkeys[i]
                 local unique_id = hotkey.ref[1]
+                local name      = hotkey.name
+                local offset    = hotkey.offset or 1
+                local active    = true
+                local collected = {}
 
-                local name = hotkey.name
-                local offset = hotkey.offset or 1
-
-                local active = true
-                local collected = { }
-
+                for j = 1, offset do collected[j] = hotkey.ref[j] end
                 for j = 1, offset do
-                    collected[j] = hotkey.ref[j]
+                    if not ui.get(collected[j]) then active = false; break end
                 end
 
-                for j = 1, offset do
-                    if not ui.get(collected[j]) then
-                        active = false
-                        break
-                    end
-                end
-
-                if active then
-                    existent_keys[unique_id] = true
-                    all_active = true
-                end
+                if active then existent_keys[unique_id] = true; all_active = true end
 
                 local _, mode = ui.get(collected[#collected])
                 if mode == 0 then goto continue end
 
                 mode = hotkey_modes[mode] or "~"
-                mode = merge { "[", mode, "]" }
+                mode = "[" .. mode .. "]"
 
                 if active_keys[unique_id] == nil then
-                    active_keys[unique_id] = {
-                        alpha = 0,
-                        height = 0,
-
-                        name_width = 0,
-                        mode_width = 0,
-
-                        name = name,
-                        mode = mode
-                    }
+                    active_keys[unique_id] = { alpha=0, height=0, name_width=0, mode_width=0, name=name, mode=mode }
                 end
 
-                local value = active_keys[unique_id] do
-                    local name_size = vector(renderer.measure_text(flags, name))
-                    local mode_width = vector(renderer.measure_text(flags, mode))
-
-                    value.name = name
-                    value.mode = mode
-
-                    value.height = math.max(name_size.y, mode_width.y)
-
-                    value.name_width = name_size.x
-                    value.mode_width = mode_width.x
-                end
+                local value = active_keys[unique_id]
+                local nw, nh = renderer.measure_text(flags, name)
+                local mw, mh = renderer.measure_text(flags, mode)
+                value.name       = name
+                value.mode       = mode
+                value.height     = math.max(nh, mh)
+                value.name_width = nw
+                value.mode_width = mw
 
                 ::continue::
             end
 
             for k, v in pairs(active_keys) do
                 local active = existent_keys[k] ~= nil
-
                 v.alpha = motion.interp(v.alpha, active, 0.045)
-
                 if v.alpha <= 0 then
                     active_keys[k] = nil
                 elseif active or v.alpha >= 0.25 then
-                    if name_width < v.name_width then
-                        name_width = v.name_width
-                    end
-
-                    if mode_width < v.mode_width then
-                        mode_width = v.mode_width
-                    end
+                    if name_width < v.name_width then name_width = v.name_width end
+                    if mode_width < v.mode_width then mode_width = v.mode_width end
                 end
             end
 
@@ -4305,159 +4210,106 @@ LPH_NO_VIRTUALIZE(function ()
             local me = entity.get_local_player()
             if me == nil then return end
 
-            local window = keybinds.window
+            local window   = keybinds.window
             local hotkeys, all_active, name_width, mode_width = get_handle()
 
-            local menu_check = ui.is_menu_open() or (next(hotkeys) ~= nil and all_active)
-            local can_show_hotkeys = widgets.enabled:get() and widgets.items:have_key("Keybinds") and menu_check
+            local menu_check    = ui.is_menu_open() or (next(hotkeys) ~= nil and all_active)
+            local can_show      = widgets.enabled:get() and widgets.items:have_key("Keybinds") and menu_check
 
-            alpha = motion.interp(alpha, can_show_hotkeys, 0.045)
-            holding = motion.interp(holding, (can_show_hotkeys and window:is_dragging()) and 0.6 or 1.0, 0.045)
+            alpha   = motion.interp(alpha,   can_show, 0.045)
+            holding = motion.interp(holding, (can_show and window:is_dragging()) and 0.6 or 1.0, 0.045)
 
-            if alpha <= 0 then
-                return
-            end
+            if alpha <= 0 then return end
 
-            local flags = get_flags()
             local r, g, b = widgets.color_picker:get()
+            local a       = 255
+            local PAD_X   = 10
+            local PAD_Y   = 5
+            local RADIUS  = 4
+            local GAP     = 20
 
-            local a = 255
+            local pos     = window.pos
 
-            local radius = 5
-            local thickness = 10
-
-            local offset_ins = vector(10, 5)
-
-            local keyval_gap = 20
-            local keyval_rounding = math.floor(radius * .5)
-
-            -- header
-            local pos = window.pos
-
-            local text = "keybinds"
-            local text_size = vector(renderer.measure_text(flags, text))
-            local text_size_base = vector(renderer.measure_text(flags, "\v"))
+            -- measure header
+            local hw, hh  = renderer.measure_text(flags, "keybinds")
 
             width = motion.interp(width, math.max(
-                offset_ins.x * 4 + text_size.x * (text_size.y / text_size_base.y),
-                keyval_rounding * 2 + name_width + mode_width + keyval_gap,
+                PAD_X * 4 + hw,
+                RADIUS * 2 + name_width + mode_width + GAP,
                 125
             ), 0.045)
 
-            local max_width = math.floor(width + 0.85)
-            local rect_size = vector(max_width, text_size.y + offset_ins.y * 2)
+            local box_w   = math.floor(width + 0.85)
+            local box_h   = hh + PAD_Y * 2
 
-            if alpha > 0.5 then
-                graphics.blur(pos.x, pos.y, rect_size.x, rect_size.y)
-            end
+            local ha = math.floor(255 * alpha * holding)
 
-            graphics.header(pos.x, pos.y, rect_size.x, 2, 5, r, g, b, a * alpha * holding)
-            graphics.glow(pos.x, pos.y, rect_size.x, rect_size.y, r, g, b, a * 0.3 * alpha * holding, thickness, radius)
-            graphics.rectangle(pos.x, pos.y, rect_size.x, rect_size.y, 0, 0, 0, 100 * alpha * holding, radius)
+            -- background
+            graphics.rectangle(pos.x, pos.y, box_w, box_h, 10, 10, 12, math.floor(180 * alpha * holding), RADIUS)
+            -- accent bar
+            renderer.rectangle(pos.x + RADIUS, pos.y - 1, box_w - RADIUS * 2, 1, r, g, b, ha)
 
+            -- header label (accent colour)
             renderer.text(
-                pos.x + (rect_size.x - text_size.x) * 0.5,
-                pos.y + (rect_size.y - text_size.y) * 0.5,
-                255, 255, 255, 255 * alpha * holding,
-                flags, 0, text
+                pos.x + (box_w - hw) * 0.5,
+                pos.y + (box_h - hh) * 0.5,
+                r, g, b, ha, flags, 0, "keybinds"
             )
 
-            -- contents
-            local offset = 2
+            -- rows
+            local row_y = pos.y + box_h + 3
 
             for _, v in pairs(active_keys) do
-                local alpha = alpha * v.alpha
-                local text_size, text_alpha = vector(v.name_width, v.height), 0
+                local row_a    = math.floor(255 * alpha * v.alpha * holding)
+                if row_a < 4 then goto skip end
 
-                if alpha >= 0.25 then
-                    text_alpha = math.min(1.0, utils.map(alpha, 0.25, 1.0, 0.0, 1.2))
-                end
+                local fade_a   = math.min(1.0, utils.map(alpha * v.alpha, 0.25, 1.0, 0.0, 1.2))
+                local val_a    = utils.map(box_w - RADIUS * 2 - v.name_width, 0.0, GAP, 0.0, 1.0, true)
 
-                local text_position = vector(pos.x + keyval_rounding, pos.y + rect_size.y + 4 + offset)
+                -- subtle row bg
+                graphics.rectangle(pos.x, row_y, box_w, v.height + 4, 15, 15, 18, math.floor(120 * fade_a * holding), 2)
 
-                local value_start = rect_size.x - v.mode_width
-                local value_alpha = utils.map(value_start - v.name_width, 0.0, keyval_gap, 0.0, 1.0, true)
+                renderer.text(pos.x + RADIUS, row_y + 2, 220, 220, 220, row_a, flags, 0, v.name)
+                renderer.text(pos.x + box_w - RADIUS - v.mode_width, row_y + 2, r, g, b, math.floor(row_a * val_a), flags, 0, v.mode)
 
-                local h_alpha = text_alpha * holding
-
-                renderer.text(text_position.x, text_position.y, 255, 255, 255, 255 * h_alpha, flags, 0, v.name)
-                renderer.text(text_position.x + rect_size.x - keyval_rounding * 2 - v.mode_width, text_position.y, 255, 255, 255, 255 * h_alpha * value_alpha, flags, 0, v.mode)
-
-                offset = offset + text_alpha * (text_size.y + text_size.y * 0.35)
+                row_y = row_y + math.floor(fade_a * (v.height + 3))
+                ::skip::
             end
 
-            window:set_size(rect_size)
+            window:set_size(vector(box_w, box_h))
             window:update()
         end
     end
 
         --- region indicators
     do
-        local alpha = 0.0
-        local align = 0.0
-
+        local alpha        = 0.0
+        local align        = 0.0
         local damage_alpha = 0.0
         local damage_value = 0.0
-        local damage_moving = 0.0
-        local damage_holding = 0.0
+        local damage_moving   = 0.0
+        local damage_holding  = 0.0
 
         local screen = vector(client.screen_size())
         local window = windows.new("##damage", 0.5 + 15 / screen.x, 0.5 - 15 / screen.y)
-
         window:set_anchor(vector(0.0, 1.0))
         window:set_size(vector(22, 22))
 
         local features = {
-            {
-                get = software.is_double_tap,
-                text = "DT",
-                alpha = 0
-            },
-
-            {
-                get = software.is_on_shot_antiaim,
-                text = "HS",
-                alpha = 0
-            },
-
-            {
-                get = software.is_duck_peek_assist,
-                text = "FD",
-                alpha = 0
-            },
-
-            {
-                get = software.is_minimum_damage_override,
-                text = "DMG",
-                alpha = 0
-            }
+            { get = software.is_double_tap,            text = "DT",  alpha = 0 },
+            { get = software.is_on_shot_antiaim,       text = "OS",  alpha = 0 },
+            { get = software.is_duck_peek_assist,      text = "FD",  alpha = 0 },
+            { get = software.is_minimum_damage_override, text = "DMG", alpha = 0 },
         }
 
         local function get_statement()
-            if software.is_edge() then
-                return 'EDGE'
+            if software.is_edge()         then return "EDGE"   end
+            if safe_head.get()            then return "SAFE"   end
+            if localplayer.is_airborne    then return "AIR"    end
+            if localplayer.is_crouched    then return "CROUCH" end
+            if localplayer.is_moving      then
+                return software.is_slow_motion() and "S.WALK" or "RUN"
             end
-
-            if safe_head.get() then
-                return "SAFE"
-            end
-
-            if localplayer.is_airborne then
-                return "AIR"
-            end
-
-            if localplayer.is_crouched then
-                return "CROUCH"
-            end
-
-            if localplayer.is_moving then
-                if software.is_slow_motion() then
-                    return "S.WALK"
-                end
-
-                return "RUN"
-            end
-
             return "STAND"
         end
 
@@ -4469,223 +4321,151 @@ LPH_NO_VIRTUALIZE(function ()
 
             local wpn = entity.get_player_weapon(me)
             if wpn == nil then return end
-
             local wpn_info = csgo_weapons(wpn)
             if wpn_info == nil then return end
 
-            local menu_check = ui.is_menu_open()
-            local alive_check = entity.is_alive(me)
-
+            local menu_check   = ui.is_menu_open()
+            local alive_check  = entity.is_alive(me)
             local scoped_check = entity.get_prop(me, "m_bIsScoped")
             local grenade_check = wpn_info.weapon_type_int == 9
+            local damage        = software.get_minimum_damage()
 
-            local damage = software.get_minimum_damage()
+            local can_show_ind  = widgets.enabled:get() and widgets.items:have_key("Crosshair Indicator") and alive_check
+            local can_show_dmg  = widgets.enabled:get() and widgets.items:have_key("Damage Indicator")
+                                  and not (wpn_info.weapon_type_int == 0 or grenade_check) or menu_check
+            local can_move_dmg  = can_show_dmg and menu_check
 
-            local can_show_indicators = widgets.enabled:get() and widgets.items:have_key("Crosshair Indicator") and alive_check
-            local can_move_indicators = can_show_indicators and scoped_check == 1
+            alpha         = motion.interp(alpha,         can_show_ind and (grenade_check and 0.4 or 1.0) or 0.0, 0.045)
+            align         = motion.interp(align,         can_show_ind and scoped_check == 1 or false, 0.045)
+            damage_alpha  = motion.interp(damage_alpha,  can_show_dmg, 0.045)
+            damage_value  = motion.interp(damage_value,  damage, 0.045)
+            damage_moving = motion.interp(damage_moving, can_move_dmg, 0.045)
+            damage_holding= motion.interp(damage_holding,(can_move_dmg and window:is_dragging()) and 0.6 or 1.0, 0.045)
 
-            local can_show_damage = widgets.enabled:get() and widgets.items:have_key("Damage Indicator") and not (wpn_info.weapon_type_int == 0 or wpn_info.weapon_type_int == 9) or menu_check
-            local can_move_damage = can_show_damage and menu_check
-
-            alpha = motion.interp(alpha, can_show_indicators and (grenade_check and 0.4 or 1.0) or 0.0, 0.045)
-            align = motion.interp(align, can_move_indicators, 0.045)
-
-            damage_alpha = motion.interp(damage_alpha, can_show_damage, 0.045)
-            damage_value = motion.interp(damage_value, damage, 0.045)
-            damage_moving = motion.interp(damage_moving, can_move_damage, 0.045)
-            damage_holding = motion.interp(damage_holding, (can_move_damage and window:is_dragging()) and 0.6 or 1.0, 0.045)
-
-            local flags = "-d"
-            local clock = globals.realtime()
-
+            local flags  = "-d"
+            local clock  = globals.realtime()
             local screen = vector(client.screen_size())
             local center = screen * 0.5
 
             local r1, g1, b1 = widgets.color_picker:rawget()
-            local r2, g2, b2, a2 = 255, 255, 255, 255
-
             local r, g, b, a = utils.color_lerp(
                 r1, g1, b1, 255,
-                r2, g2, b2, a2,
+                255, 255, 255, 255,
                 utils.breathe(clock + 0.5 - 0.5 * align)
             )
 
-            -- damage
+            -- ── damage indicator ─────────────────────────────────────
             if damage_alpha > 0 then
-                local value = utils.round(damage_value)
-                local text = f("%d", value)
+                local val   = utils.round(damage_value)
+                local text  = f("%d", val)
+                if damage == 0    then text = "AUTO" end
+                if val > 100      then text = f("HP +%d", val - 100) end
 
-                if damage == 0 then
-                    text = "AUTO"
-                end
-
-                if value > 100 then
-                    text = f("HP +%d", value - 100)
-                end
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local pos = window.pos:clone()
-                local rect_size = vector(measure.x + 18, measure.y + 16)
-
-                local text_position = pos:clone()
-
-                text_position.x = text_position.x + (rect_size.x - measure.x) * 0.5
-                text_position.y = text_position.y + (rect_size.y - measure.y) * 0.5
+                local mw, mh = renderer.measure_text(flags, text)
+                mw = mw + 1
+                local pos      = window.pos:clone()
+                local rect_sz  = vector(mw + 18, mh + 16)
+                local tx       = pos.x + (rect_sz.x - mw) * 0.5
+                local ty       = pos.y + (rect_sz.y - mh) * 0.5
 
                 if damage_moving > 0 then
-                    graphics.rectangle_outline(pos.x, pos.y, rect_size.x, rect_size.y, 255, 255, 255, 128 * damage_moving * damage_holding, 7)
+                    graphics.rectangle_outline(pos.x, pos.y, rect_sz.x, rect_sz.y,
+                        255, 255, 255, math.floor(128 * damage_moving * damage_holding), 7)
                 end
 
-                local r3, g3, b3 = r, g, b
-                if not can_show_indicators then
-                    r3 = r1
-                    g3 = g1
-                    b3 = b1
-                end
+                local dr, dg, db = can_show_ind and r or r1, can_show_ind and g or g1, can_show_ind and b or b1
+                renderer.text(tx - 1, ty, dr, dg, db, math.floor(a * damage_alpha * damage_holding), flags, 0, text)
 
-                renderer.text(text_position.x - 1, text_position.y, r3, g3, b3, a * damage_alpha * damage_holding, flags, 0, text)
-
-                window:set_size(rect_size)
+                window:set_size(rect_sz)
                 window:update()
             end
 
-            if alpha <= 0 then
-                return
-            end
+            if alpha <= 0 then return end
 
-            -- header
-            local pos = center:clone()
+            -- ── crosshair block ──────────────────────────────────────
+            local cx = center.x + utils.round(10 * align)
+            local cy = center.y + 20
 
-            pos.x = pos.x + utils.round(10 * align)
-            pos.y = pos.y + 20
-
+            -- Name line: "Z E N I T H" in accent with wave
             do
-                local text = "Z E N I T H"
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local text_position = pos:clone()
-                local text_offset = (measure.x * 0.5) * (1 - align)
-
-                text_position.x = text_position.x - utils.round(text_offset)
-
-                -- graphics.glow(text_position.x + 1, text_position.y + 2, measure.x, 4, r, g, b, a * alpha * 0.1, 10, 1)
-                -- renderer.rectangle(text_position.x + 1, text_position.y + 2, measure.x, 4, r, g, b, a * alpha * 0.1)
-
-                text = decorations.wave(text, clock, r1, g1, b1, 255, r2, g2, b2, a2)
-                graphics.text(text_position.x, text_position.y, r, g, b, a * alpha, flags, 0, text)
-
-                pos.y = pos.y + measure.y
+                local text   = "Z E N I T H"
+                local tw, th = renderer.measure_text(flags, text)
+                tw = tw + 1
+                local ox     = (tw * 0.5) * (1 - align)
+                text = decorations.wave(text, clock, r1, g1, b1, 255, 255, 255, 255, 255)
+                graphics.text(cx - utils.round(ox), cy, r, g, b, math.floor(a * alpha), flags, 0, text)
+                cy = cy + th
             end
 
+            -- State line
             do
-                local text = get_statement()
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local text_position = pos:clone()
-                local text_offset = (measure.x * 0.5) * (1 - align)
-
-                text_position.x = text_position.x - utils.round(text_offset)
-
-                renderer.text(text_position.x, text_position.y, r, g, b, a * alpha, flags, 0, text)
-                pos.y = pos.y + measure.y
+                local text   = get_statement()
+                local tw, th = renderer.measure_text(flags, text)
+                tw = tw + 1
+                local ox     = (tw * 0.5) * (1 - align)
+                renderer.text(cx - utils.round(ox), cy, 180, 180, 180, math.floor(a * alpha), flags, 0, text)
+                cy = cy + th
             end
 
+            -- Feature pills (DT / OS / FD / DMG)
             for i = 1, #features do
-                local feature = features[i]
+                local feat = features[i]
+                feat.alpha = motion.interp(feat.alpha, can_show_ind and feat.get() or false, 0.045)
+                if feat.alpha <= 0 then goto cont end
 
-                local value_check = feature.get()
-                local can_show_feature = can_show_indicators and value_check
+                local fa     = feat.alpha * alpha
+                local text   = feat.text
+                local tw, th = renderer.measure_text(flags, text)
+                tw = tw + 1
+                local ox     = (tw * 0.5) * (1 - align)
 
-                feature.alpha = motion.interp(feature.alpha, can_show_feature, 0.045)
-
-                if feature.alpha <= 0 then
-                    goto continue
-                end
-
-                local text = feature.text
-                local alpha = feature.alpha * alpha
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local text_position = pos:clone()
-                local text_offset = (measure.x * 0.5) * (1 - align)
-
-                text_position.x = text_position.x - utils.round(text_offset)
-
-                renderer.text(text_position.x, text_position.y, r, g, b, a * alpha, flags, 0, text)
-                pos.y = pos.y + utils.round(measure.y * feature.alpha)
-
-                ::continue::
+                renderer.text(cx - utils.round(ox), cy, r, g, b, math.floor(a * fa), flags, 0, text)
+                cy = cy + utils.round(th * feat.alpha)
+                ::cont::
             end
         end
     end
 
         ---region arrows
     do
-        local alpha = 0
-        local left_alpha = 0
+        local alpha       = 0
+        local left_alpha  = 0
         local right_alpha = 0
-
-        local screen = vector(client.screen_size()) * .5
+        local screen      = vector(client.screen_size()) * .5
 
         function arrows.frame()
             local lp = entity.get_local_player()
-            if lp == nil then
-                return
-            end
+            if lp == nil then return end
 
             local wpn = entity.get_player_weapon(lp)
             if wpn == nil then return end
-
             local wpn_info = csgo_weapons(wpn)
             if wpn_info == nil then return end
 
-            local can_show_arrows = manual_direction.enabled:get() and manual_direction.arrows:get() and entity.is_alive(lp)
-            local can_move_indicators = can_show_indicators and scoped_check == 1
+            local can_show = manual_direction.enabled:get() and manual_direction.arrows:get() and entity.is_alive(lp)
+            alpha = motion.interp(alpha, can_show and (wpn_info.weapon_type_int == 9 and 0.4 or 1.0) or 0.0, 0.045)
+            if alpha <= 0 then return end
 
-            alpha = motion.interp(alpha, can_show_arrows and (wpn_info.weapon_type_int == 9 and 0.4 or 1.0) or 0.0, 0.045)
-            if alpha <= 0 then
-                return
-            end
+            local r, g, b, av = manual_direction.color:rawget()
+            av = 255 * alpha
 
-            local r, g, b, a = manual_direction.color:rawget()
-            a = 255 * alpha
+            local dir = manual_direction.get()
 
-            local manual_direction = manual_direction.get()
+            left_alpha  = motion.interp(left_alpha,  dir == 0 and 1 or 0, 0.045)
+            right_alpha = motion.interp(right_alpha, dir == 1 and 1 or 0, 0.045)
 
-            left_alpha = motion.interp(left_alpha, manual_direction == 0 and 1 or 0, 0.045)
-            if left_alpha ~= 0 then
-                renderer.text(screen.x - 50, screen.y - 16, r, g, b, a * left_alpha, '+', nil, '<')
-            end
-
-            right_alpha = motion.interp(right_alpha, manual_direction == 1 and 1 or 0, 0.045)
-            if right_alpha ~= 0 then
-                renderer.text(screen.x + 39, screen.y - 16, r, g, b, a * right_alpha, '+', nil, '>')
-            end
+            if left_alpha  > 0 then renderer.text(screen.x - 50, screen.y - 16, r, g, b, av * left_alpha,  '+', nil, '<') end
+            if right_alpha > 0 then renderer.text(screen.x + 39, screen.y - 16, r, g, b, av * right_alpha, '+', nil, '>') end
         end
     end
 
         --- region velocity_warning
     do
-        local alpha = 0.0
+        local alpha   = 0.0
         local holding = 0.0
-        local hovering = 0.0
-
-        local function renderer_bar(x, y, w, h, r, g, b, a, pct)
-            --graphics.glow(x, y, w, h, r, g, b, a * 0.15, 222, h * 0.5)
-            renderer.rectangle(x, y, w, h, 0, 0, 0, a)
-            renderer.rectangle(x + 1, y + 1, (w - 2) * pct, h - 2, r, g, b, a)
-        end
+        local hovering= 0.0
 
         velocity_warning.window = windows.new("##velocity_warning", 0.5, 0.3)
-
         velocity_warning.window:set_anchor(vector(0.5, 0.0))
         velocity_warning.window:set_size(vector(180, 4))
 
@@ -4693,194 +4473,71 @@ LPH_NO_VIRTUALIZE(function ()
             local me = entity.get_local_player()
             if me == nil then return end
 
-            local window = velocity_warning.window
-            local modifier = entity.get_prop(me, "m_flVelocityModifier")
-
-            local menu_check = ui.is_menu_open()
-
+            local window    = velocity_warning.window
+            local modifier  = entity.get_prop(me, "m_flVelocityModifier")
+            local menu_check  = ui.is_menu_open()
             local alive_check = entity.is_alive(me)
-            local velocity_check = modifier < 1.0
+            local vel_check   = modifier < 1.0
+            local is_drag     = window:is_dragging()
+            local is_hover    = window:is_hovering()
 
-            local is_dragging = window:is_dragging()
-            local is_hovering = window:is_hovering()
+            local can_show = widgets.enabled:get() and widgets.items:have_key("Velocity Warning")
+                             and ((alive_check and vel_check) or menu_check)
 
-            local can_show_warning = widgets.enabled:get() and widgets.items:have_key("Velocity Warning") and ((alive_check and velocity_check) or menu_check)
+            alpha   = motion.interp(alpha,   can_show, 0.045)
+            holding = motion.interp(holding, (can_show and is_drag)  and 0.6 or 1.0, 0.045)
+            hovering= motion.interp(hovering,(can_show and is_hover and not is_drag) and 1.0 or 0.0, 0.045)
 
-            alpha = motion.interp(alpha, can_show_warning, 0.045)
-            holding = motion.interp(holding, (can_show_warning and is_dragging) and 0.6 or 1.0, 0.045)
-            hovering = motion.interp(hovering, (can_show_warning and is_hovering and not is_dragging) and 1.0 or 0.0, 0.045)
+            if alpha <= 0 then return end
 
-            if alpha <= 0 then
-                return
-            end
-
-            if menu_check and (not velocity_check or not alive_check) then
+            if menu_check and (not vel_check or not alive_check) then
                 modifier = math.min(1, globals.tickcount() % 200 / 150)
             end
 
-            local flags = "d"
+            local flags   = "d"
             local percent = (1 - modifier) * 100
-
             local r, g, b = widgets.color_picker:get()
 
-            local a = 255
-
+            -- lerp to warm red when slowed
             if modifier < 1.0 then
                 r = utils.lerp(255, r, modifier)
-                g = utils.lerp(75, g, modifier)
-                b = utils.lerp(75, b, modifier)
+                g = utils.lerp(75,  g, modifier)
+                b = utils.lerp(75,  b, modifier)
             end
 
-            -- indication
-            local pos = window.pos:clone()
+            local pos  = window.pos:clone()
             local size = window.size:clone()
 
-            local text = f("Max velocity was reduced by %d%%", percent)
-            local text_size = vector(renderer.measure_text(flags, text))
+            local text        = f("velocity reduced by %d%%", percent)
+            local tw, th      = renderer.measure_text(flags, text)
 
             renderer.text(
-                pos.x + (size.x - text_size.x) * 0.5,
+                pos.x + (size.x - tw) * 0.5,
                 pos.y,
-                255, 255, 255, 255 * alpha * holding,
+                255, 255, 255, math.floor(255 * alpha * holding),
                 flags, 0, text
             )
 
-            pos.y = pos.y + text_size.y
-            pos.y = pos.y + 5
+            pos.y = pos.y + th + 5
 
-            local bar_pos = pos:clone()
-            local bar_size = vector(text_size.x + 28, 4)
+            -- slim accent bar
+            local bar_w = tw + 28
+            local bar_x = pos.x + (size.x - bar_w) * 0.5
 
-            renderer_bar(bar_pos.x, bar_pos.y, bar_size.x, bar_size.y, r, g, b, a * alpha * holding, modifier)
-            pos.y = pos.y + bar_size.y + 5
+            renderer.rectangle(bar_x, pos.y, bar_w, 2, 30, 30, 35, math.floor(200 * alpha * holding))
+            renderer.rectangle(bar_x + 1, pos.y, math.floor((bar_w - 2) * (1 - modifier)), 2,
+                r, g, b, math.floor(255 * alpha * holding))
 
-            if hovering > 0 then
-                renderer.text(
-                    pos.x,
-                    pos.y,
-                    255, 255, 255, 255 * alpha * hovering,
-                    flags, 0, "Press M2 to center."
-                )
+            if hovering > 0 or is_hover then
+                renderer.text(bar_x + (bar_w - tw) * 0.5, pos.y + 5,
+                    200, 200, 200, math.floor(255 * alpha * hovering), flags, 0,
+                    f("%.0f%%", (1 - modifier) * 100))
             end
 
-            local window_size = vector(math.max(text_size.x, bar_size.x), text_size.y + bar_size.y + 5)
-
-            if is_hovering and not is_dragging and client.key_state(0x02) then
-                local screen = vector(client.screen_size())
-
-                window:set_pos(vector(
-                    (screen.x - size.x) * 0.5,
-                    window.pos.y
-                ))
-            end
-
-            window:set_size(window_size)
+            window:set_size(vector(math.max(size.x, bar_w), th + 16))
             window:update()
         end
     end
-
-        --- region custom scope
-    do
-        custom_scope.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Scope Overlay")
-        : record("aa", "custom_scope::enabled")
-        : save()
-
-        custom_scope.color = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", "Color", 255, 255, 255, 255)
-        : record("aa", "custom_scope::color")
-        : save()
-
-        custom_scope.mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Mode", { 'Default', 'T' })
-        : record("aa", "custom_scope::mode")
-        : save()
-
-        custom_scope.position = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "\nPosition", 0, 500, 50, true, 'px')
-        : record("aa", "custom_scope::position")
-        : save()
-
-        custom_scope.offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "\nOffset", 0, 500, 10, true, 'px')
-        : record("aa", "custom_scope::offset")
-        : save()
-
-        local alpha = 0
-        client.set_event_callback('paint_ui', function ()
-            ui.set(software.visuals.scope_overlay, true)
-        end)
-
-        client.set_event_callback('paint', function ()
-            if not custom_scope.enabled:get() then
-                return
-            end
-
-            ui.set(software.visuals.scope_overlay, false)
-
-            local lp = entity.get_local_player()
-            if lp == nil then
-                return
-            end
-
-            local width, height = client.screen_size()
-            local offset, position = custom_scope.offset:get() * height / 1080, custom_scope.position:get() * height / 1080
-
-            local condition = entity.get_prop(lp, 'm_bIsScoped') == 1 and entity.get_prop(lp, 'm_bResumeZoom') == 0
-            alpha = motion.interp(alpha, condition, 0.045)
-            if alpha < 0.001 then
-                return
-            end
-
-            local clr = { custom_scope.color:rawget() }
-
-            local clr1 = { clr[1], clr[2], clr[3], 0 }
-            local clr2 = { clr[1], clr[2], clr[3], clr[4] * alpha }
-            local mode = custom_scope.mode:get()
-
-            if mode ~= 'T' then
-                renderer.gradient(
-                    width / 2, height / 2 - position + 2,
-                    1, position - offset,
-                    clr1[1], clr1[2], clr1[3], clr1[4],
-                    clr2[1], clr2[2], clr2[3], clr2[4],
-                    false
-                )
-            end
-
-            renderer.gradient(
-                width / 2, height / 2 + offset,
-                1, position - offset,
-                clr2[1], clr2[2], clr2[3], clr2[4],
-                clr1[1], clr1[2], clr1[3], clr1[4],
-                false
-            )
-
-            renderer.gradient(
-                width / 2 - position + 2, height / 2,
-                position - offset, 1,
-                clr1[1], clr1[2], clr1[3], clr1[4],
-                clr2[1], clr2[2], clr2[3], clr2[4],
-                true
-            )
-
-            renderer.gradient(
-                width / 2 + offset, height / 2,
-                position - offset, 1,
-                clr2[1], clr2[2], clr2[3], clr2[4],
-                clr1[1], clr1[2], clr1[3], clr1[4],
-                true
-            )
-        end)
-
-        defer(function ()
-            ui.set_visible(software.visuals.scope_overlay, true)
-        end)
-    end
-end)()
-
---- region console filter
-do
-
-
-    defer(function ()
-    end)
-end
 
 
 --- hit marker zenith
@@ -5047,9 +4704,9 @@ do
                 end
             end
 
-            shared.online_label:set(string.format('👤Current Online: %d', online))
+            shared.online_label:set(string.format('\\aaaaaaaffâ¢ \\affffffff Online \\aaaaaaaff~ \\affd700ff%d', online))
             if shared.fl_online then
-                shared.fl_online:set(string.format('👤Online: \affd700ff%d', online))
+                shared.fl_online:set(string.format('\aaaaaaaaff• \affffffffOnline \aaaaaaaaff~ \affd700ff%d', online))
             end
             -- leaderboard from data if available
             if shared.fl_leaderboard and shared.data then
@@ -5694,6 +5351,44 @@ client.set_event_callback("net_update_end", localplayer.net_update)
 client.set_event_callback("shutdown", function() if gui and gui.shutdown then gui.shutdown() end end)
 client.set_event_callback("shutdown", antiaim.shutdown)
 
+
+-- ======================================================================
+--  BRAND HEADER (paint_ui) — "Zenith · Elegance in Execution."
+--  Drawn at the top of the AA column on every page, Umbrella-style
+-- ======================================================================
+do
+    local _bh_alpha = 0.0
+    client.set_event_callback('paint_ui', function()
+        local is_open = ui.is_menu_open()
+        _bh_alpha = motion.interp(_bh_alpha, is_open and 1 or 0, 0.055)
+        if _bh_alpha <= 0.01 then return end
+
+        local r, g, b = widgets.color_picker:rawget()
+        local a       = math.floor(255 * _bh_alpha)
+        local flags   = "d"
+
+        -- position: top-left of the Anti-aimbot angles group area
+        -- offset ~12px from left edge, ~45px from top
+        local sx, sy = client.screen_size()
+        local px = math.floor(sx * 0.012)
+        local py = math.floor(sy * 0.048)
+
+        -- "Zenith" in accent colour, "· Elegance in Execution." in dim white
+        local brand   = "Zenith"
+        local tagline = " · Elegance in Execution."
+
+        local bw, bh = renderer.measure_text(flags, brand)
+        local tw, _  = renderer.measure_text(flags, tagline)
+
+        renderer.text(px, py, r, g, b, a, flags, 0, brand)
+        renderer.text(px + bw, py, 160, 160, 160, math.floor(200 * _bh_alpha), flags, 0, tagline)
+
+        -- thin separator line
+        local line_w = bw + tw
+        renderer.rectangle(px, py + bh + 3, line_w, 1, r, g, b, math.floor(80 * _bh_alpha))
+    end)
+end
+
 client.set_event_callback("paint_ui", function() if gui and gui.frame then gui.frame() end end)
 client.set_event_callback("paint_ui", windows.frame)
 
@@ -5741,8 +5436,8 @@ menu.set_callback(function()
     -- display fake lag info panel every frame
     if shared.fl_whatsup     then _safe_display(shared.fl_whatsup)     end
     if shared.fl_build       then _safe_display(shared.fl_build)       end
+    if shared.fl_version     then _safe_display(shared.fl_version)     end
     if shared.fl_online      then _safe_display(shared.fl_online)      end
-    if shared.fl_leaderboard then _safe_display(shared.fl_leaderboard) end
 
     -- display Lua tab fake lag overrides
     if shared.lua_fl_enabled then
@@ -6316,18 +6011,21 @@ end
 
 
 -- ======================================================================
---  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
+--  HOME PAGE  — Umbrella-inspired: brand header + bullet info rows
 -- ======================================================================
 do
     local home = {}
     _G.__home = home
 
+    -- ── static labels ────────────────────────────────────────────────
+    -- brand header (drawn via paint_ui, not pui labels)
+    -- stat labels
     home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a71bc78ff\xe2\x96\xb6 Statistics')
     home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x96\xb6 Total time: \a71bc78ff0.0 Hours')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session time: \a71bc78ff0 Minutes')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session: \a71bc78ff0 Minutes')
     home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Headshots: \a71bc78ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Enemy killed: \a71bc78ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'X Misses at me: \a71bc78ff0')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Killed: \a71bc78ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Misses: \a71bc78ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -6336,8 +6034,8 @@ do
     local _last_sv  = 0
 
     local function _get_total()
-        local ok,v = pcall(function() return database.read('zenith_total_time_v1') end)
-        return (ok and type(v)=='number') and v or 0
+        local ok, v = pcall(function() return database.read('zenith_total_time_v1') end)
+        return (ok and type(v) == 'number') and v or 0
     end
     local function _save_total(h)
         pcall(function() database.write('zenith_total_time_v1', h) end)
@@ -6356,21 +6054,64 @@ do
     end)
 
     function home.update()
-        local rt = globals.realtime and globals.realtime() or 0
+        local rt   = globals.realtime and globals.realtime() or 0
         local secs = rt - _s_start
         local mins = math.floor(secs / 60)
         if rt - _last_sv > 60 then
-            _save_total(_get_total() + secs/3600)
+            _save_total(_get_total() + secs / 3600)
             _last_sv = rt
         end
-        local tot = _get_total()
-        local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
+        local tot    = _get_total()
+        local hs_pct = _s_kills > 0 and math.floor(_s_hs / _s_kills * 100) or 0
+
         home.lbl_total:set(string.format('\xe2\x96\xb6 Total time: \a71bc78ff%.1f Hours', tot))
-        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session time: \a71bc78ff%d Minutes', mins))
+        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session: \a71bc78ff%d Minutes', mins))
         home.lbl_hs:set(string.format('Headshots: \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('Enemy killed: \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('X Misses at me: \a71bc78ff%d', _s_misses))
+        home.lbl_kills:set(string.format('Killed: \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('Misses: \a71bc78ff%d', _s_misses))
     end
+
+    -- ── painted header (drawn on paint_ui when menu open + Home page) ─
+    local _header_alpha = 0.0
+
+    client.set_event_callback('paint_ui', function()
+        if not ui.is_menu_open() then
+            _header_alpha = motion.interp(_header_alpha, 0, 0.08)
+            if _header_alpha <= 0 then return end
+        end
+
+        -- only render on Home page
+        local sel_ok, sel = pcall(ui.get, gui.selection:get_ref())
+        if not (sel_ok and sel == 'Home') then
+            _header_alpha = motion.interp(_header_alpha, 0, 0.08)
+            return
+        end
+        _header_alpha = motion.interp(_header_alpha, 1, 0.06)
+        if _header_alpha <= 0.01 then return end
+
+        local r, g, b = widgets.color_picker:rawget()
+        local a       = math.floor(255 * _header_alpha)
+        local flags   = "d"
+
+        -- position: top of the fakelag group panel
+        -- approximate fixed position; adjust if needed
+        local sx, sy  = client.screen_size()
+        local px = math.floor(sx * 0.012)
+        local py = math.floor(sy * 0.045)
+
+        -- "Zenith" in accent colour
+        local brand       = "Zenith"
+        local tagline     = "\xc2\xb7 Powered by Zenith"
+        local bw, bh      = renderer.measure_text(flags, brand)
+        local tw, _       = renderer.measure_text(flags, tagline)
+
+        renderer.text(px, py, r, g, b, a, flags, 0, brand)
+        renderer.text(px + bw + 6, py, 170, 170, 170, math.floor(200 * _header_alpha), flags, 0, tagline)
+
+        -- thin separator line under brand
+        py = py + bh + 4
+        renderer.rectangle(px, py, bw + 6 + tw, 1, r, g, b, math.floor(120 * _header_alpha))
+    end)
 
     function home.show()
         home.update()
@@ -6382,6 +6123,7 @@ do
         _safe_display(home.lbl_misses)
     end
 end
+
 
 --  CLANTAG SYSTEM (zenith.gs)
 -- ======================================================================
