@@ -2544,187 +2544,204 @@ end
 
 --- region defensive
 do
-    -- ── helpers ───────────────────────────────────────────────────────────
-    local function norm_yaw(a) return ((a + 180) % 360) - 180 end
-    local function clamp(v, lo, hi) return v < lo and lo or v > hi and hi or v end
-    local function lerp(a, b, t) return a + (b - a) * t end
+    -- -- helpers ------------------------------------------------------------
+    local function norm_yaw(a)   return ((a + 180) % 360) - 180 end
+    local function clamp(v,lo,hi) return v < lo and lo or v > hi and hi or v end
+    local function lerp(a,b,t)    return a + (b-a)*t end
+    local function has(list, val)
+        if not list then return false end
+        for _,v in ipairs(list) do if v == val then return true end end
+        return false
+    end
 
-    local hd = {}   -- namespace for all hysteria-defensive state
+    local hd = {}
+    hd.lifetime   = 0
+    hd.switch     = false
+    hd.jitter_t   = 0
+    hd.delay_t    = 0    -- tick delay counter
+    hd.manual_side = nil
 
-    hd.lifetime  = 0
-    hd.switch    = false
-    hd.jitter_t  = 0
+    -- -- UI references ------------------------------------------------------
+    local G  = "AA"
+    local GR = "Anti-aimbot angles"
 
-    -- ── state list ────────────────────────────────────────────────────────
-    local STATES = {
-        { id = "default",  label = "Default"       },
-        { id = "stand",    label = "Standing"      },
-        { id = "run",      label = "Running"       },
-        { id = "walk",     label = "Slow Walk"     },
-        { id = "air",      label = "In-Air"        },
-        { id = "airduck",  label = "Air-Crouch"    },
-        { id = "crouch",   label = "Crouching"     },
-    }
-    local STATE_IDS = {}
-    for i,s in ipairs(STATES) do STATE_IDS[i] = s.label end
+    -- -------------------- LEFT PANEL (per-state builder) ------------------
 
-    -- ── UI ────────────────────────────────────────────────────────────────
-    local ui_g  = "AA"
-    local ui_gr = "Anti-aimbot angles"
+    -- State + Team selectors (mirror the native sub-page header)
+    hd.ui_state = menu.new_item(ui.new_combobox, G, GR,
+        merge{"State", "\n", "hd::state"},
+        {"Standing","Moving","Slow Walk","Crouching","In-Air","Air-Crouch"})
+    : record("aa","hd::state") : save()
 
-    -- Master enable
-    hd.ui_enable = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "Zenith AA")
-    : record("aa", "hd::enable") : save()
+    hd.ui_team = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Team", "\n", "hd::team"},
+        {"Both","Terrorist","Counter-Terrorist"})
+    : record("aa","hd::team") : save()
 
-    -- Inverter hotkey
-    hd.ui_inverter = menu.new_item(ui.new_hotkey, ui_g, ui_gr, "- Inverter")
-    : record("aa", "hd::inverter") : save()
+    -- Force defensive block
+    hd.ui_force_def = menu.new_item(ui.new_checkbox, G, GR, "Force defensive")
+    : record("aa","hd::force_def") : save()
 
-    -- Safe head
-    hd.ui_safehead = menu.new_item(ui.new_multiselect, ui_g, ui_gr,
-        merge{"- Safe head", "\n", "hd::safehead"},
-        {"Air melee", "Height difference"})
-    : record("aa", "hd::safehead") : save()
+    hd.ui_def_on = menu.new_item(ui.new_multiselect, G, GR,
+        merge{"Defensive on", "\n", "hd::def_on"},
+        {"Double tap","Hide shots","On shot"})
+    : record("aa","hd::def_on") : save()
+
+    hd.ui_def_mode = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Defensive mode", "\n", "hd::def_mode"},
+        {"Always on","While shooting","On peek"})
+    : record("aa","hd::def_mode") : save()
+
+    hd.ui_custom_ticks = menu.new_item(ui.new_checkbox, G, GR, "Custom ticks")
+    : record("aa","hd::custom_ticks") : save()
+
+    -- Override state (master toggle)
+    hd.ui_enable = menu.new_item(ui.new_checkbox, G, GR, "Override state")
+    : record("aa","hd::enable") : save()
+
+    -- Yaw left / right
+    hd.ui_yaw_left = menu.new_item(ui.new_slider, G, GR,
+        merge{"Yaw left", "\n", "hd::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::yaw_left") : save()
+
+    hd.ui_yaw_right = menu.new_item(ui.new_slider, G, GR,
+        merge{"Yaw right", "\n", "hd::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::yaw_right") : save()
+
+    -- Yaw random mode + sliders
+    hd.ui_yaw_rnd_mode = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Yaw random mode", "\n", "hd::yaw_rnd_mode"},
+        {"Off","Percent","Range"})
+    : record("aa","hd::yaw_rnd_mode") : save()
+
+    hd.ui_yaw_rnd_left = menu.new_item(ui.new_slider, G, GR,
+        merge{"Yaw left random", "\n", "hd::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::yaw_rnd_left") : save()
+
+    hd.ui_yaw_rnd_right = menu.new_item(ui.new_slider, G, GR,
+        merge{"Yaw right random", "\n", "hd::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::yaw_rnd_right") : save()
+
+    -- Yaw jitter
+    hd.ui_yaw_jitter = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Yaw jitter", "\n", "hd::yaw_jitter"},
+        {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::yaw_jitter") : save()
+
+    hd.ui_yaw_jitter_deg = menu.new_item(ui.new_slider, G, GR,
+        merge{"\n", "\n", "hd::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::yaw_jitter_deg") : save()
+
+    hd.ui_randomization = menu.new_item(ui.new_slider, G, GR,
+        merge{"Randomization", "\n", "hd::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::randomization") : save()
+
+    -- Body yaw
+    hd.ui_body_yaw = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Body yaw", "\n", "hd::body_yaw"},
+        {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::body_yaw") : save()
+
+    hd.ui_body_yaw_deg = menu.new_item(ui.new_slider, G, GR,
+        merge{"\n", "\n", "hd::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::body_yaw_deg") : save()
+
+    -- Delay system
+    hd.ui_delay_from = menu.new_item(ui.new_slider, G, GR,
+        merge{"Delay from", "\n", "hd::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::delay_from") : save()
+
+    hd.ui_delay_to = menu.new_item(ui.new_slider, G, GR,
+        merge{"Delay to", "\n", "hd::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::delay_to") : save()
+
+    hd.ui_delay_count = menu.new_item(ui.new_slider, G, GR,
+        merge{"Delay tick count", "\n", "hd::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::delay_count") : save()
+
+    hd.ui_delay_tick1 = menu.new_item(ui.new_slider, G, GR,
+        merge{"Delay tick \xc2\xb11", "\n", "hd::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::delay_tick1") : save()
+
+    hd.ui_delay_rnd = menu.new_item(ui.new_slider, G, GR,
+        merge{"Delay randomization", "\n", "hd::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::delay_rnd") : save()
+
+    hd.ui_switch_chance = menu.new_item(ui.new_slider, G, GR,
+        merge{"Switch chance", "\n", "hd::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::switch_chance") : save()
+
+    -- -------------------- RIGHT PANEL (Fake lag column) -------------------
+
+    -- Fake lag settings preset selector
+    hd.ui_fl_settings = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Settings", "\n", "hd::fl_settings"},
+        {"Main","Aggressive","Passive","Custom"})
+    : record("aa","hd::fl_settings") : save()
+
+    -- Break LC triggers
+    hd.ui_vulnlc = menu.new_item(ui.new_multiselect, G, GR,
+        merge{"Break LC triggers", "\n", "hd::vulnlc"},
+        {"Can't shoot","Jumping","Crouching"})
+    : record("aa","hd::vulnlc") : save()
+
+    -- Edge yaw hotkey
+    hd.ui_edge_yaw = menu.new_item(ui.new_hotkey, G, GR,
+        merge{"Edge yaw", "\n", "hd::edge_yaw"})
+    : record("aa","hd::edge_yaw") : save()
+
+    -- Freestanding hotkey
+    hd.ui_freestanding = menu.new_item(ui.new_hotkey, G, GR,
+        merge{"Freestanding", "\n", "hd::freestanding"})
+    : record("aa","hd::freestanding") : save()
 
     -- Manual yaw
-    hd.ui_manual = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "- Manual yaw")
-    : record("aa", "hd::manual") : save()
-    hd.ui_man_left  = menu.new_item(ui.new_hotkey, ui_g, ui_gr, "  Left")
-    : record("aa", "hd::man_left") : save()
-    hd.ui_man_right = menu.new_item(ui.new_hotkey, ui_g, ui_gr, "  Right")
-    : record("aa", "hd::man_right") : save()
-    hd.ui_man_reset = menu.new_item(ui.new_hotkey, ui_g, ui_gr, "  Reset")
-    : record("aa", "hd::man_reset") : save()
+    hd.ui_manual = menu.new_item(ui.new_checkbox, G, GR, "Manual Yaw")
+    : record("aa","hd::manual") : save()
 
-    -- LC Breaker
-    hd.ui_vulnlc = menu.new_item(ui.new_multiselect, ui_g, ui_gr,
-        merge{"- LC Breaker", "\n", "hd::vulnlc"},
-        {"Can't shoot", "Jumping", "Crouching"})
-    : record("aa", "hd::vulnlc") : save()
+    hd.ui_man_left  = menu.new_item(ui.new_hotkey, G, GR, merge{"  Left",  "\n","hd::man_left"})
+    : record("aa","hd::man_left") : save()
 
-    -- Defensive snap (global toggle)
-    hd.ui_snap_on = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "- Defensive snap")
-    : record("aa", "hd::snap_on") : save()
-    hd.ui_snap_ping = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "  Ping-safe")
-    : record("aa", "hd::snap_ping") : save()
-    hd.ui_snap_os   = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "  Allow with On-Shot AA")
-    : record("aa", "hd::snap_os") : save()
+    hd.ui_man_right = menu.new_item(ui.new_hotkey, G, GR, merge{"  Right", "\n","hd::man_right"})
+    : record("aa","hd::man_right") : save()
 
-    -- Snap pitch / yaw (Custom mode per-state)
-    hd.ui_snap_pitch = menu.new_item(ui.new_combobox, ui_g, ui_gr,
-        merge{"  Snap Pitch", "\n", "hd::snap_pitch"},
-        {"None", "Switch", "Random", "Spin"})
-    : record("aa", "hd::snap_pitch") : save()
-    hd.ui_snap_pmin = menu.new_item(ui.new_slider, ui_g, ui_gr,
-        merge{"  Pitch min", "\n", "hd::snap_pmin"}, -89, 89)
-    : record("aa", "hd::snap_pmin") : save()
-    hd.ui_snap_pmax = menu.new_item(ui.new_slider, ui_g, ui_gr,
-        merge{"  Pitch max", "\n", "hd::snap_pmax"}, -89, 89)
-    : record("aa", "hd::snap_pmax") : save()
-    hd.ui_snap_yaw = menu.new_item(ui.new_combobox, ui_g, ui_gr,
-        merge{"  Snap Yaw", "\n", "hd::snap_yaw"},
-        {"None", "Switch", "Static", "Random", "Spin"})
-    : record("aa", "hd::snap_yaw") : save()
-    hd.ui_snap_ymin = menu.new_item(ui.new_slider, ui_g, ui_gr,
-        merge{"  Yaw range", "\n", "hd::snap_ymin"}, 0, 360)
-    : record("aa", "hd::snap_ymin") : save()
+    hd.ui_man_reset = menu.new_item(ui.new_hotkey, G, GR, merge{"  Reset", "\n","hd::man_reset"})
+    : record("aa","hd::man_reset") : save()
 
-    -- Fake lag
-    hd.ui_fl_on    = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "- Fake lag")
-    : record("aa", "hd::fl_on") : save()
-    hd.ui_fl_mode  = menu.new_item(ui.new_combobox, ui_g, ui_gr,
-        merge{"  Mode", "\n", "hd::fl_mode"},
-        {"Dynamic", "Maximum", "Fluctuate"})
-    : record("aa", "hd::fl_mode") : save()
-    hd.ui_fl_limit = menu.new_item(ui.new_slider, ui_g, ui_gr,
-        merge{"  Limit", "\n", "hd::fl_limit"}, 1, 15)
-    : record("aa", "hd::fl_limit") : save()
+    -- Avoid backstab (delegates to existing avoid_backstab region)
+    hd.ui_avoid_bs = menu.new_item(ui.new_checkbox, G, GR, "Avoid backstab")
+    : record("aa","hd::avoid_bs") : save()
 
-    -- Builder: state selector
-    hd.ui_builder_state = menu.new_item(ui.new_combobox, ui_g, ui_gr,
-        merge{"Builder State", "\n", "hd::b_state"}, STATE_IDS)
-    : record("aa", "hd::b_state") : save()
+    -- Safe head
+    hd.ui_safehead = menu.new_item(ui.new_multiselect, G, GR,
+        merge{"Safe head", "\n", "hd::safehead"},
+        {"Air melee","Height difference"})
+    : record("aa","hd::safehead") : save()
 
-    -- Per-state controls (use one shared set; values stored in hd.presets)
-    hd.ui_b_yoff  = menu.new_item(ui.new_slider,   ui_g, ui_gr, merge{"  Yaw offset",  "\n","hd::b_yoff"},  -60, 60)
-    : record("aa","hd::b_yoff") : save()
-    hd.ui_b_mod   = menu.new_item(ui.new_combobox, ui_g, ui_gr, merge{"  Modifier",    "\n","hd::b_mod"},
-        {"None","Jitter","X-way","Rotate","Random"})
-    : record("aa","hd::b_mod") : save()
-    hd.ui_b_mdeg  = menu.new_item(ui.new_slider,   ui_g, ui_gr, merge{"  Mod degree",  "\n","hd::b_mdeg"}, -60, 60)
-    : record("aa","hd::b_mdeg") : save()
-    hd.ui_b_body  = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "  Body yaw")
-    : record("aa","hd::b_body") : save()
-    hd.ui_b_bjit  = menu.new_item(ui.new_checkbox, ui_g, ui_gr, "  Body jitter")
-    : record("aa","hd::b_bjit") : save()
-    hd.ui_b_bmode = menu.new_item(ui.new_combobox, ui_g, ui_gr, merge{"  Body mode","\n","hd::b_bmode"},
-        {"Auto","Default","Side-based"})
-    : record("aa","hd::b_bmode") : save()
-    hd.ui_b_bdeg  = menu.new_item(ui.new_slider,   ui_g, ui_gr, merge{"  Body degree","\n","hd::b_bdeg"}, -180, 180)
-    : record("aa","hd::b_bdeg") : save()
-    hd.ui_b_bleft = menu.new_item(ui.new_slider,   ui_g, ui_gr, merge{"  Body left",  "\n","hd::b_bleft"},-180,180)
-    : record("aa","hd::b_bleft") : save()
-    hd.ui_b_bright= menu.new_item(ui.new_slider,   ui_g, ui_gr, merge{"  Body right", "\n","hd::b_bright"},-180,180)
-    : record("aa","hd::b_bright") : save()
+    -- Fake lag enable + Amount + Variance + Limit
+    hd.ui_fl_on = menu.new_item(ui.new_checkbox, G, GR,
+        merge{"Enabled", "\n", "hd::fl_on"})
+    : record("aa","hd::fl_on") : save()
 
-    -- per-state presets table (mirrors the builder values)
-    hd.presets = {}
-    for _, s in ipairs(STATES) do
-        hd.presets[s.id] = {
-            yaw_offset = 0, mod = "None", mod_degree = 0,
-            body = false,   body_jitter = false, body_mode = "Auto",
-            body_degree = 0, body_left = 0, body_right = 0,
-        }
-    end
+    hd.ui_fl_mode = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Amount", "\n", "hd::fl_mode"},
+        {"Dynamic","Maximum","Fluctuate"})
+    : record("aa","hd::fl_mode") : save()
 
-    -- save current builder values back to preset when state changes
-    local function builder_save()
-        local sel  = hd.ui_builder_state:get()
-        local sid  = (function() for _,s in ipairs(STATES) do if s.label==sel then return s.id end end return "default" end)()
-        local p    = hd.presets[sid]
-        if not p then return end
-        p.yaw_offset   = hd.ui_b_yoff:get()
-        p.mod          = hd.ui_b_mod:get()
-        p.mod_degree   = hd.ui_b_mdeg:get()
-        p.body         = hd.ui_b_body:get()
-        p.body_jitter  = hd.ui_b_bjit:get()
-        p.body_mode    = hd.ui_b_bmode:get()
-        p.body_degree  = hd.ui_b_bdeg:get()
-        p.body_left    = hd.ui_b_bleft:get()
-        p.body_right   = hd.ui_b_bright:get()
-    end
+    hd.ui_fl_variance = menu.new_item(ui.new_slider, G, GR,
+        merge{"Variance", "\n", "hd::fl_variance"}, 0, 100, 59, true, "%")
+    : record("aa","hd::fl_variance") : save()
 
-    local function builder_load()
-        local sel = hd.ui_builder_state:get()
-        local sid = (function() for _,s in ipairs(STATES) do if s.label==sel then return s.id end end return "default" end)()
-        local p   = hd.presets[sid]
-        if not p then return end
-        hd.ui_b_yoff:set(p.yaw_offset)
-        hd.ui_b_mod:set(p.mod)
-        hd.ui_b_mdeg:set(p.mod_degree)
-        hd.ui_b_body:set(p.body)
-        hd.ui_b_bjit:set(p.body_jitter)
-        hd.ui_b_bmode:set(p.body_mode)
-        hd.ui_b_bdeg:set(p.body_degree)
-        hd.ui_b_bleft:set(p.body_left)
-        hd.ui_b_bright:set(p.body_right)
-    end
+    hd.ui_fl_limit = menu.new_item(ui.new_slider, G, GR,
+        merge{"Limit", "\n", "hd::fl_limit"}, 1, 14, 13, true, "t")
+    : record("aa","hd::fl_limit") : save()
 
-    -- auto-save on any builder change
-    for _, item in ipairs({
-        hd.ui_b_yoff, hd.ui_b_mod, hd.ui_b_mdeg,
-        hd.ui_b_body, hd.ui_b_bjit, hd.ui_b_bmode,
-        hd.ui_b_bdeg, hd.ui_b_bleft, hd.ui_b_bright
-    }) do
-        if item.set_callback then
-            item:set_callback(builder_save)
-        end
-    end
-    if hd.ui_builder_state.set_callback then
-        hd.ui_builder_state:set_callback(builder_load)
-    end
+    -- -- Snap / Inverter (unchanged from hysteria system) ------------------
+    hd.ui_inverter = menu.new_item(ui.new_hotkey, G, GR,
+        merge{"Inverter", "\n", "hd::inverter"})
+    : record("aa","hd::inverter") : save()
 
-    -- ── helpers ───────────────────────────────────────────────────────────
+    -- -- Logic helpers -----------------------------------------------------
 
     local function get_state_id()
         if not entity.is_alive(entity.get_local_player()) then return "default" end
@@ -2732,138 +2749,115 @@ do
             return localplayer.is_crouched and "airduck" or "air"
         end
         if localplayer.is_crouched then return "crouch" end
-        if localplayer.is_moving then
+        if localplayer.is_moving   then
             return software.is_slow_motion() and "walk" or "run"
         end
         return "stand"
     end
 
-    local function get_preset()
-        local sid = get_state_id()
-        local p   = hd.presets[sid]
-        return (p and p.body ~= nil) and p or hd.presets["default"]
+    -- -- Jitter helpers ----------------------------------------------------
+    local function get_jitter_offset()
+        local mode = hd.ui_yaw_jitter:get()
+        local deg  = hd.ui_yaw_jitter_deg:get()
+        if mode == "Off"    then return 0 end
+        if mode == "Offset" then return hd.switch and deg or -deg end
+        if mode == "Switch" then return hd.switch and deg or 0 end
+        if mode == "Random" then return math.random(-deg, deg) end
+        if mode == "Spin"   then return lerp(-deg, deg, globals.curtime() * 3 % 2 - 1) end
+        return 0
     end
 
-    -- ── snap logic (ported from antiaim.features.snap) ────────────────────
-
-    local snap_yaw_fns = {
-        ["None"]   = function ()     return 0,   true  end,
-        ["Switch"] = function (ymin) return 0.5 * (hd.switch and ymin or -ymin) end,
-        ["Static"] = function (ymin) return ymin end,
-        ["Random"] = function (ymin) return 0.5 * math.random(-ymin, ymin) end,
-        ["Spin"]   = function (ymin) return 0.5 * lerp(-ymin, ymin, globals.curtime() * 3 % 2 - 1) end,
-    }
-    local snap_pitch_fns = {
-        ["None"]   = function ()            return 89 end,
-        ["Switch"] = function (pmin, pmax)  return hd.lifetime % 2 == 0 and pmax or pmin end,
-        ["Random"] = function (pmin, pmax)  return math.random(pmin, pmax) end,
-        ["Spin"]   = function (pmin, pmax)  return lerp(pmin, pmax, globals.curtime() * 6 % 2 - 1) end,
-    }
-
-    local function check_snap()
-        if not hd.ui_snap_on:get() then return false end
-        -- need exploit active (DT or OS)
-        local is_dt = software.is_double_tap()
-        local is_os = software.is_on_shot_antiaim()
-        if not (is_dt or is_os) then return false end
-        -- don't snap when OS is active but user hasn't allowed it
-        if is_os and not is_dt then
-            if not hd.ui_snap_os:get() then return false end
+    local function get_body_yaw_offset()
+        local mode = hd.ui_body_yaw:get()
+        local deg  = hd.ui_body_yaw_deg:get()
+        if mode == "Off"        then return nil, nil end
+        if mode == "Static"     then return "Static", deg end
+        if mode == "Freestanding" then return "Freestanding", deg end
+        if mode == "Jitter"     then return "Static", hd.switch and deg or -deg end
+        if mode == "X-way"      then
+            hd.jitter_t = (hd.jitter_t + 1) % 2
+            return "Static", hd.jitter_t == 0 and deg or -deg
         end
-        -- tickbase must be shifted (defensive tick)
-        local dt_data = exploit.get()
-        if not (dt_data and dt_data.shift) then return false end
-        -- ping-safe: only snap vs enemies with 15–90ms ping
-        if hd.ui_snap_ping:get() then
-            local threat = client.current_threat()
-            if threat then
-                local resource = entity.get_player_resource(threat)
-                if resource then
-                    local ping = entity.get_prop(resource, "m_iPing", threat)
-                    if not ping or ping < 15 or ping > 90 then return false end
-                end
+        if mode == "Spin"       then
+            return "Static", lerp(-deg, deg, globals.curtime() * 3 % 2 - 1)
+        end
+        return nil, nil
+    end
+
+    -- -- Delay system ------------------------------------------------------
+    local function get_delay()
+        local from  = hd.ui_delay_from:get()
+        local to    = hd.ui_delay_to:get()
+        if from == 0 and to == 0 then return 0 end
+        local count = hd.ui_delay_count:get()
+        local rnd   = hd.ui_delay_rnd:get()
+        local base  = (from == to) and from or math.random(math.min(from,to), math.max(from,to))
+        if rnd > 0 and math.random(100) <= rnd then
+            base = base + hd.ui_delay_tick1:get()
+        end
+        return clamp(base, 0, 14)
+    end
+
+    -- -- Fake lag apply ----------------------------------------------------
+    local fl_overridden = false
+    local function apply_fakelag()
+        local refs_en  = pui.reference("AA", "Fake lag", "Enabled")
+        local refs_amt = pui.reference("AA", "Fake lag", "Amount")
+        local refs_var = pui.reference("AA", "Fake lag", "Variance")
+        local refs_lim = pui.reference("AA", "Fake lag", "Limit")
+
+        if not hd.ui_fl_on:get() then
+            if fl_overridden then
+                refs_en:override()
+                refs_amt:override()
+                refs_var:override()
+                refs_lim:override()
+                fl_overridden = false
+            end
+            return
+        end
+
+        fl_overridden  = true
+        local mode  = hd.ui_fl_mode:get()
+        local limit = hd.ui_fl_limit:get()
+        local var   = hd.ui_fl_variance:get()
+
+        refs_en:override(true)
+        refs_amt:override(mode)
+        refs_lim:override(limit)
+        -- Variance is a slider reference
+        pcall(function() refs_var:override(var) end)
+    end
+
+    -- -- LC Breaker --------------------------------------------------------
+    local function apply_vulnlc(cmd)
+        local items = hd.ui_vulnlc:get()
+        if not items or #items == 0 then return end
+        local dt = exploit.get()
+        if not (dt and dt.shift) then return end
+        local lp = entity.get_local_player()
+        if not lp then return end
+
+        if has(items, "Can't shoot") then
+            local wpn  = entity.get_player_weapon(lp)
+            local info = wpn and csgo_weapons(wpn)
+            if info and info.weapon_type_int ~= 9 then
+                local na   = entity.get_prop(lp,"m_flNextAttack") or 0
+                local st   = entity.get_prop(lp,"m_flSimulationTime") or 0
+                local diff = toticks(na - st - 1)
+                if diff > 0 then cmd.force_defensive = true; return end
             end
         end
-        return true
-    end
 
-    local function apply_snap(ctx)
-        if not check_snap() then return false end
-        local yaw_mode = hd.ui_snap_yaw:get()
-        local ymin     = hd.ui_snap_ymin:get()
-        local pitch_mode = hd.ui_snap_pitch:get()
-        local pmin = hd.ui_snap_pmin:get()
-        local pmax = hd.ui_snap_pmax:get()
-
-        local yaw_fn  = snap_yaw_fns[yaw_mode]  or snap_yaw_fns["None"]
-        local pch_fn  = snap_pitch_fns[pitch_mode] or snap_pitch_fns["None"]
-
-        local yaw_val, is_default_yaw = yaw_fn(ymin)
-        local pch_val = pch_fn(pmin, pmax)
-
-        ctx.yaw        = is_default_yaw and "180" or "Custom"
-        ctx.yaw_offset = is_default_yaw and 0 or norm_yaw(yaw_val)
-        ctx.pitch      = "Custom"
-        ctx.pitch_offset = clamp(pch_val, -89, 89)
-        return true
-    end
-
-    -- ── builder/modifier logic (ported from antiaim.builder) ─────────────
-
-    local function get_modifier(scene)
-        local mod    = scene.mod
-        local degree = scene.mod_degree
-        local value  = 0
-
-        if   mod == "Jitter" then value = (hd.switch and  degree or -degree)
-        elseif mod == "Random" then value = math.random(-degree, degree)
-        elseif mod == "Rotate" then value = lerp(degree, -degree, (globals.tickcount()) % 5 / 5)
-        elseif mod == "X-way" then
-            hd.jitter_t = (hd.jitter_t + 1) % 2
-            value = hd.jitter_t == 0 and degree or -degree
+        if has(items,"Jumping")   and localplayer.is_airborne then
+            cmd.force_defensive = true
         end
-        return value
-    end
-
-    local function get_body(scene, modifier)
-        if not scene.body then return nil end
-        local side, left, right = 0, 0, 0
-        local mode = scene.body_mode
-        if mode == "Default" then
-            left, right = scene.body_degree, scene.body_degree
-        elseif mode == "Side-based" then
-            left, right = scene.body_left, scene.body_right
-        else -- Auto
-            left  = modifier * 1.618 - 30
-            right = modifier * 1.618 + 30
-        end
-        if scene.body_jitter then
-            side = hd.switch and 1 or -1
-        else
-            side = hd.ui_inverter:get() and 1 or -1
-        end
-        local result = (side > 0 and left) or (side < 0 and right) or 0
-        return clamp(result, -180, 180)
-    end
-
-    local function apply_builder(ctx)
-        local scene    = get_preset()
-        local modifier = get_modifier(scene)
-        local body     = get_body(scene, modifier)
-
-        ctx.yaw        = "180"
-        ctx.yaw_offset = norm_yaw(scene.yaw_offset + modifier)
-        ctx.pitch      = "Custom"
-        ctx.pitch_offset = -89
-
-        if body then
-            ctx.body_yaw        = "Static"
-            ctx.body_yaw_offset = body
+        if has(items,"Crouching") and localplayer.is_crouched and not localplayer.is_airborne then
+            cmd.force_defensive = true
         end
     end
 
-    -- ── safe head (ported from antiaim.features.head) ────────────────────
-
+    -- -- Safe head ---------------------------------------------------------
     local function apply_safe_head(ctx)
         local sh = hd.ui_safehead:get()
         if not sh or #sh == 0 then return end
@@ -2872,119 +2866,92 @@ do
         local threat = client.current_threat()
         if not threat or entity.is_dormant(threat) then return end
 
-        local my_origin = vector(entity.get_prop(lp, "m_vecOrigin"))
-        local th_origin = vector(entity.get_origin(threat))
-        local hdiff     = my_origin.z - th_origin.z
-        local dist      = my_origin:dist(th_origin)
+        local my_org = vector(entity.get_prop(lp,"m_vecOrigin"))
+        local th_org = vector(entity.get_origin(threat))
+        local hdiff  = my_org.z - th_org.z
+        local dist   = my_org:dist(th_org)
+        local ex,ey,ez = client.eye_position()
+        local _,tent = client.trace_line(lp, ex,ey,ez,
+            th_org.x, th_org.y, th_org.z + 56)
+        local visible = tent == threat
 
-        local ex, ey, ez = client.eye_position()
-        local _, trace_ent = client.trace_line(lp, ex, ey, ez,
-            th_origin.x, th_origin.y, th_origin.z + 56)
-        local is_visible = trace_ent == threat
+        local wpn    = entity.get_player_weapon(lp)
+        local wpn_i  = wpn and csgo_weapons(wpn)
+        local melee  = wpn_i and wpn_i.weapon_type_int == 0
 
-        local weapon    = entity.get_player_weapon(lp)
-        local wpn_info  = weapon and csgo_weapons(weapon)
-        local is_melee  = wpn_info and wpn_info.weapon_type_int == 0
-
-        local triggers = sh
-        local has = function(v)
-            for _, x in ipairs(triggers) do if x == v then return true end end
-            return false
-        end
-
-        if (has("Air melee") and localplayer.is_airborne and is_melee and hdiff > -32)
-        or (has("Height difference") and hdiff > 64 and (is_visible or dist < 1024)) then
-            ctx.yaw_offset   = 20
-            ctx.body_yaw     = "Static"
+        if (has(sh,"Air melee") and localplayer.is_airborne and melee and hdiff > -32)
+        or (has(sh,"Height difference") and hdiff > 64 and (visible or dist < 1024)) then
+            ctx.yaw_offset      = 20
+            ctx.body_yaw        = "Static"
             ctx.body_yaw_offset = 1
-            ctx.pitch        = "Custom"
-            ctx.pitch_offset = 89
+            ctx.pitch           = "Custom"
+            ctx.pitch_offset    = 89
         end
     end
 
-    -- ── fake lag control (ported from antiaim.features.fakelag) ──────────
-
-    local fl_overridden = false
-
-    local function apply_fakelag()
-        local refs_fl_enable  = pui.reference("AA", "Fake lag", "Enabled")
-        local refs_fl_amount  = pui.reference("AA", "Fake lag", "Amount")
-        local refs_fl_limit   = pui.reference("AA", "Fake lag", "Limit")
-
-        if not hd.ui_fl_on:get() then
-            if fl_overridden then
-                refs_fl_enable:override()
-                refs_fl_amount:override()
-                refs_fl_limit:override()
-                fl_overridden = false
-            end
-            return
-        end
-
-        fl_overridden = true
-        local mode  = hd.ui_fl_mode:get()
-        local limit = hd.ui_fl_limit:get()
-
-        refs_fl_enable:override(true)
-        refs_fl_amount:override(mode)
-        refs_fl_limit:override(limit)
-    end
-
-    -- ── LC Breaker ────────────────────────────────────────────────────────
-
-    local function apply_vulnlc(cmd)
-        local items = hd.ui_vulnlc:get()
-        if not items or #items == 0 then return end
-        if not exploit.get().shift then return end
-
-        local lp = entity.get_local_player()
-        if not lp then return end
-
-        local has = function(v)
-            for _, x in ipairs(items) do if x == v then return true end end
-            return false
-        end
-
-        local weapon = entity.get_player_weapon(lp)
-        local wpn    = weapon and csgo_weapons(weapon)
-
-        if has("Can't shoot") and wpn and wpn.weapon_type_int ~= 9 then
-            local next_attack = entity.get_prop(lp, "m_flNextAttack") or 0
-            local simtime     = entity.get_prop(lp, "m_flSimulationTime") or 0
-            local diff        = toticks(next_attack - simtime - 1)
-            if diff > 0 then cmd.force_defensive = true; return end
-        end
-
-        if (localplayer.is_airborne and has("Jumping"))
-        or (localplayer.is_crouched and not localplayer.is_airborne and has("Crouching")) then
-            cmd.force_defensive = true
-        end
-    end
-
-    -- ── manual yaw ────────────────────────────────────────────────────────
-
-    hd.manual_side = nil   -- nil=off, 1=left, -1=right
-
+    -- -- Manual yaw --------------------------------------------------------
     local function update_manual()
         if not hd.ui_manual:get() then hd.manual_side = nil; return end
-        if hd.ui_man_reset:get()  then hd.manual_side = nil; return end
-        if hd.ui_man_left:get()   then hd.manual_side =  1; return end
-        if hd.ui_man_right:get()  then hd.manual_side = -1 end
+        if hd.ui_man_reset:get() then hd.manual_side = nil; return end
+        if hd.ui_man_left:get()  then hd.manual_side =  1; return end
+        if hd.ui_man_right:get() then hd.manual_side = -1 end
     end
 
-    -- ── main integration callback ─────────────────────────────────────────
+    -- -- Edge yaw / freestanding forwarding -------------------------------
+    local function apply_edge_freestand(ctx)
+        if hd.ui_edge_yaw:rawget() then
+            ctx.edge_yaw = true
+        end
+        if hd.ui_freestanding:rawget() then
+            ctx.freestanding = true
+        end
+    end
 
+    -- -- Random switch chance ----------------------------------------------
+    local function should_switch()
+        local chance = hd.ui_switch_chance:get()
+        if chance >= 100 then return true end
+        if chance <= 0   then return false end
+        return math.random(100) <= chance
+    end
+
+    -- -- Force defensive check ---------------------------------------------
+    local function check_force_def(cmd)
+        if not hd.ui_force_def:get() then return end
+        local on_items = hd.ui_def_on:get()
+        if not on_items or #on_items == 0 then
+            cmd.force_defensive = true
+            return
+        end
+        local mode = hd.ui_def_mode:get()
+        local dt   = software.is_double_tap()
+        local os   = software.is_on_shot_antiaim()
+
+        local trigger = false
+        if has(on_items,"Double tap")   and dt then trigger = true end
+        if has(on_items,"On shot")      and os then trigger = true end
+        if has(on_items,"Hide shots")   and (dt or os) then trigger = true end
+
+        if mode == "Always on" then trigger = true end
+
+        if trigger then cmd.force_defensive = true end
+    end
+
+    -- -- Main AA application -----------------------------------------------
     local function hd_setup_command(cmd, ctx)
         if not hd.ui_enable:get() then return end
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        -- tick counter + switch
+        -- tick advance
         hd.lifetime = hd.lifetime + 1
-        hd.switch   = not hd.switch
+        if should_switch() then hd.switch = not hd.switch end
 
-        -- update manual direction
+        -- manual yaw
         update_manual()
+
+        -- force defensive
+        check_force_def(cmd)
 
         -- LC breaker
         apply_vulnlc(cmd)
@@ -2992,25 +2959,62 @@ do
         -- fake lag
         apply_fakelag()
 
-        -- if no snap active, apply builder
-        if not apply_snap(ctx) then
-            apply_builder(ctx)
+        -- apply delay override
+        local delay = get_delay()
+        if delay > 0 then
+            hd.delay_t = (hd.delay_t + 1) % delay
+            if hd.delay_t ~= 0 then
+                ctx.defensive_ticks = delay
+            end
         end
+
+        -- manual yaw override
+        if hd.manual_side then
+            ctx.yaw_base   = "Local view"
+            ctx.yaw_offset = hd.manual_side * 90
+            ctx.yaw_jitter = "Off"
+            ctx.body_yaw   = "Static"
+        else
+            -- yaw left/right with random spread
+            local left  = hd.ui_yaw_left:get()
+            local right = hd.ui_yaw_right:get()
+            local rnd_l = hd.ui_yaw_rnd_left:get()
+            local rnd_r = hd.ui_yaw_rnd_right:get()
+
+            if rnd_l > 0 then left  = left  + math.random(0, rnd_l)  end
+            if rnd_r > 0 then right = right + math.random(0, rnd_r) end
+
+            local base = hd.switch and norm_yaw(right) or norm_yaw(left)
+            local jit  = get_jitter_offset()
+            local rnd  = hd.ui_randomization:get()
+            if rnd > 0 then jit = jit + math.random(-rnd/2, rnd/2) end
+
+            ctx.yaw        = "180"
+            ctx.yaw_offset = norm_yaw(base + jit)
+
+            -- body yaw
+            local byaw_mode, byaw_deg = get_body_yaw_offset()
+            if byaw_mode then
+                ctx.body_yaw        = byaw_mode
+                ctx.body_yaw_offset = byaw_deg or 0
+            end
+        end
+
+        -- edge yaw / freestanding
+        apply_edge_freestand(ctx)
 
         -- safe head (overwrites if triggered)
         apply_safe_head(ctx)
     end
 
-    -- register as the defensive handler
     function defensive.handle(cmd, ctx)
         hd_setup_command(cmd, ctx)
     end
 
-    -- ── page rendering (Defensive tab only) ──────────────────────────────
-
-    rawset(_G, "_hd_state", hd)   -- expose for page renderer
-
+    rawset(_G, "_hd_state", hd)
 end
+
+
 
 
 
@@ -3690,6 +3694,73 @@ do
     rawset(_G, '_zn_inferno', inferno)
     rawset(_G, '_zn_regular', regular)
 end
+
+--- region evaded_shot_log
+do
+    -- Detect when an ENEMY shoots near local player but misses (evaded shot).
+    -- Method: bullet_impact event fires at the world hit position.
+    -- If distance from impact to local player's origin is within EVADE_RADIUS,
+    -- and the bullet was fired by an enemy, we count it as an evaded shot.
+
+    local EVADE_RADIUS    = 96   -- units - within ~3 player widths
+    local EVADE_DURATION  = 4.0
+    local KIND_EVADE      = { icon = '\xe2\x9c\x93', r = 90, g = 200, b = 255 }  -- ✓ teal
+
+    local function push_evade()
+        local reg = _G._zn_regular
+        if not reg then return end
+        local MAX = 10
+        if #reg >= MAX then table.remove(reg, 1) end
+        reg[#reg + 1] = {
+            kind     = KIND_EVADE,
+            text     = 'Evaded shot',
+            lifetime = EVADE_DURATION,
+            alpha    = 0.0,
+            slide    = 0.0,
+        }
+    end
+
+    client.set_event_callback('bullet_impact', function(e)
+        -- only care if the AA log feature is enabled
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+
+        -- the userid who fired the shot
+        local shooter_id = e['userid']
+        if not shooter_id then return end
+        local shooter = client.userid_to_entindex(shooter_id)
+        if not shooter or shooter == lp then return end  -- ignore own shots
+        if not entity.is_enemy(shooter) then return end   -- ignore teammates
+
+        -- get impact position
+        local ix = e['x']
+        local iy = e['y']
+        local iz = e['z']
+        if not (ix and iy and iz) then return end
+
+        -- get local player position
+        local ox, oy, oz = entity.get_prop(lp, 'm_vecOrigin')
+        if not (ox and oy and oz) then return end
+
+        -- distance check (squared for performance)
+        local dx, dy, dz = ix-ox, iy-oy, iz-oz
+        local dist_sq = dx*dx + dy*dy + dz*dz
+        if dist_sq > EVADE_RADIUS * EVADE_RADIUS then return end
+
+        -- Log to on-screen event log
+        push_evade()
+
+        -- Log to console
+        local name = entity.get_player_name(shooter) or '?'
+        client.color_log(90, 200, 255, '[Zenith]\0')
+        client.color_log(180, 180, 180, ' Evaded shot from \0')
+        client.color_log(255, 180, 80,  name)
+    end)
+end
+
 
 --- region eventlogs  (REWORKED)
 do
@@ -4540,6 +4611,100 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
+        --- region custom scope
+    do
+        custom_scope.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Scope Overlay")
+        : record("aa", "custom_scope::enabled")
+        : save()
+
+        custom_scope.color = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", "Color", 255, 255, 255, 255)
+        : record("aa", "custom_scope::color")
+        : save()
+
+        custom_scope.mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Mode", { 'Default', 'T' })
+        : record("aa", "custom_scope::mode")
+        : save()
+
+        custom_scope.position = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "\nPosition", 0, 500, 50, true, 'px')
+        : record("aa", "custom_scope::position")
+        : save()
+
+        custom_scope.offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "\nOffset", 0, 500, 10, true, 'px')
+        : record("aa", "custom_scope::offset")
+        : save()
+
+        local alpha = 0
+        client.set_event_callback('paint_ui', function ()
+            ui.set(software.visuals.scope_overlay, true)
+        end)
+
+        client.set_event_callback('paint', function ()
+            if not custom_scope.enabled:get() then
+                return
+            end
+
+            ui.set(software.visuals.scope_overlay, false)
+
+            local lp = entity.get_local_player()
+            if lp == nil then
+                return
+            end
+
+            local width, height = client.screen_size()
+            local offset, position = custom_scope.offset:get() * height / 1080, custom_scope.position:get() * height / 1080
+
+            local condition = entity.get_prop(lp, 'm_bIsScoped') == 1 and entity.get_prop(lp, 'm_bResumeZoom') == 0
+            alpha = motion.interp(alpha, condition, 0.045)
+            if alpha < 0.001 then
+                return
+            end
+
+            local clr = { custom_scope.color:rawget() }
+
+            local clr1 = { clr[1], clr[2], clr[3], 0 }
+            local clr2 = { clr[1], clr[2], clr[3], clr[4] * alpha }
+            local mode = custom_scope.mode:get()
+
+            if mode ~= 'T' then
+                renderer.gradient(
+                    width / 2, height / 2 - position + 2,
+                    1, position - offset,
+                    clr1[1], clr1[2], clr1[3], clr1[4],
+                    clr2[1], clr2[2], clr2[3], clr2[4],
+                    false
+                )
+            end
+
+            renderer.gradient(
+                width / 2, height / 2 + offset,
+                1, position - offset,
+                clr2[1], clr2[2], clr2[3], clr2[4],
+                clr1[1], clr1[2], clr1[3], clr1[4],
+                false
+            )
+
+            renderer.gradient(
+                width / 2 - position + 2, height / 2,
+                position - offset, 1,
+                clr1[1], clr1[2], clr1[3], clr1[4],
+                clr2[1], clr2[2], clr2[3], clr2[4],
+                true
+            )
+
+            renderer.gradient(
+                width / 2 + offset, height / 2,
+                position - offset, 1,
+                clr2[1], clr2[2], clr2[3], clr2[4],
+                clr1[1], clr1[2], clr1[3], clr1[4],
+                true
+            )
+        end)
+
+        defer(function ()
+            ui.set_visible(software.visuals.scope_overlay, true)
+        end)
+    end
+
 end)()
 
 --- hit marker zenith
@@ -4616,6 +4781,165 @@ do
     end
 end
 
+
+--- region yaw_direction
+do
+
+    yaw_direction.edge_yaw = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", merge { "Edge Yaw", "\n", "yaw_direction::edge_yaw" })
+    : record("aa", "yaw_direction::edge_yaw")
+
+    yaw_direction.freestanding = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", merge { "Freestanding", "\n", "yaw_direction::freestanding" })
+    : record("aa", "yaw_direction::freestanding")
+
+    fs_disablers.states = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- Disable On", "\n", "fs_disablers::states" }, {"Standing", "Moving", "Slow Walk", "Crouched", "Air" })
+    : record("aa", "fs_disablers::states")
+    : save()
+
+    function yaw_direction.update(ctx)
+        if not aa_tweaks.enable:get() then
+            return
+        end
+
+        if aa_tweaks.items:have_key('Edge Yaw on FD') and software.is_duck_peek_assist() then
+            ctx.edge_yaw = true, 1
+        else
+            ctx.edge_yaw = yaw_direction.edge_yaw:rawget()
+        end
+
+        ctx.freestanding = yaw_direction.freestanding:rawget()
+    end
+end
+
+--- region freestqand disaskdfkskd
+do
+    local function get_statement()
+        if localplayer.is_airborne then
+            return "Air"
+        end
+
+        if localplayer.is_crouched then
+            return "Crouched"
+        end
+
+        if localplayer.is_moving then
+            if software.is_slow_motion() then
+                return "Slow Walk"
+            end
+
+            return "Moving"
+        end
+
+        return "Standing"
+    end
+
+    function fs_disablers.update(ctx)
+        local state = get_statement()
+        if state == nil then
+            return
+        end
+
+        if not fs_disablers.states:have_key(state) then
+            return
+        end
+
+        ctx.freestanding = false
+    end
+end
+
+
+--- clientside nickname
+do
+    clientside_nickname.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Client-Side Nickname")
+    : record("visuals", "clientside_nickname::enabled")
+    : save()
+
+    clientside_nickname.nickname = menu.new_item(ui.new_textbox, "AA", "Anti-aimbot angles", "Nickname")
+    : record("visuals", "clientside_nickname::nickname")
+    : save()
+
+    local panorama = panorama.open()
+
+    local native_BaseLocalClient_base = ffi.cast("uintptr_t**", memory.pattern_scan("engine.dll", "A1 ? ? ? ? 0F 28 C1 F3 0F 5C 80 ? ? ? ? F3 0F 11 45 ? A1 ? ? ? ? 56 85 C0 75 04 33 F6 EB 26 80 78 14 00 74 F6 8B 4D 08 33 D2 E8 ? ? ? ? 8B F0 85 F6", 1))
+
+    local player_info_t = ffi.typeof([[
+        struct {
+            int64_t         unknown;
+            int64_t         steamID64;
+            char            szName[128];
+            int             userId;
+            char            szSteamID[20];
+            char            pad_0x00A8[0x10];
+            unsigned long   iSteamID;
+            char            szFriendsName[128];
+            bool            fakeplayer;
+            bool            ishltv;
+            unsigned int    customfiles[4];
+            unsigned char   filesdownloaded;
+        }
+    ]])
+
+    local native_GetStringUserData = vtable_thunk(11, ffi.typeof("$*(__thiscall*)(void*, int, int*)", player_info_t))
+
+    local previous_name
+    local function apply_nickname(name)
+        local local_player = entity.get_local_player()
+        if not local_player then
+            return
+        end
+
+        local native_BaseLocalClient = native_BaseLocalClient_base[0][0]
+        if not native_BaseLocalClient then
+            return
+        end
+
+        local native_UserInfoTable = ffi.cast("void***", native_BaseLocalClient + 0x52C0)[0]
+        if not native_UserInfoTable then
+            return
+        end
+
+        local data = native_GetStringUserData(native_UserInfoTable, local_player - 1, nil)
+        if not data then
+            return
+        end
+
+        local this_name = ffi.string(data[0].szName)
+        if name ~= this_name and previous_name == nil then
+            previous_name = this_name
+        end
+
+        data[0].szName = ffi.new("char[128]", name)
+    end
+
+    local was_applied = false
+    local function callback()
+        local chosen_nick = ui.get(clientside_nickname.nickname:get_ref()):sub(0, 32)
+        clientside_nickname.nickname:set(chosen_nick)
+
+        if not clientside_nickname.enabled:get() or #chosen_nick == 0 then
+            if was_applied then
+                was_applied = false
+                apply_nickname(previous_name or panorama["MyPersonaAPI"]["GetName"]())
+                previous_name = nil
+            end
+
+            return
+        end
+
+        was_applied = true
+
+        apply_nickname(chosen_nick)
+    end
+
+    clientside_nickname.apply = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "Apply", callback)
+    : record("visuals", "clientside_nickname::apply")
+
+    clientside_nickname.enabled:set_callback(callback)
+
+    client.set_event_callback('round_prestart', callback)
+    client.set_event_callback('player_connect_full', callback)
+
+    callback()
+end
 
 --- region shared
 do
@@ -5575,14 +5899,56 @@ menu.set_callback(function()
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     -- ── DEFENSIVE ────────────────────────────────────────────────────
     if page == "Builder" then
-        -- ── Zenith AA ────────────────────────────────────────────────
+        -- Zenith AA (screenshot layout)
         local hd = _G._hd_state
         if hd then
+            -- LEFT PANEL: Per-state AA config
+            _safe_display(hd.ui_state)
+            _safe_display(hd.ui_team)
+
+            _safe_display(hd.ui_force_def)
+            if hd.ui_force_def:get() then
+                _safe_display(hd.ui_def_on)
+                _safe_display(hd.ui_def_mode)
+            end
+
+            _safe_display(hd.ui_custom_ticks)
             _safe_display(hd.ui_enable)
+
             if hd.ui_enable:get() then
-                -- General
-                _safe_display(hd.ui_inverter)
-                _safe_display(hd.ui_safehead)
+                _safe_display(hd.ui_yaw_left)
+                _safe_display(hd.ui_yaw_right)
+
+                _safe_display(hd.ui_yaw_rnd_mode)
+                if hd.ui_yaw_rnd_mode:get() ~= "Off" then
+                    _safe_display(hd.ui_yaw_rnd_left)
+                    _safe_display(hd.ui_yaw_rnd_right)
+                end
+
+                _safe_display(hd.ui_yaw_jitter)
+                if hd.ui_yaw_jitter:get() ~= "Off" then
+                    _safe_display(hd.ui_yaw_jitter_deg)
+                end
+                _safe_display(hd.ui_randomization)
+
+                _safe_display(hd.ui_body_yaw)
+                if hd.ui_body_yaw:get() ~= "Off" then
+                    _safe_display(hd.ui_body_yaw_deg)
+                end
+
+                _safe_display(hd.ui_delay_from)
+                _safe_display(hd.ui_delay_to)
+                _safe_display(hd.ui_delay_count)
+                _safe_display(hd.ui_delay_tick1)
+                _safe_display(hd.ui_delay_rnd)
+                _safe_display(hd.ui_switch_chance)
+
+                -- RIGHT PANEL: Fake lag column
+                _safe_display(hd.ui_fl_settings)
+                _safe_display(hd.ui_vulnlc)
+                _safe_display(hd.ui_edge_yaw)
+                _safe_display(hd.ui_freestanding)
+
                 _safe_display(hd.ui_manual)
                 if hd.ui_manual:get() then
                     _safe_display(hd.ui_man_left)
@@ -5590,58 +5956,23 @@ menu.set_callback(function()
                     _safe_display(hd.ui_man_reset)
                 end
 
-                -- LC Breaker
-                _safe_display(hd.ui_vulnlc)
+                _safe_display(hd.ui_avoid_bs)
+                _safe_display(hd.ui_safehead)
 
-                -- Fake lag
                 _safe_display(hd.ui_fl_on)
                 if hd.ui_fl_on:get() then
                     _safe_display(hd.ui_fl_mode)
+                    _safe_display(hd.ui_fl_variance)
                     _safe_display(hd.ui_fl_limit)
                 end
 
-                -- Defensive snap
-                _safe_display(hd.ui_snap_on)
-                if hd.ui_snap_on:get() then
-                    _safe_display(hd.ui_snap_ping)
-                    _safe_display(hd.ui_snap_os)
-                    _safe_display(hd.ui_snap_pitch)
-                    local sp = hd.ui_snap_pitch:get()
-                    if sp ~= "None" then
-                        _safe_display(hd.ui_snap_pmin)
-                        _safe_display(hd.ui_snap_pmax)
-                    end
-                    _safe_display(hd.ui_snap_yaw)
-                    if hd.ui_snap_yaw:get() ~= "None" then
-                        _safe_display(hd.ui_snap_ymin)
-                    end
-                end
-
-                -- Builder
-                _safe_display(hd.ui_builder_state)
-                _safe_display(hd.ui_b_yoff)
-                _safe_display(hd.ui_b_mod)
-                local bmod = hd.ui_b_mod:get()
-                if bmod ~= "None" then
-                    _safe_display(hd.ui_b_mdeg)
-                end
-                _safe_display(hd.ui_b_body)
-                if hd.ui_b_body:get() then
-                    _safe_display(hd.ui_b_bjit)
-                    _safe_display(hd.ui_b_bmode)
-                    local bm = hd.ui_b_bmode:get()
-                    if bm == "Default" then
-                        _safe_display(hd.ui_b_bdeg)
-                    elseif bm == "Side-based" then
-                        _safe_display(hd.ui_b_bleft)
-                        _safe_display(hd.ui_b_bright)
-                    end
-                end
+                -- Inverter hotkey
+                _safe_display(hd.ui_inverter)
             end
         end
     end
 
-    -- ── RESOLVER ─────────────────────────────────────────────────────
+
     if page == "Resolver" then
         if resolver_show_tab then resolver_show_tab() end
     end
