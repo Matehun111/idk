@@ -2990,12 +2990,12 @@ do
     : record("aa","hd::inverter") : save()
 
     -- section header labels  \a71bc78ff = green accent, \xe2\x96\xba = filled triangle
-    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Pitch")
-    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Yaw")
-    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Body Yaw")
-    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Delay")
-    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Fake Lag")
-    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Controls")
+    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "71bc78ff► Pitch")
+    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "71bc78ff► Yaw")
+    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "71bc78ff► Body Yaw")
+    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "71bc78ff► Delay")
+    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "71bc78ff► Fake Lag")
+    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "71bc78ff► Controls")
 
     -- =========================================================
     --  PRESET SAVE / LOAD  (editor <-> presets <-> hidden storage)
