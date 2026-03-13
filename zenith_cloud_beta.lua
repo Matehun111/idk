@@ -2779,6 +2779,14 @@ do
         merge{"Inverter", "\n", "hd::inverter"})
     : record("aa","hd::inverter") : save()
 
+    -- section header labels  \a71bc78ff = green accent, \xe2\x96\xba = filled triangle
+    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Pitch")
+    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Yaw")
+    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Body Yaw")
+    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Delay")
+    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Fake Lag")
+    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Controls")
+
     -- =========================================================
     --  PRESET SAVE / LOAD   (editor <-> presets table)
     -- =========================================================
@@ -3813,27 +3821,108 @@ do
 
     rawset(_G, '_zn_inferno', inferno)
     rawset(_G, '_zn_regular', regular)
+
+    -- -- Console hitlog -----------------------------------------------
+    -- Detailed per-shot log to console: hit/miss reason, HC, hitgroup, yaw
+    local _fire_data = {}  -- { damage, hitgroup, tick, target }
+
+    local HG_FULL = {
+        [0]='generic',[1]='head',[2]='chest',[3]='stomach',
+        [4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg',[8]='neck'
+    }
+
+    local function get_yaw_info()
+        local lp = entity.get_local_player()
+        if not lp then return '?' end
+        local y = entity.get_prop(lp, 'm_angEyeAngles[1]')
+        return y and f('%.0f', y) or '?'
+    end
+
+    client.set_event_callback('aim_fire', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        _fire_data.damage   = e.damage
+        _fire_data.hitgroup = e.hitgroup
+        _fire_data.tick     = e.tick
+        _fire_data.target   = e.target
+        _fire_data.yaw      = get_yaw_info()
+    end)
+
+    client.set_event_callback('aim_hit', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local name = (e.target and entity.get_player_name(e.target)) or '?'
+        local hg   = HG_FULL[e.hitgroup] or 'body'
+        local hc   = e.hit_chance or 0
+        local dmg  = e.damage or 0
+        local bt   = globals.tickcount() - (_fire_data.tick or globals.tickcount())
+        local yaw  = _fire_data.yaw or '?'
+        client.color_log(120, 220, 120, '[Zenith] \0')
+        client.color_log(255, 255, 255, f('HIT %s ', name))
+        client.color_log(255, 220, 60,  f('[%s] \0', hg))
+        client.color_log(255, 255, 255, f('%d dmg  \0', dmg))
+        client.color_log(160, 200, 255, f('HC %d%%  bt %dt  yaw %s', hc, bt, yaw))
+    end)
+
+    client.set_event_callback('aim_miss', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local name   = (e.target and entity.get_player_name(e.target)) or '?'
+        local reason = e.reason or 'correction'
+        local hg     = HG_FULL[e.hitgroup] or 'body'
+        local hc     = e.hit_chance or 0
+        local bt     = globals.tickcount() - (_fire_data.tick or globals.tickcount())
+        local yaw    = _fire_data.yaw or '?'
+        client.color_log(220, 80,  80,  '[Zenith] \0')
+        client.color_log(255, 255, 255, f('MISS %s ', name))
+        client.color_log(255, 160, 80,  f('[%s -> %s]  \0', hg, reason))
+        client.color_log(160, 200, 255, f('HC %d%%  bt %dt  yaw %s', hc, bt, yaw))
+    end)
 end
 
 --- region evaded_shot_log
 do
-    -- Detect when an ENEMY bullet passes near local player but does NOT hit them.
-    -- player_hurt tracks actual hits so we can exclude them from "evaded" counts.
+    -- Detect when an enemy bullet passes NEAR but does NOT HIT the local player.
+    -- We suppress the evade log if the local player was hurt by that same shooter
+    -- in the same server tick (meaning the bullet DID land).
 
-    local EVADE_RADIUS   = 80
+    local EVADE_RADIUS   = 72
     local EVADE_DURATION = 4.0
     local KIND_EVADE     = { icon = '\xe2\x9c\x93', r = 90, g = 200, b = 255 }
 
-    local last_hurt_tick = -999
+    -- table of { tick, shooter_entindex } for every time we were hurt
+    local hurt_log = {}
 
     client.set_event_callback('player_hurt', function(e)
         local lp = entity.get_local_player()
         if not lp then return end
-        local uid = e['userid']
-        if uid and client.userid_to_entindex(uid) == lp then
-            last_hurt_tick = globals.tickcount()
+        -- e.userid = victim, e.attacker = shooter
+        local victim_id = e['userid']
+        if not victim_id then return end
+        local victim = client.userid_to_entindex(victim_id)
+        if victim ~= lp then return end
+        local attacker_id = e['attacker']
+        if not attacker_id then return end
+        local attacker = client.userid_to_entindex(attacker_id)
+        if not attacker then return end
+        -- record this hit so bullet_impact can check against it
+        hurt_log[#hurt_log + 1] = { tick = globals.tickcount(), shooter = attacker }
+        -- prune old entries
+        local cur = globals.tickcount()
+        for i = #hurt_log, 1, -1 do
+            if cur - hurt_log[i].tick > 2 then table.remove(hurt_log, i) end
         end
     end)
+
+    local function was_hit_by(shooter_ent)
+        local cur = globals.tickcount()
+        for _, h in ipairs(hurt_log) do
+            if h.shooter == shooter_ent and cur - h.tick <= 1 then
+                return true
+            end
+        end
+        return false
+    end
 
     local function push_evade(shooter)
         local reg = _G._zn_regular
@@ -3860,8 +3949,8 @@ do
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        -- bullet actually hit the player this tick = not an evade
-        if globals.tickcount() == last_hurt_tick then return end
+        -- if shooter actually hit us (within 1 tick) this is not an evade
+        if was_hit_by(shooter) then return end
 
         local shooter_id = e['userid']
         if not shooter_id then return end
@@ -3914,8 +4003,29 @@ do
         { kind={ icon='\xe2\x9c\x93', r=90, g=200,b=255 }, text='Evaded  \a[nick]xXsniper420Xx\aFFFFFFFF',                                    alpha=1, slide=1 },
     }
 
-    local widget = windows.new('##EventLogsV2', 0.78, 0.70)
+    -- Persistent position sliders (hidden, saved via config system)
+    local _pos_x_item = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge{'\n','eventlog::pos_x'}, 0, 10000, 7800)
+        :record('visuals','eventlog::pos_x'):save()
+    local _pos_y_item = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge{'\n','eventlog::pos_y'}, 0, 10000, 7000)
+        :record('visuals','eventlog::pos_y'):save()
+
+    local widget = windows.new('##EventLogsV2', _pos_x_item:get() / 10000, _pos_y_item:get() / 10000)
     widget:set_size(vector(220, 20))
+
+    -- save position when dragged
+    local _save_timer = 0
+    local function maybe_save_pos()
+        _save_timer = _save_timer - globals.frametime()
+        if _save_timer > 0 then return end
+        if not widget:is_dragging() then return end
+        _save_timer = 0.5
+        local screen = vector(client.screen_size())
+        local pos = widget.pos
+        _pos_x_item:set(math.floor(pos.x / screen.x * 10000 + 0.5))
+        _pos_y_item:set(math.floor(pos.y / screen.y * 10000 + 0.5))
+    end
 
     local hovered_alpha = 0.0
 
@@ -3988,6 +4098,7 @@ do
 
         widget:set_size(vector(240, math.max(20, total_h)))
         widget:update()
+        maybe_save_pos()
     end
 
     eventlogs.add        = function() end
@@ -4138,79 +4249,83 @@ LPH_NO_VIRTUALIZE(function ()
             update_timer(nci, globals.frametime())
             if nci == nil then return end
 
-            local clock = globals.realtime()
-            glow_t = glow_t + globals.frametime()
-
-            local flags  = "d"
+            local flags = "d"
             local r, g, b = widgets.color_picker:rawget()
-            local a      = alpha
-
+            local a  = alpha
+            local ia = math.floor(255 * a)
             local screen = vector(client.screen_size())
 
-            -- collect display tokens
-        local tokens = {}
-        if widgets.display:have_key("Username") then
-            local nick = USERNAME
-            if widgets.custom_name:get() then
-                local cn = ui.get(widgets.custom_name_value:get_ref())
-                if #cn ~= 0 then nick = cn end
+            -- collect tokens
+            local tokens = {}
+            if widgets.display:have_key("Username") then
+                local nick = USERNAME
+                if widgets.custom_name:get() then
+                    local cn = ui.get(widgets.custom_name_value:get_ref())
+                    if #cn ~= 0 then nick = cn end
+                end
+                tokens[#tokens+1] = { label = nick, accent = true }
             end
-            tokens[#tokens+1] = nick
+            if widgets.display:have_key("Latency") then
+                local p = get_ping(nci)
+                if p then tokens[#tokens+1] = { label = p } end
+            end
+            if widgets.display:have_key("FPS") then
+                tokens[#tokens+1] = { label = f("%dfps", math.floor(1 / get_framerate())) }
+            end
+            if widgets.display:have_key("Time") then
+                tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
+            end
+
+            local LOGO_W = texture ~= nil and 26 or 0
+            local PAD    = 8
+            local brand  = "Zenith"
+            local bw, bh = renderer.measure_text(flags, brand)
+
+            local info_w = 0
+            for _, t in ipairs(tokens) do
+                info_w = info_w + renderer.measure_text(flags, t.label)
+            end
+            if #tokens > 0 then info_w = info_w + #tokens * 18 end
+
+            local box_w = LOGO_W + PAD * 2 + bw + info_w
+            local box_h = bh + PAD * 2 - 2
+            local px    = screen.x - 9 - box_w
+            local py    = 9
+
+            -- card
+            graphics.rectangle(px, py, box_w, box_h, 8, 8, 11, math.floor(200 * a), 4)
+            -- left accent strip
+            renderer.rectangle(px, py + 4, 2, box_h - 8, r, g, b, ia)
+            -- bottom line
+            renderer.rectangle(px + 4, py + box_h - 1, box_w - 8, 1, r, g, b, math.floor(60 * a))
+
+            if texture ~= nil then
+                renderer.texture(texture, px + PAD, py + (box_h - 22) * 0.5,
+                    22, 22, 255, 255, 255, ia, "f")
+            end
+
+            local tx = px + LOGO_W + PAD
+            local ty = py + (box_h - bh) * 0.5
+            renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
+            tx = tx + bw
+
+            if #tokens > 0 then
+                renderer.rectangle(tx + 6, py + 4, 1, box_h - 8, 55, 55, 60, math.floor(150 * a))
+                tx = tx + 14
+                for i, t in ipairs(tokens) do
+                    local cr = t.accent and r or 175
+                    local cg = t.accent and g or 175
+                    local cb = t.accent and b or 180
+                    local tw2 = renderer.measure_text(flags, t.label)
+                    renderer.text(tx, ty, cr, cg, cb, math.floor(230 * a), flags, 0, t.label)
+                    tx = tx + tw2
+                    if i < #tokens then
+                        renderer.text(tx, ty, 50, 50, 55, math.floor(160 * a), flags, 0, "  |  ")
+                        tx = tx + renderer.measure_text(flags, "  |  ")
+                    end
+                end
+            end
         end
-        if widgets.display:have_key("Latency") then
-            local p = get_ping(nci)
-            if p then tokens[#tokens+1] = p end
-        end
-        if widgets.display:have_key("FPS") then
-            tokens[#tokens+1] = f("%dfps", math.floor(1 / get_framerate()))
-        end
-        if widgets.display:have_key("Time") then
-            tokens[#tokens+1] = f("%02d:%02d", client.system_time())
-        end
-
-        -- layout
-        local PAD_X  = 10
-        local PAD_Y  = 6
-        local RADIUS = 4
-        local SEP    = "  |  "
-        local LOGO_W = texture ~= nil and 26 or 0
-
-        local brand    = "Zenith"
-        local info_str = #tokens > 0 and (SEP .. table.concat(tokens, SEP)) or ""
-        local full_str = brand .. info_str
-
-        local bw, bh  = renderer.measure_text(flags, brand)
-        local tw, th  = renderer.measure_text(flags, full_str)
-
-        local box_w   = LOGO_W + PAD_X * 2 + tw
-        local box_h   = PAD_Y * 2 + bh
-
-        local px = screen.x - 9 - box_w
-        local py = 9
-        local ia = math.floor(255 * a)
-
-        -- background
-        graphics.rectangle(px, py, box_w, box_h, 10, 10, 13, math.floor(185 * a), RADIUS)
-        -- top accent bar
-        renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, 2, r, g, b, ia)
-
-        -- logo
-        if texture ~= nil then
-            renderer.texture(texture, px + PAD_X, py + (box_h - 22) * 0.5,
-                22, 22, 255, 255, 255, ia, "f")
-        end
-
-        local tx = px + LOGO_W + PAD_X
-        local ty = py + (box_h - bh) * 0.5
-
-        -- brand in accent
-        renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
-
-        -- info tokens dim white
-        if #info_str > 0 then
-            renderer.text(tx + bw, ty, 180, 180, 185, math.floor(200 * a), flags, 0, info_str)
-        end
-    end
     end
 
         --- region keybinds
@@ -6108,31 +6223,30 @@ menu.set_callback(function()
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     -- ── DEFENSIVE ────────────────────────────────────────────────────
-    if page == "Builder" then
+        if page == "Builder" then
         local hd = _G._hd_state
         if hd then
             _safe_display(hd.ui_enable)
             if hd.ui_enable:get() then
 
-                -- State editor selector
                 _safe_display(hd.ui_state)
 
                 -- Pitch
+                if hd.lbl_pitch then _safe_display(hd.lbl_pitch) end
                 _safe_display(hd.ui_pitch)
                 if hd.ui_pitch:get() == "Custom" then
                     _safe_display(hd.ui_pitch_custom)
                 end
 
                 -- Yaw
+                if hd.lbl_yaw then _safe_display(hd.lbl_yaw) end
                 _safe_display(hd.ui_yaw_left)
                 _safe_display(hd.ui_yaw_right)
-
                 _safe_display(hd.ui_yaw_rnd_mode)
                 if hd.ui_yaw_rnd_mode:get() ~= "Off" then
                     _safe_display(hd.ui_yaw_rnd_left)
                     _safe_display(hd.ui_yaw_rnd_right)
                 end
-
                 _safe_display(hd.ui_yaw_jitter)
                 if hd.ui_yaw_jitter:get() ~= "Off" then
                     _safe_display(hd.ui_yaw_jitter_deg)
@@ -6140,53 +6254,53 @@ menu.set_callback(function()
                 _safe_display(hd.ui_randomization)
                 _safe_display(hd.ui_switch_chance)
 
-                -- Body yaw
+                -- Body Yaw
+                if hd.lbl_body then _safe_display(hd.lbl_body) end
                 _safe_display(hd.ui_body_yaw)
                 if hd.ui_body_yaw:get() ~= "Off" then
                     _safe_display(hd.ui_body_yaw_deg)
                 end
 
                 -- Delay
+                if hd.lbl_delay then _safe_display(hd.lbl_delay) end
                 _safe_display(hd.ui_delay_from)
                 _safe_display(hd.ui_delay_to)
                 _safe_display(hd.ui_delay_count)
                 _safe_display(hd.ui_delay_tick1)
                 _safe_display(hd.ui_delay_rnd)
 
-                -- Fake lag (right panel / global)
+                -- Fake Lag
+                if hd.lbl_fl then _safe_display(hd.lbl_fl) end
                 _safe_display(hd.ui_fl_settings)
-                _safe_display(hd.ui_vulnlc)
-                _safe_display(hd.ui_edge_yaw)
-                _safe_display(hd.ui_freestanding)
-
-                _safe_display(hd.ui_manual)
-                if hd.ui_manual:get() then
-                    _safe_display(hd.ui_man_left)
-                    _safe_display(hd.ui_man_right)
-                    _safe_display(hd.ui_man_reset)
-                end
-
-                _safe_display(hd.ui_avoid_bs)
-                _safe_display(hd.ui_safehead)
-
-                _safe_display(hd.ui_force_def)
-                if hd.ui_force_def:get() then
-                    _safe_display(hd.ui_def_on)
-                    _safe_display(hd.ui_def_mode)
-                end
-
                 _safe_display(hd.ui_fl_on)
                 if hd.ui_fl_on:get() then
                     _safe_display(hd.ui_fl_mode)
                     _safe_display(hd.ui_fl_variance)
                     _safe_display(hd.ui_fl_limit)
                 end
+                _safe_display(hd.ui_vulnlc)
 
+                -- Controls
+                if hd.lbl_ctrl then _safe_display(hd.lbl_ctrl) end
                 _safe_display(hd.ui_inverter)
+                _safe_display(hd.ui_edge_yaw)
+                _safe_display(hd.ui_freestanding)
+                _safe_display(hd.ui_manual)
+                if hd.ui_manual:get() then
+                    _safe_display(hd.ui_man_left)
+                    _safe_display(hd.ui_man_right)
+                    _safe_display(hd.ui_man_reset)
+                end
+                _safe_display(hd.ui_avoid_bs)
+                _safe_display(hd.ui_safehead)
+                _safe_display(hd.ui_force_def)
+                if hd.ui_force_def:get() then
+                    _safe_display(hd.ui_def_on)
+                    _safe_display(hd.ui_def_mode)
+                end
             end
         end
     end
-
 
     if page == "Visual" then
         _safe_display(widgets.enabled)
@@ -6764,6 +6878,14 @@ do
     end)
     client.set_event_callback('round_poststart', function()
         _win_panel = false
+        -- force-apply clantag on round start for immediate scoreboard visibility
+        if mp.ct_en and mp.ct_en:get() then
+            local ok2, txt = pcall(ui.get, mp.ct_text.ref)
+            client.set_clan_tag((ok2 and txt and txt ~= '') and txt or 'zenith.gs')
+        end
+    end)
+    client.set_event_callback('round_start', function()
+        _old_tick = -999  -- force update on next net_update_end
     end)
 
     local function play_tag(frames, speed, count)

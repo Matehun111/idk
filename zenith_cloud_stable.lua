@@ -1,4 +1,4 @@
--- ZENITH | BETA | Cloud Build
+-- ZENITH | STABLE | Cloud Build
 
 local function _safe_display(obj)
     if obj and type(obj)=="table" and type(obj.display)=="function" then
@@ -979,7 +979,7 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff�  \a666666ffElegance in Execution.')
+    vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -1007,10 +1007,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup = group_fakelag:label(string.format('\a888888ff | \affffffffUser   \a888888ff> \a71bc78ff%s', USERNAME))
-shared.fl_build = group_fakelag:label('\a888888ff | \affffffffBranch  \a888888ff> \a71bc78ffStable')
-shared.fl_version = group_fakelag:label('\a888888ff | \affffffffVersion  \a888888ff> \a71bc78ff3.0')
-shared.fl_online = group_fakelag:label('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff...')
+shared.fl_whatsup     = group_fakelag:label(string.format('\a77ff99ffWelcome, \aff9955ff%s\affffffff!', USERNAME))
+shared.fl_build       = group_fakelag:label(string.format('Build: \a77ccffff%s', BUILD))
+shared.fl_online      = group_fakelag:label('Online: \affd700ff...')
+shared.fl_leaderboard = group_fakelag:label('Leaderboard: ...')
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1040,7 +1040,7 @@ do
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> %s%d', col, n))
+            shared.fl_online:set(string.format('Online: %s%d\affffffff', col, n))
         end
     end
 
@@ -1311,6 +1311,8 @@ client.set_event_callback('paint_ui', function()
 
     local ref = software.misc.settings.menu_color
     local r, g, b, a = ui.get(ref)
+    local water_ui = helpers['functions']:fade_handle2(-globals.curtime(), '  Z  E  N  I  T  H', r, g, b)
+    vars.selection.label:set("                    "..table.concat(water_ui))
 end)
 
 client.set_event_callback('shutdown', function()
@@ -1332,8 +1334,7 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Visual", "Configs"}
-    if _HAS_AIMBOT   then --[[aimbot disabled]] end
+    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Configs"}
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -1356,18 +1357,6 @@ function gui.frame()
         ui.set_visible(ot.fake_peek[1],       false)
 end
 
--- Disable aimbot-related UI on stable build
-if not _HAS_AIMBOT then
-    -- Hide exploit/dt buttons on stable; they'll still exist but be inert
-    client.delay_call(0.5, function()
-        local function safe_hide(ref)
-            pcall(ui.set_visible, ref, false)
-        end
-        safe_hide(software.rage.aimbot.double_tap[1])
-        safe_hide(software.rage.aimbot.force_body_aim)
-        safe_hide(software.rage.aimbot.force_safe_point)
-    end)
-end
 
 --- region motion
 do
@@ -2310,6 +2299,7 @@ do
     end
 
     local function setup()
+        yaw_direction.is_freestanding = false
         if ctx.enabled ~= nil then
             override.set(software.aa.angles.enabled, ctx.enabled)
         else
@@ -2318,12 +2308,6 @@ do
 
         if ctx.pitch ~= nil then
             override.set(software.aa.angles.pitch[1], ctx.pitch)
-            -- apply custom offset immediately, don't rely on ui.get to see the override
-            if ctx.pitch_offset ~= nil then
-                override.set(software.aa.angles.pitch[2], utils.clamp(ctx.pitch_offset, -89, 89))
-            else
-                override.unset(software.aa.angles.pitch[2])
-            end
         end
 
         if ctx.yaw_base ~= nil then
@@ -2343,6 +2327,7 @@ do
         end
 
         if ctx.freestanding ~= nil then
+            yaw_direction.is_freestanding = ctx.freestanding
             override.set(software.aa.angles.freestanding[1], ctx.freestanding)
             override.set(software.aa.angles.freestanding[2], ctx.freestanding and
                 "Always on" or "On hotkey")
@@ -2352,8 +2337,15 @@ do
             override.set(software.aa.angles.roll, ctx.roll)
         end
 
+        local pitch_value = ui.get(software.aa.angles.pitch[1])
         local yaw_value = ui.get(software.aa.angles.yaw[1])
         local body_yaw_value = ui.get(software.aa.angles.body_yaw[1])
+
+        if pitch_value == "Custom" then
+            if ctx.pitch_offset ~= nil then
+                override.set(software.aa.angles.pitch[2], utils.clamp(ctx.pitch_offset, -89, 89))
+            end
+        end
 
         if yaw_value ~= "Off" then
             if ctx.yaw_offset ~= nil then
@@ -2391,6 +2383,8 @@ do
     end
 
     local function update(e)
+        angles.update(ctx)
+        yaw_direction.update(ctx)
         auto_peek.perform(ctx)
         manual_direction.update(ctx)
 
@@ -2538,7 +2532,6 @@ do
         end
     end)
 end
-
 
 --- region defensive
 do
@@ -2778,6 +2771,14 @@ do
     hd.ui_inverter = menu.new_item(ui.new_hotkey, G, GR,
         merge{"Inverter", "\n", "hd::inverter"})
     : record("aa","hd::inverter") : save()
+
+    -- section header labels  \a71bc78ff = green accent, \xe2\x96\xba = filled triangle
+    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Pitch")
+    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Yaw")
+    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Body Yaw")
+    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Delay")
+    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Fake Lag")
+    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Controls")
 
     -- =========================================================
     --  PRESET SAVE / LOAD   (editor <-> presets table)
@@ -3688,16 +3689,6 @@ do
     end
 end
 
--- ======================================================================
---  ZENITH | REWORKED ON-SCREEN EVENT LOG
---  • Pill/card per entry with rounded accent background
---  • Slide-in animation (from right)
---  • Smooth alpha fade-out
---  • Icons per event type  (✦ hit │ ✖ miss │ ✸ burn │ ↯ unreg)
---  • Color-coded by category
---  • Draggable position anchor
--- ======================================================================
-
 --- region log_aimbot_shots  (REWORKED)
 do
     local DURATION    = 6.0
@@ -3813,27 +3804,108 @@ do
 
     rawset(_G, '_zn_inferno', inferno)
     rawset(_G, '_zn_regular', regular)
+
+    -- -- Console hitlog -----------------------------------------------
+    -- Detailed per-shot log to console: hit/miss reason, HC, hitgroup, yaw
+    local _fire_data = {}  -- { damage, hitgroup, tick, target }
+
+    local HG_FULL = {
+        [0]='generic',[1]='head',[2]='chest',[3]='stomach',
+        [4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg',[8]='neck'
+    }
+
+    local function get_yaw_info()
+        local lp = entity.get_local_player()
+        if not lp then return '?' end
+        local y = entity.get_prop(lp, 'm_angEyeAngles[1]')
+        return y and f('%.0f', y) or '?'
+    end
+
+    client.set_event_callback('aim_fire', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        _fire_data.damage   = e.damage
+        _fire_data.hitgroup = e.hitgroup
+        _fire_data.tick     = e.tick
+        _fire_data.target   = e.target
+        _fire_data.yaw      = get_yaw_info()
+    end)
+
+    client.set_event_callback('aim_hit', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local name = (e.target and entity.get_player_name(e.target)) or '?'
+        local hg   = HG_FULL[e.hitgroup] or 'body'
+        local hc   = e.hit_chance or 0
+        local dmg  = e.damage or 0
+        local bt   = globals.tickcount() - (_fire_data.tick or globals.tickcount())
+        local yaw  = _fire_data.yaw or '?'
+        client.color_log(120, 220, 120, '[Zenith] \0')
+        client.color_log(255, 255, 255, f('HIT %s ', name))
+        client.color_log(255, 220, 60,  f('[%s] \0', hg))
+        client.color_log(255, 255, 255, f('%d dmg  \0', dmg))
+        client.color_log(160, 200, 255, f('HC %d%%  bt %dt  yaw %s', hc, bt, yaw))
+    end)
+
+    client.set_event_callback('aim_miss', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local name   = (e.target and entity.get_player_name(e.target)) or '?'
+        local reason = e.reason or 'correction'
+        local hg     = HG_FULL[e.hitgroup] or 'body'
+        local hc     = e.hit_chance or 0
+        local bt     = globals.tickcount() - (_fire_data.tick or globals.tickcount())
+        local yaw    = _fire_data.yaw or '?'
+        client.color_log(220, 80,  80,  '[Zenith] \0')
+        client.color_log(255, 255, 255, f('MISS %s ', name))
+        client.color_log(255, 160, 80,  f('[%s -> %s]  \0', hg, reason))
+        client.color_log(160, 200, 255, f('HC %d%%  bt %dt  yaw %s', hc, bt, yaw))
+    end)
 end
 
 --- region evaded_shot_log
 do
-    -- Detect when an ENEMY bullet passes near local player but does NOT hit them.
-    -- player_hurt tracks actual hits so we can exclude them from "evaded" counts.
+    -- Detect when an enemy bullet passes NEAR but does NOT HIT the local player.
+    -- We suppress the evade log if the local player was hurt by that same shooter
+    -- in the same server tick (meaning the bullet DID land).
 
-    local EVADE_RADIUS   = 80
+    local EVADE_RADIUS   = 72
     local EVADE_DURATION = 4.0
     local KIND_EVADE     = { icon = '\xe2\x9c\x93', r = 90, g = 200, b = 255 }
 
-    local last_hurt_tick = -999
+    -- table of { tick, shooter_entindex } for every time we were hurt
+    local hurt_log = {}
 
     client.set_event_callback('player_hurt', function(e)
         local lp = entity.get_local_player()
         if not lp then return end
-        local uid = e['userid']
-        if uid and client.userid_to_entindex(uid) == lp then
-            last_hurt_tick = globals.tickcount()
+        -- e.userid = victim, e.attacker = shooter
+        local victim_id = e['userid']
+        if not victim_id then return end
+        local victim = client.userid_to_entindex(victim_id)
+        if victim ~= lp then return end
+        local attacker_id = e['attacker']
+        if not attacker_id then return end
+        local attacker = client.userid_to_entindex(attacker_id)
+        if not attacker then return end
+        -- record this hit so bullet_impact can check against it
+        hurt_log[#hurt_log + 1] = { tick = globals.tickcount(), shooter = attacker }
+        -- prune old entries
+        local cur = globals.tickcount()
+        for i = #hurt_log, 1, -1 do
+            if cur - hurt_log[i].tick > 2 then table.remove(hurt_log, i) end
         end
     end)
+
+    local function was_hit_by(shooter_ent)
+        local cur = globals.tickcount()
+        for _, h in ipairs(hurt_log) do
+            if h.shooter == shooter_ent and cur - h.tick <= 1 then
+                return true
+            end
+        end
+        return false
+    end
 
     local function push_evade(shooter)
         local reg = _G._zn_regular
@@ -3860,8 +3932,8 @@ do
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        -- bullet actually hit the player this tick = not an evade
-        if globals.tickcount() == last_hurt_tick then return end
+        -- if shooter actually hit us (within 1 tick) this is not an evade
+        if was_hit_by(shooter) then return end
 
         local shooter_id = e['userid']
         if not shooter_id then return end
@@ -3882,7 +3954,6 @@ do
         push_evade(shooter)
     end)
 end
-
 --- region eventlogs  (REWORKED)
 do
     local CARD_PAD_X  = 8
@@ -3914,8 +3985,29 @@ do
         { kind={ icon='\xe2\x9c\x93', r=90, g=200,b=255 }, text='Evaded  \a[nick]xXsniper420Xx\aFFFFFFFF',                                    alpha=1, slide=1 },
     }
 
-    local widget = windows.new('##EventLogsV2', 0.78, 0.70)
+    -- Persistent position sliders (hidden, saved via config system)
+    local _pos_x_item = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge{'\n','eventlog::pos_x'}, 0, 10000, 7800)
+        :record('visuals','eventlog::pos_x'):save()
+    local _pos_y_item = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge{'\n','eventlog::pos_y'}, 0, 10000, 7000)
+        :record('visuals','eventlog::pos_y'):save()
+
+    local widget = windows.new('##EventLogsV2', _pos_x_item:get() / 10000, _pos_y_item:get() / 10000)
     widget:set_size(vector(220, 20))
+
+    -- save position when dragged
+    local _save_timer = 0
+    local function maybe_save_pos()
+        _save_timer = _save_timer - globals.frametime()
+        if _save_timer > 0 then return end
+        if not widget:is_dragging() then return end
+        _save_timer = 0.5
+        local screen = vector(client.screen_size())
+        local pos = widget.pos
+        _pos_x_item:set(math.floor(pos.x / screen.x * 10000 + 0.5))
+        _pos_y_item:set(math.floor(pos.y / screen.y * 10000 + 0.5))
+    end
 
     local hovered_alpha = 0.0
 
@@ -3988,6 +4080,7 @@ do
 
         widget:set_size(vector(240, math.max(20, total_h)))
         widget:update()
+        maybe_save_pos()
     end
 
     eventlogs.add        = function() end
@@ -4001,27 +4094,322 @@ do
     eventlogs.unregistered_color_picker = col(100,140,255)
 end
 
----region неопознан  (hit-rate counter - kept intact)
+---region log aim 4ots
 do
-    local shots do
-        shots = { total = 0, hits = 0 }
-        client.set_event_callback('aim_fire', function() shots.total = shots.total + 1 end)
-        client.set_event_callback('aim_hit',  function() shots.hits  = shots.hits  + 1 end)
-        client.set_event_callback('player_connect_full', function(e)
-            if client.userid_to_entindex(e['userid']) ~= entity.get_local_player() then return end
-            shots.hits = 0; shots.total = 0
-        end)
+    local hitgroup_str = {
+        [0] = 'generic',
+        'head', 'chest', 'stomach',
+        'left arm', 'right arm',
+        'left leg', 'right leg',
+        'neck', 'generic', 'gear'
+    }
+
+    local weapon_verb = {
+        ['hegrenade'] = 'Naded',
+        ['inferno'] = 'Burned',
+        ['knife'] = 'Knifed',
+    }
+
+    local hex_to_rgb = function( hex )
+        hex = hex:gsub('#', '')
+        return tonumber('0x' .. hex:sub(1, 2)), tonumber('0x' .. hex:sub(3, 4)), tonumber('0x' .. hex:sub(5, 6))
     end
 
-    client.set_event_callback('paint_ui', function()
+    local function clean_up(str)
+        local text = str:gsub('(\a%x%x%x%x%x%x)%x%x', '%1')
+        return text
+    end
+
+	local function printc(...)
+		for i, v in ipairs{...} do
+			local r = "\aD9D9D9" .. v
+			for col, text in r:gmatch("\a(%x%x%x%x%x%x)([^\a]*)") do
+                local r, g, b = hex_to_rgb(col)
+				client.color_log(r, g, b, string.format('%s\0', text))
+			end
+            client.color_log(255, 255, 255, '\n\0')
+		end
+	end
+
+    local wanted_damage, wanted_hitgroup, backtrack = 0, 0, 0
+
+    client.set_event_callback("aim_fire", function (e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Log Aimbot Shots') then
+            return
+        end
+
+        wanted_damage = e.damage
+        wanted_hitgroup = e.hitgroup
+        backtrack = globals.tickcount() - e.tick
+    end)
+
+    client.set_event_callback('aim_hit', function (shot)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Log Aimbot Shots') then
+            return
+        end
+
+        local target = shot.target
+        if target == nil then
+            return
+        end
+
+        local info = {
+            '\rHit ',
+            f('\a[nick]%s\r\'s ', entity.get_player_name(target)),
+            'in the ',
+            shot.hitgroup ~= wanted_hitgroup and f('\a[highlight]%s\r(\a[highlight]%s\r) ', hitgroup_str[ shot.hitgroup ], hitgroup_str[ wanted_hitgroup ]) or f('\a[highlight]%s\r ', hitgroup_str[ shot.hitgroup ]),
+            'for ',
+            shot.damage ~= wanted_damage and f('\a[highlight]%d\r(\a[highlight]%d\r) ', shot.damage, wanted_damage) or f('\a[highlight]%d\r ', shot.damage),
+            'damage ',
+            f('(hc: \a[highlight]%d%% \a[idle]· \rhistory: \a[highlight]%dt\r)', shot.hit_chance, backtrack)
+        }
+
+        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
+        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
+        print_dev(str, 8)
+    end)
+
+    client.set_event_callback('aim_miss', function (shot)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Log Aimbot Shots') then
+            return
+        end
+
+        local target = shot.target
+        if target == nil then
+            return
+        end
+
+        local info = {
+            '\rMissed ',
+            f('\a[nick]%s\r\'s ', entity.get_player_name(target)),
+            f('\a[highlight]%s\r ', hitgroup_str[ shot.hitgroup ]),
+            'due to ',
+            f('\a[miss]%s\r ', shot.reason),
+            f('(hc: \a[highlight]%d%% \a[idle]· \rhistory: \a[highlight]%dt\r)', shot.hit_chance, backtrack)
+        }
+
+        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
+        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
+        print_dev(str, 8)
+    end)
+
+    client.set_event_callback('player_hurt', function (e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Log Aimbot Shots') then
+            return
+        end
+
         local lp = entity.get_local_player()
-        if lp == nil then return end
-        if not widgets.enabled:get() or not widgets.items:have_key('Hit Rate') then return end
-        local hit_rate = shots.total ~= 0 and (shots.hits / shots.total * 100) or 100
-        renderer.indicator(255, 255, 255, 200, f('%s%d%%', hit_rate <= 50 and '◣_◢ ' or '', hit_rate))
+        local victim = client.userid_to_entindex(e.userid)
+        local attacker = client.userid_to_entindex(e.attacker)
+        if victim == nil or attacker == nil or victim == lp or attacker ~= lp then
+            return
+        end
+
+        local hitgroup = hitgroup_str[ e.hitgroup ]
+
+        local verb = weapon_verb[ e.weapon ]
+        if verb == nil then
+            return
+        end
+
+        local info = {
+            '\r' .. verb,
+            f(' \a[nick]%s\r ', entity.get_player_name(victim)),
+            'for ',
+            f('\a[highlight]%d \rdamage ', e.dmg_health or 0),
+            f('(\a[highlight]%d \rhealth remaining)', e.health or 0)
+        }
+
+        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
+        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
+        print_dev(str, 8)
     end)
 end
 
+-- --region hitchance
+-- do
+--     hitchance.reset = false
+--     hitchance.weapons = { 'G3SG1 / SCAR-20', 'AWP', 'SSG 08', 'R8 Revolver', 'Pistol' }
+
+--     hitchance.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Hit Chance")
+--     : record("rage", "hitchance::enabled")
+--     : save()
+
+--     hitchance.weapon_list = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Weapons", hitchance.weapons)
+--     : record("rage", "hitchance::weapons")
+--     : save()
+
+--     for _, weapon in next, hitchance.weapons do
+--         hitchance['Enabled_' .. weapon] = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', f('Enable %s', weapon))
+--         : record("rage", "hitchance::enable::" .. weapon)
+--         : save()
+
+--         hitchance['Modes_' .. weapon] = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { 'Modes', '\n', weapon }, { 'No Scope', 'In Air' })
+--         : record("rage", "hitchance::modes::" .. weapon)
+--         : save()
+
+--         hitchance['Distance_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'Distance', '\n', weapon }, 100, 1001, 500, true, 'm', 0.01, { [1001] = 'Inf.' })
+--         : record("rage", "hitchance::distance::" .. weapon)
+--         : save()
+
+--         hitchance['No Scope_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'No Scope', '\n', weapon }, 1, 100, 50, true, '%')
+--         : record("rage", "hitchance::noscope::" .. weapon)
+--         : save()
+
+--         hitchance['In Air_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'In Air', '\n', weapon }, 1, 100, 50, true, '%')
+--         : record("rage", "hitchance::inair::" .. weapon)
+--         : save()
+--     end
+
+--     function hitchance.backups()
+--         if hitchance.reset then
+--             override.unset(software.rage.aimbot.hitchance)
+--             override.unset(software.rage.aimbot.auto_scope)
+--             hitchance.reset = false
+--         end
+--     end
+
+--     function hitchance.distance(ent, distance)
+--         local my_origin = vector(entity.get_origin(ent))
+--         if my_origin == nil then
+--             return
+--         end
+
+--         local target = client.current_threat()
+--         if target == nil then
+--             return
+--         end
+
+--         local enemy_origin = vector(entity.get_origin(target))
+--         if enemy_origin == nil then
+--             return
+--         end
+
+--         if distance == 1001 then
+--             return 'Inf.'
+--         end
+
+--         return my_origin:dist(enemy_origin) <= distance
+--     end
+
+--     local noscope_ignore = {
+--         ['R8 Revolver'] = true,
+--         ['Pistol'] = true
+--     }
+
+--     client.set_event_callback('setup_command', function (cmd)
+--         if not hitchance.enabled:get() then
+--             return hitchance.backups()
+--         end
+
+--         local lp = entity.get_local_player()
+--         if lp == nil then
+--             return hitchance.backups()
+--         end
+
+--         local wpn = entity.get_player_weapon(lp)
+--         if wpn == nil then
+--             return hitchance.backups()
+--         end
+
+--         if ui.is_menu_open() then
+--             return hitchance.backups()
+--         end
+
+--         local weapon = ui.get(software.rage.weapon.weapon_type)
+
+--         if not hitchance['Enabled_' .. weapon] then
+--             return hitchance.backups()
+--         end
+
+--         if not hitchance['Enabled_' .. weapon]:get() then
+--             return hitchance.backups()
+--         end
+
+--         local distance = hitchance.distance(lp, hitchance[ 'Distance_' .. weapon ]:get())
+--         local conditions = hitchance[ 'Modes_' .. weapon ]
+--         local is_pistol = noscope_ignore[ weapon ] or false
+
+--         if conditions:have_key('In Air') and localplayer.is_airborne then
+--             override.set(software.rage.aimbot.hitchance, hitchance[ 'In Air_' .. weapon]:get())
+--         elseif conditions:have_key('No Scope') and entity.get_prop(lp, 'm_bIsScoped') == 0 and distance and not is_pistol then
+--             override.set(software.rage.aimbot.hitchance, hitchance[ 'No Scope_' .. weapon]:get())
+--             override.set(software.rage.aimbot.auto_scope, false)
+--         else
+--             return hitchance.backups()
+--         end
+
+--         if distance == 'Inf.' then
+--             override.unset(software.rage.aimbot.auto_scope)
+--         end
+
+--         hitchance.reset = true
+--     end)
+-- end
+
+---region неопознан
+do
+    local shots do
+        shots = {
+            total = 0,
+            hits = 0,
+
+            reasons = {
+                ['prediction error'] = true,
+                ['death'] = true
+            }
+        }
+
+        client.set_event_callback('aim_fire', function (shot)
+            shots.total = shots.total + 1
+        end)
+
+        client.set_event_callback('aim_hit', function (shot)
+            shots.hits = shots.hits + 1
+        end)
+
+        client.set_event_callback('player_connect_full', function (e)
+            if client.userid_to_entindex(e['userid']) ~= entity.get_local_player() then
+                return
+            end
+
+            shots.hits = 0
+            shots.total = 0
+        end)
+    end
+
+    client.set_event_callback('paint_ui', function ()
+        local lp = entity.get_local_player()
+        if lp == nil then
+            return
+        end
+
+        if not widgets.enabled:get() or not widgets.items:have_key('Hit Rate') then
+            return
+        end
+
+        local hit_rate = shots.total ~= 0 and (shots.hits / shots.total * 100) or 100
+
+        renderer.indicator(255, 255, 255, 200, f('%s%d%%', hit_rate <= 50 and '◣_◢ ' or '', hit_rate))
+    end)
+
+end
 
 
 ---region autopeek
@@ -4138,79 +4526,83 @@ LPH_NO_VIRTUALIZE(function ()
             update_timer(nci, globals.frametime())
             if nci == nil then return end
 
-            local clock = globals.realtime()
-            glow_t = glow_t + globals.frametime()
-
-            local flags  = "d"
+            local flags = "d"
             local r, g, b = widgets.color_picker:rawget()
-            local a      = alpha
-
+            local a  = alpha
+            local ia = math.floor(255 * a)
             local screen = vector(client.screen_size())
 
-            -- collect display tokens
-        local tokens = {}
-        if widgets.display:have_key("Username") then
-            local nick = USERNAME
-            if widgets.custom_name:get() then
-                local cn = ui.get(widgets.custom_name_value:get_ref())
-                if #cn ~= 0 then nick = cn end
+            -- collect tokens
+            local tokens = {}
+            if widgets.display:have_key("Username") then
+                local nick = USERNAME
+                if widgets.custom_name:get() then
+                    local cn = ui.get(widgets.custom_name_value:get_ref())
+                    if #cn ~= 0 then nick = cn end
+                end
+                tokens[#tokens+1] = { label = nick, accent = true }
             end
-            tokens[#tokens+1] = nick
+            if widgets.display:have_key("Latency") then
+                local p = get_ping(nci)
+                if p then tokens[#tokens+1] = { label = p } end
+            end
+            if widgets.display:have_key("FPS") then
+                tokens[#tokens+1] = { label = f("%dfps", math.floor(1 / get_framerate())) }
+            end
+            if widgets.display:have_key("Time") then
+                tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
+            end
+
+            local LOGO_W = texture ~= nil and 26 or 0
+            local PAD    = 8
+            local brand  = "Zenith"
+            local bw, bh = renderer.measure_text(flags, brand)
+
+            local info_w = 0
+            for _, t in ipairs(tokens) do
+                info_w = info_w + renderer.measure_text(flags, t.label)
+            end
+            if #tokens > 0 then info_w = info_w + #tokens * 18 end
+
+            local box_w = LOGO_W + PAD * 2 + bw + info_w
+            local box_h = bh + PAD * 2 - 2
+            local px    = screen.x - 9 - box_w
+            local py    = 9
+
+            -- card
+            graphics.rectangle(px, py, box_w, box_h, 8, 8, 11, math.floor(200 * a), 4)
+            -- left accent strip
+            renderer.rectangle(px, py + 4, 2, box_h - 8, r, g, b, ia)
+            -- bottom line
+            renderer.rectangle(px + 4, py + box_h - 1, box_w - 8, 1, r, g, b, math.floor(60 * a))
+
+            if texture ~= nil then
+                renderer.texture(texture, px + PAD, py + (box_h - 22) * 0.5,
+                    22, 22, 255, 255, 255, ia, "f")
+            end
+
+            local tx = px + LOGO_W + PAD
+            local ty = py + (box_h - bh) * 0.5
+            renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
+            tx = tx + bw
+
+            if #tokens > 0 then
+                renderer.rectangle(tx + 6, py + 4, 1, box_h - 8, 55, 55, 60, math.floor(150 * a))
+                tx = tx + 14
+                for i, t in ipairs(tokens) do
+                    local cr = t.accent and r or 175
+                    local cg = t.accent and g or 175
+                    local cb = t.accent and b or 180
+                    local tw2 = renderer.measure_text(flags, t.label)
+                    renderer.text(tx, ty, cr, cg, cb, math.floor(230 * a), flags, 0, t.label)
+                    tx = tx + tw2
+                    if i < #tokens then
+                        renderer.text(tx, ty, 50, 50, 55, math.floor(160 * a), flags, 0, "  |  ")
+                        tx = tx + renderer.measure_text(flags, "  |  ")
+                    end
+                end
+            end
         end
-        if widgets.display:have_key("Latency") then
-            local p = get_ping(nci)
-            if p then tokens[#tokens+1] = p end
-        end
-        if widgets.display:have_key("FPS") then
-            tokens[#tokens+1] = f("%dfps", math.floor(1 / get_framerate()))
-        end
-        if widgets.display:have_key("Time") then
-            tokens[#tokens+1] = f("%02d:%02d", client.system_time())
-        end
-
-        -- layout
-        local PAD_X  = 10
-        local PAD_Y  = 6
-        local RADIUS = 4
-        local SEP    = "  |  "
-        local LOGO_W = texture ~= nil and 26 or 0
-
-        local brand    = "Zenith"
-        local info_str = #tokens > 0 and (SEP .. table.concat(tokens, SEP)) or ""
-        local full_str = brand .. info_str
-
-        local bw, bh  = renderer.measure_text(flags, brand)
-        local tw, th  = renderer.measure_text(flags, full_str)
-
-        local box_w   = LOGO_W + PAD_X * 2 + tw
-        local box_h   = PAD_Y * 2 + bh
-
-        local px = screen.x - 9 - box_w
-        local py = 9
-        local ia = math.floor(255 * a)
-
-        -- background
-        graphics.rectangle(px, py, box_w, box_h, 10, 10, 13, math.floor(185 * a), RADIUS)
-        -- top accent bar
-        renderer.rectangle(px + RADIUS, py, box_w - RADIUS*2, 2, r, g, b, ia)
-
-        -- logo
-        if texture ~= nil then
-            renderer.texture(texture, px + PAD_X, py + (box_h - 22) * 0.5,
-                22, 22, 255, 255, 255, ia, "f")
-        end
-
-        local tx = px + LOGO_W + PAD_X
-        local ty = py + (box_h - bh) * 0.5
-
-        -- brand in accent
-        renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
-
-        -- info tokens dim white
-        if #info_str > 0 then
-            renderer.text(tx + bw, ty, 180, 180, 185, math.floor(200 * a), flags, 0, info_str)
-        end
-    end
     end
 
         --- region keybinds
@@ -4911,80 +5303,404 @@ LPH_NO_VIRTUALIZE(function ()
 
 end)()
 
---- hit marker zenith
+--- region console filter
 do
-    local ctx = {
-        target = 0,
-        pos = vector()
-    }
 
-    local pending_markers = { }
 
-    function hit_marker.frame()
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Damage Marker') then
-            return
-        end
-
-        local realtime = globals.realtime()
-        for i, data in ipairs(pending_markers) do
-            local diff = data[3] - realtime
-
-            local alpha = math.min(1, diff)--diff < 1 and math.max(0, diff) or 1
-
-            local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
-
-            local r, g, b = unpack(data[4])
-            renderer.text(x, y, r, g, b, 255 * alpha, "c", nil, data[2])
-
-            if data[3] < realtime then
-                table.remove(pending_markers, i)
-            end
-        end
-    end
-
-    function hit_marker.aim_fire(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Damage Marker') then
-            return
-        end
-
-        ctx.target = e.target
-        ctx.pos = vector(e.x, e.y, e.z)
-    end
-
-    function hit_marker.aim_hit(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Damage Marker') then
-            return
-        end
-
-        if ctx.target == e.target then
-            table.insert(
-                pending_markers,
-                {
-                    ctx.pos, tostring(e.damage),
-                    globals.realtime() + 3,
-                    e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
-                }
-            )
-        end
-    end
-
-    function hit_marker.round_prestart()
-        table.clear(pending_markers)
-    end
+    defer(function ()
+    end)
 end
 
+---region
+do
+    anim_breakers.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Animation Breakers")
+    : record("aa", "anim_breakers::enabled")
+    : save()
+
+    anim_breakers.ground = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", '- Leg Movement', { "Default", 'Static', 'Walking' })
+    : record("aa", "anim_breakers::ground")
+    : save()
+
+    anim_breakers.air = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", '- In Air', { "Default", 'Static', 'Walking' })
+    : record("aa", "anim_breakers::air")
+    : save()
+
+    local native_GetClientEntity = vtable_bind('client.dll', 'VClientEntityList003', 3, 'void*(__thiscall*)(void*, int)')
+
+    local char_ptr = ffi.typeof('char*')
+    local nullptr = ffi.new('void*')
+    local class_ptr = ffi.typeof('void***')
+
+    local animation_layer_t = ffi.typeof([[
+        struct {										char pad0[0x18];
+            uint32_t	sequence;
+            float		prev_cycle;
+            float		weight;
+            float		weight_delta_rate;
+            float		playback_rate;
+            float		cycle;
+            void		*entity;						char pad1[0x4];
+        } **
+    ]])
+
+    client.set_event_callback('net_update_end', function ()
+        if not anim_breakers.enabled:get() then
+            override.unset(software.aa.other.leg_movement)
+            return
+        end
+
+        local lp = entity.get_local_player()
+        if lp == nil then
+            return
+        end
+
+        local player_ptr = ffi.cast(class_ptr, native_GetClientEntity(lp))
+        if player_ptr == nullptr then
+            return
+        end
+
+        local anim_layers = ffi.cast(animation_layer_t, ffi.cast(char_ptr, player_ptr) + 0x2990)[0]
+
+        do
+            local mode = anim_breakers.ground:get()
+            if mode ~= 'Disabled' then
+                if mode == 'Static' then
+                    entity.set_prop(lp, 'm_flPoseParameter', 1, 0)
+                    override.set(software.aa.other.leg_movement, 'Always slide')
+                elseif mode == 'Walking' then
+                    entity.set_prop(lp, 'm_flPoseParameter', 0.5, 7)
+                    override.set(software.aa.other.leg_movement, 'Never slide')
+                end
+            else
+                override.unset(software.aa.other.leg_movement)
+            end
+        end
+
+        do
+            local mode = anim_breakers.air:get()
+            if mode ~= 'Disabled' and ctx_bebra.condition() == 'AIR' then
+                if mode == 'Static' then
+                    entity.set_prop(lp, 'm_flPoseParameter', 1, 6)
+                elseif mode == 'Walking' then
+                    anim_layers[6]['weight'] = 1
+                end
+            end
+        end
+    end)
+end
+
+--- region angles
+do
+    local function set_custom_list(ctx, list)
+        if list.pitch ~= nil then
+            ctx.pitch = list.pitch:get()
+            ctx.pitch_offset = list.pitch_offset:get()
+        end
+
+        if list.yaw_base ~= nil then
+            ctx.yaw_base = list.yaw_base:get()
+        end
+
+        ctx.yaw = list.yaw:get()
+        ctx.yaw_offset = list.yaw_offset:get()
+
+        if ctx.yaw == "180 LR" then
+            ctx.yaw_offset = 0
+        end
+
+        ctx.yaw_180lr_mode = list.yaw_180lr_mode:get()
+        ctx.yaw_delay = list.yaw_delay:get()
+        ctx.yaw_left = list.yaw_left:get()
+        ctx.yaw_right = list.yaw_right:get()
+
+        ctx.yaw_jitter = list.yaw_jitter:get()
+        ctx.jitter_mode = list.jitter_mode:get()
+        ctx.zenith_cycle = list.zenith_cycle:get()
+        ctx.zenith_delay = list.zenith_delay:get()
+        ctx.zenith_safe = list.zenith_safe:get()
+        ctx.jitter_offset = list.jitter_offset:get()
+        ctx.jitter_randomization = list.jitter_randomization:get()
+
+        ctx.body_yaw = list.body_yaw:get()
+        ctx.body_yaw_offset = list.body_yaw_offset:get()
+        ctx.freestanding_body_yaw = list.freestanding_body_yaw:get()
+    end
+
+    angles.type = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Anti Aim Builder", {
+        "Off",
+        "Custom",
+        "Recommended"
+    })
+    : record("aa", "angles::type")
+    : save()
+
+    local conds = { 'Standing', 'Moving', 'Slow Walk', 'Crouched', 'Move Crouched', 'Air', 'Air Crouched', 'Fake Lag'}
+
+    local function reset_delay()
+        for _, condition in next, conds do
+            delay_data_all[condition] = {
+                ticks = 0,
+                is_active = false,
+                current = 0,
+                previous_angle = 0
+            }
+        end
+    end
+
+    reset_delay()
+
+    angles.custom = { } do
+        angles.custom.state = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "State", { unpack(e_statement, 0) })
+        : record("aa", "custom::state")
+
+        for i = 0, #e_statement do
+            local list = { }
+            local state = e_statement[i]
+
+            if i ~= 0 then
+                list.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Enable", "\x20", state })
+                : record("aa", merge { "custom", "::", state, "::", "enabled" })
+                : save()
+            end
+
+            if i ~= 10 then
+                local pitch_list = { "Off", "Default", "Up", "Down", "Minimal", "Random", "Custom" }
+
+                list.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Pitch", "\n", "custom_", "pitch_", state }, pitch_list)
+                : record("aa", merge { "custom", "::", state, "::", "pitch" })
+                : save()
+
+                list.pitch_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "pitch_offset_", state }, -89, 89, 0, true, "°")
+                : record("aa", merge { "custom", "::", state, "::", "pitch_offset" })
+                : save()
+
+                list.yaw_base = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Yaw base", "\n", "custom_", "yaw_base_", state }, { "Local view", "At targets" })
+                : record("aa", merge { "custom", "::", state, "::", "yaw_base" })
+                : save()
+            end
+
+            list.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Yaw", "\n", "custom_", "yaw_", state }, { "Off", "180", "Spin", "Static", "180 Z", "Crosshair", "180 LR" })
+            : record("aa", merge { "custom", "::", state, "::", "yaw" })
+            : save()
+
+            list.yaw_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "yaw_offset_", state }, -180, 180, 0, true, "°")
+            : record("aa", merge { "custom", "::", state, "::", "yaw_offset" })
+            : save()
+
+            list.yaw_180lr_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "yaw_180lr_mode_", state }, { "Side based", "Switch delay" })
+            : record("aa", merge { "custom", "::", state, "::", "yaw_180lr_mode" })
+            : save()
+
+            list.yaw_left = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Left offset", "\n", "custom_", "yaw_left_", state }, -180, 180, 0, true, "°")
+            : record("aa", merge { "custom", "::", state, "::", "yaw_left" })
+            : save()
+
+            list.yaw_right = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Right offset", "\n", "custom_", "yaw_right_", state }, -180, 180, 0, true, "°")
+            : record("aa", merge { "custom", "::", state, "::", "yaw_right" })
+            : save()
+
+            list.yaw_delay = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Delay", "\n", "custom_", "Delay_", state }, 2, 10, 5, true, "t")
+            : record("aa", merge { "custom", "::", state, "::", "yaw_delay" })
+            : save()
+
+            list.yaw_jitter = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Yaw jitter", "\n", "custom_", "yaw_jitter_", state }, { "Off", "Offset", "Center", "Random", "Skitter", "Zenith" })
+            : record("aa", merge { "custom", "::", state, "::", "yaw_jitter" })
+            : save()
+
+            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way" })
+            : record("aa", merge { "custom", "::", state, "::", "jitter_mode" })
+            : save()
+
+            list.jitter_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\nJitter offset", "\n", "custom_", "jitter_offset_", state }, -180, 180, 0, true, "°")
+            : record("aa", merge { "custom", "::", state, "::", "jitter_offset" })
+            : save()
+
+            list.jitter_randomization = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Randomization", "\n", "custom_", "jitter_randomization_", state }, 0, 180, 0, true, "°", 1, { [0] = "Off" })
+            : record("aa", merge { "custom", "::", state, "::", "jitter_randomization" })
+            : save()
+
+            list.zenith_cycle = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Delay Cycle", "\n", "custom_", "delay_cycle_", state }, 5, 200, 50, true, '', 1, { [5] = "Off" })
+            : record("aa", merge { "custom", "::", state, "::", "zenith_cycle" })
+            : save()
+
+            list.zenith_delay = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Delay Time", "\n", "custom_", "zenith_delay", state }, 5, 30, 15)
+            : record("aa", merge { "custom", "::", state, "::", "zenith_delay" })
+            : save()
+
+            list.zenith_safe = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Safe Yaw", "\n", "custom_", "safe_yaw_", state })
+            : record("aa", merge { "custom", "::", state, "::", "zenith_safe" })
+            : save()
+
+            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", 'Randomize Jitter' })
+            : record("aa", merge { "custom", "::", state, "::", "body_yaw" })
+            : save()
+
+            list.body_yaw_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "body_yaw_offset_", state }, -180, 180, 0, true, "°")
+            : record("aa", merge { "custom", "::", state, "::", "body_yaw_offset" })
+            : save()
+
+            list.freestanding_body_yaw = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Freestanding body yaw", "\n", "custom_", "freestanding_body_yaw_", state })
+            : record("aa", merge { "custom", "::", state, "::", "freestanding_body_yaw" })
+            : save()
+
+
+            list.zenith_safe:set_callback(reset_delay)
+            list.zenith_delay:set_callback(reset_delay)
+            list.zenith_cycle:set_callback(reset_delay)
+
+            angles.custom[state] = list
+        end
+    end
+
+    angles.recommended = {
+        ['Standing'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 10
+            ctx.yaw_jitter = 'Skitter'
+            ctx.jitter_offset = 35
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -40
+        end,
+
+        ['Moving'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 10
+            ctx.yaw_jitter = 'Center'
+            ctx.jitter_offset = 60
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -40
+        end,
+
+        ['Slow Walk'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 10
+            ctx.yaw_jitter = 'Zenith'
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 60
+            ctx.jitter_randomization = 15
+            ctx.zenith_cycle = 32
+            ctx.zenith_delay = 18
+            ctx.zenith_safe = true
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -40
+        end,
+
+        ['Crouched'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 10
+            ctx.yaw_jitter = 'Center'
+            ctx.jitter_offset = 70
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -40
+        end,
+
+        ['Move Crouched'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 10
+            ctx.yaw_jitter = 'Center'
+            ctx.jitter_offset = 60
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -40
+        end,
+
+        ['Air'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 2
+            ctx.yaw_jitter = 'Offset'
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 28
+            ctx.jitter_randomization = 12
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -35
+            ctx.freestanding_body_yaw = true
+        end,
+
+        ['Air Crouched'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 3
+            ctx.yaw_jitter = 'Offset'
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 28
+            ctx.jitter_randomization = 12
+            ctx.body_yaw = 'Jitter'
+            ctx.body_yaw_offset = -35
+            ctx.freestanding_body_yaw = true
+        end,
+
+        ['Fake Lag'] = function (ctx)
+            ctx.pitch = 'Default'
+            ctx.yaw_base = 'At targets'
+            ctx.yaw = '180'
+            ctx.yaw_offset = 0
+            ctx.yaw_jitter = 'Off'
+            ctx.jitter_offset = 0
+            ctx.body_yaw = 'Opposite'
+            ctx.body_yaw_offset = 0
+            ctx.freestanding_body_yaw = true
+        end
+    }
+
+    function angles.set(ctx, state)
+        if angles.type:get() == "Custom" then
+            local list = angles.custom[state]
+
+            if list ~= nil then
+                -- if not enabled in menu
+                if list.enabled ~= nil then
+                    if not list.enabled:get() then
+                        return false
+                    end
+                end
+
+                set_custom_list(ctx, list)
+                return true
+            end
+
+            return false
+        end
+
+        if angles.type:get() == "Recommended" then
+            local fn = angles.recommended[state]
+
+            if fn ~= nil then
+                fn(ctx)
+                return true
+            end
+
+            return false
+        end
+
+        return false
+    end
+
+    function angles.update(ctx)
+        local list = statement.get()
+
+        for i = #list, 1, -1 do
+            local state = list[i]
+
+            if angles.set(ctx, state) then
+                return
+            end
+        end
+
+        angles.set(ctx, "Main")
+    end
+end
 
 --- region yaw_direction
 do
@@ -5049,7 +5765,6 @@ do
         ctx.freestanding = false
     end
 end
-
 
 --- clientside nickname
 do
@@ -5145,6 +5860,106 @@ do
     callback()
 end
 
+-- --- tab to game
+-- do
+--     tab_to_game.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Tab to Game")
+--     : record("visuals", "tab_to_game::enabled")
+--     : save()
+
+--     local api_ShowWindow          = memory.get_export("user32.dll", "ShowWindow", "int(__fastcall*)(unsigned int, unsigned int, void*, int)")
+--     local api_GetForegroundWindow = memory.get_export("user32.dll", "GetForegroundWindow", "int(__fastcall*)(unsigned int, unsigned int)")
+--     local api_SetForegroundWindow = memory.get_export("user32.dll", "SetForegroundWindow", "int(__fastcall*)(unsigned int, unsigned int, void*)")
+
+--     local csgo_hwnd_raw = memory.pattern_scan("engine.dll", "8B 0D ? ? ? ? 85 C9 74 16 8B 01 8B")
+--     local hwnd = ffi.cast("void*", ((ffi.cast("uintptr_t***", ffi.cast("uintptr_t", csgo_hwnd_raw) + 2)[0])[0] + 2)[0])
+
+--     local function show_window()
+--         api_ShowWindow(hwnd, 3)
+--         api_SetForegroundWindow(hwnd)
+--     end
+
+--     function tab_to_game.round_prestart()
+--         if tab_to_game.enabled:get() then
+--             show_window()
+--         end
+--     end
+-- end
+
+--- hit marker zenith
+do
+    local ctx = {
+        target = 0,
+        pos = vector()
+    }
+
+    local pending_markers = { }
+
+    function hit_marker.frame()
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        local realtime = globals.realtime()
+        for i, data in ipairs(pending_markers) do
+            local diff = data[3] - realtime
+
+            local alpha = math.min(1, diff)--diff < 1 and math.max(0, diff) or 1
+
+            local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
+
+            local r, g, b = unpack(data[4])
+            renderer.text(x, y, r, g, b, 255 * alpha, "c", nil, data[2])
+
+            if data[3] < realtime then
+                table.remove(pending_markers, i)
+            end
+        end
+    end
+
+    function hit_marker.aim_fire(e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        ctx.target = e.target
+        ctx.pos = vector(e.x, e.y, e.z)
+    end
+
+    function hit_marker.aim_hit(e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        if ctx.target == e.target then
+            table.insert(
+                pending_markers,
+                {
+                    ctx.pos, tostring(e.damage),
+                    globals.realtime() + 3,
+                    e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
+                }
+            )
+        end
+    end
+
+    function hit_marker.round_prestart()
+        table.clear(pending_markers)
+    end
+end
+
+
 --- region shared
 do
     shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
@@ -5234,9 +6049,9 @@ do
                 end
             end
 
-            shared.online_label:set(string.format('\\aaaaaaaffâ¢ \\affffffff Online \\aaaaaaaff~ \\affd700ff%d', online))
+            shared.online_label:set(string.format('👤Current Online: %d', online))
             if shared.fl_online then
-                shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff%d', online))
+                shared.fl_online:set(string.format('👤Online: \affd700ff%d', online))
             end
             -- leaderboard from data if available
             if shared.fl_leaderboard and shared.data then
@@ -5441,301 +6256,6 @@ do
 end
 
 
--- ======================================================================
---  PREDICT (shoot enemies earlier via Kalman yaw prediction)
--- ======================================================================
-do
-    local predict = {}
-    predict.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "☠Predict")
-    : record("aa", "predict::enabled") : save()
-    predict.mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Predict Mode",
-        {"Normal", "Extreme"})
-    : record("aa", "predict::mode") : save()
-
-    client.set_event_callback("setup_command", function()
-        -- predict mode noted but simple resolver handles this automatically
-    end)
-
-    _G.__predict = predict
-end
-
--- ======================================================================
---  UNSAFE CHARGE (allow shooting during doubletap even on low HC)
--- ======================================================================
-do
-    local unsafe_charge = {}
-    unsafe_charge.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Unsafe Charge")
-    : record("aa", "unsafe_charge::enabled") : save()
-
-    client.set_event_callback("setup_command", function(cmd)
-        if not unsafe_charge.enabled:get() then return end
-        if not software.is_double_tap() then return end
-        -- override minimum damage to 1 so DT fires regardless
-        plist.set(entity.get_local_player(), "Minimum damage override", 1)
-    end)
-
-    _G.__unsafe_charge = unsafe_charge
-end
-
--- ======================================================================
---  AUTO OS (auto switch DT -> HideShot in bad conditions)
--- ======================================================================
-do
-    local auto_os = {}
-    auto_os.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Auto OS")
-    : record("aa", "auto_os::enabled") : save()
-
-    auto_os.states = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- States",
-        {"Stand", "Crouch", "Air", "Move"})
-    : record("aa", "auto_os::states") : save()
-
-    auto_os.avoid_weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- Avoid States",
-        {"Desert Eagle & Crouch", "Knife & Air", "Pistol & Move"})
-    : record("aa", "auto_os::avoid") : save()
-
-    local function os_get_state()
-        local me = entity.get_local_player()
-        if not me then return "Stand" end
-        local vel = {entity.get_prop(me, "m_vecVelocity[0]"), entity.get_prop(me, "m_vecVelocity[1]")}
-        local spd = math.sqrt((vel[1] or 0)^2 + (vel[2] or 0)^2)
-        local flags = entity.get_prop(me, "m_fFlags") or 0
-        local on_ground = bit.band(flags, 1) ~= 0
-        local crouched = entity.get_prop(me, "m_bDucked") == 1
-        if not on_ground then return "Air" end
-        if crouched then return "Crouch" end
-        if spd > 10 then return "Move" end
-        return "Stand"
-    end
-
-    client.set_event_callback("setup_command", function(cmd)
-        if not auto_os.enabled:get() then return end
-        if not software.is_double_tap() then return end
-
-        local me  = entity.get_local_player()
-        local wpn = me and entity.get_player_weapon(me)
-        local cls = wpn and entity.get_classname(wpn) or ""
-
-        -- only suppress on actual guns - let everything else through (knife, nades, zeus, c4)
-        local is_gun = cls:find("rifle") or cls:find("pistol") or cls:find("sniper") or
-                       cls:find("machinegun") or cls:find("shotgun") or cls:find("smg") or
-                       cls:find("ak47") or cls:find("m4a") or cls:find("awp") or
-                       cls:find("aug") or cls:find("sg5") or cls:find("famas") or
-                       cls:find("galil") or cls:find("scar") or cls:find("g3sg") or
-                       cls:find("ssg") or cls:find("deagle") or cls:find("elite") or
-                       cls:find("fiveseven") or cls:find("glock") or cls:find("hkp") or
-                       cls:find("p250") or cls:find("revolver") or cls:find("tec9") or
-                       cls:find("usp") or cls:find("cz75") or cls:find("mp5") or
-                       cls:find("mp7") or cls:find("mp9") or cls:find("mac10") or
-                       cls:find("p90") or cls:find("bizon") or cls:find("ump") or
-                       cls:find("m249") or cls:find("negev") or cls:find("nova") or
-                       cls:find("xm1014") or cls:find("mag7") or cls:find("sawedoff") or
-                       cls:find("scout")
-        if not is_gun then return end
-
-        local state  = os_get_state()
-        local states = auto_os.states:get()
-        for _, s in ipairs(states) do
-            if s == state then
-                cmd.in_attack = false
-                return
-            end
-        end
-    end)
-
-    _G.__auto_os = auto_os
-end
-
--- ======================================================================
---  AIR TELEPORT (peek from air using DT + jump timing)
--- ======================================================================
-do
-    local air_tel = {}
-    air_tel.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Air Teleport")
-    : record("aa", "air_tel::enabled") : save()
-
-    air_tel.weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- Weapons",
-        {"AWP", "Scout", "Taser", "Pistol", "Rifle"})
-    : record("aa", "air_tel::weapons") : save()
-
-    air_tel.allow_cross = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Allow on cross",
-        {"No", "Yes"})
-    : record("aa", "air_tel::cross") : save()
-
-    local _at_was_air    = false
-    local _at_charge     = false
-    local _at_dt_suppressed = false  -- true while we force DT off mid-air
-    local _at_restore_time  = 0      -- tick to re-enable DT
-
-    -- helper: is any visible enemy able to shoot us (has LOS, is alive, not dormant)
-    local function _at_enemy_can_shoot(me)
-        local my_pos = entity.get_origin(me)
-        if not my_pos then return false end
-        for _, ent in ipairs(entity.get_players(true)) do
-            if entity.is_alive(ent) and not entity.is_dormant(ent) then
-                local epos = entity.get_origin(ent)
-                if epos then
-                    -- simple distance + LOS check via trace
-                    local dist = (my_pos - epos):length()
-                    if dist < 3000 then
-                        -- trace from enemy eye to our position
-                        local eye = entity.get_prop(ent, 'm_vecOrigin')
-                        if eye then
-                            local trace = engine.trace_line(epos, my_pos, ent)
-                            if trace and trace > 0.97 then
-                                return true  -- clear LOS within range
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        return false
-    end
-
-    -- helper: weapon allowed
-    local function _at_weapon_ok(me)
-        local wpn = entity.get_player_weapon(me)
-        local wpn_class = wpn and entity.get_classname(wpn) or ''
-        local sel = air_tel.weapons:get()
-        if #sel == 0 then return true end
-        for _, w in ipairs(sel) do
-            if (w == 'AWP'    and wpn_class:find('awp'))    or
-               (w == 'Scout'  and wpn_class:find('ssg'))    or
-               (w == 'Taser'  and wpn_class:find('taser'))  or
-               (w == 'Pistol' and wpn_class:find('pistol')) or
-               (w == 'Rifle'  and (wpn_class:find('ak47') or wpn_class:find('m4'))) then
-                return true
-            end
-        end
-        return false
-    end
-
-    client.set_event_callback('setup_command', function(cmd)
-        if not air_tel.enabled:get() then
-            -- clean up if disabled mid-flight
-            if _at_dt_suppressed then
-                ui.set(unpack(settings.rage.double_tap))
-                _at_dt_suppressed = false
-            end
-            return
-        end
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
-        if not _at_weapon_ok(me) then _at_was_air = false; return end
-
-        local flags     = entity.get_prop(me, 'm_fFlags') or 0
-        local on_ground = bit.band(flags, 1) ~= 0
-        local in_air    = not on_ground
-        local now       = globals.tickcount()
-
-        -- ── Restore DT after suppression timeout ──────────────────────────
-        if _at_dt_suppressed and now >= _at_restore_time then
-            ui.set(unpack(settings.rage.double_tap))  -- re-enable DT
-            _at_dt_suppressed = false
-        end
-
-        if in_air then
-            _at_charge = software.is_double_tap()
-
-            -- If enemy can shoot us while airborne → suppress DT immediately
-            if _at_charge and not _at_dt_suppressed then
-                local enemy_visible = _at_enemy_can_shoot(me)
-                if enemy_visible then
-                    -- disable DT so we don't shoot mid-air
-                    local dt_ref = settings.rage.double_tap
-                    if dt_ref then
-                        ui.set(dt_ref[1], false)
-                    end
-                    _at_dt_suppressed = true
-                    _at_restore_time  = now + math.floor((1/globals.tickinterval()) * 2)  -- 2 seconds
-                end
-            end
-
-            -- block shooting while airborne
-            cmd.in_attack = false
-        end
-
-        -- ── Landed after being airborne → teleport tick ───────────────────
-        if _at_was_air and on_ground then
-            if _at_charge then
-                cmd.in_jump = true   -- ground-snap teleport
-                _at_charge  = false
-            end
-            -- if DT was suppressed, set restore timer from landing moment
-            if _at_dt_suppressed then
-                _at_restore_time = now + math.floor((1/globals.tickinterval()) * 2)
-            end
-        end
-
-        _at_was_air = in_air
-    end)
-
-    _G.__air_tel = air_tel
-end
-
--- ======================================================================
---  JUMP SCOUT (SSG08 jump shot)
--- ======================================================================
-do
-    local jump_scout = {}
-    jump_scout.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Jump Scout")
-    : record("aa", "jump_scout::enabled") : save()
-
-    jump_scout.key = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", "- Jump Scout Key")
-    : record("aa", "jump_scout::key") : save()
-
-    local _js_prev = false
-
-    client.set_event_callback("setup_command", function(cmd)
-        if not jump_scout.enabled:get() then return end
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
-        local wpn = entity.get_player_weapon(me)
-        if not wpn then return end
-        local wpn_info = csgo_weapons and csgo_weapons(wpn)
-        local is_scout = wpn_info and (wpn_info.name == "weapon_ssg08")
-        if not is_scout then return end
-        local kdown = jump_scout.key:get()
-        if kdown and not _js_prev then
-            cmd.in_jump = true
-            cmd.in_attack = true
-        end
-        _js_prev = kdown
-    end)
-
-    _G.__jump_scout = jump_scout
-end
-
--- ======================================================================
---  DORMANT AIMBOT (fire at dormant/gray ESP enemies)
--- ======================================================================
-do
-    local dormant_ab = {}
-    dormant_ab.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Dormant Aimbot")
-    : record("aa", "dormant_ab::enabled") : save()
-
-    dormant_ab.damage = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "- Damage", 1, 100, 20, true, "hp")
-    : record("aa", "dormant_ab::damage") : save()
-
-    client.set_event_callback("setup_command", function(cmd)
-        if not dormant_ab.enabled:get() then return end
-        local me = entity.get_local_player()
-        if not me then return end
-        local min_dmg = dormant_ab.damage:get()
-        for i = 1, globals.maxplayers() do
-            if entity.get_classname(i) == "CCSPlayer" and entity.is_dormant(i) then
-                local team_me = entity.get_prop(me, "m_iTeamNum") or 0
-                local team_ent = entity.get_prop(i, "m_iTeamNum") or 0
-                if team_me ~= team_ent then
-                    plist.set(i, "Minimum damage override", min_dmg)
-                    plist.set(i, "Force body aim", true)
-                end
-            end
-        end
-    end)
-
-    _G.__dormant_ab = dormant_ab
-end
 
 -- ======================================================================
 --  DROP NADES (drop grenades to teammates)
@@ -5881,68 +6401,6 @@ client.set_event_callback("net_update_end", localplayer.net_update)
 client.set_event_callback("shutdown", function() if gui and gui.shutdown then gui.shutdown() end end)
 client.set_event_callback("shutdown", antiaim.shutdown)
 
-
--- ======================================================================
---  BRAND HEADER -- animated Zenith � Elegance in Execution.
--- ======================================================================
-do
-    local _bh_alpha = 0.0
-    local _bh_t     = 0.0
-
-    client.set_event_callback('paint_ui', function()
-        local is_open = ui.is_menu_open()
-        _bh_alpha = motion.interp(_bh_alpha, is_open and 1 or 0, 0.055)
-        if _bh_alpha <= 0.01 then return end
-
-        _bh_t = _bh_t + globals.frametime()
-
-        local r, g, b = widgets.color_picker:rawget()
-        local a       = math.floor(255 * _bh_alpha)
-        local flags   = "d"
-
-        local sx, sy  = client.screen_size()
-        local px      = math.floor(sx * 0.012)
-        local py      = math.floor(sy * 0.048)
-
-        local brand   = "Zenith"
-        local tagline = "  Elegance in Execution."
-
-        local bw, bh  = renderer.measure_text(flags, brand)
-        local tw, _   = renderer.measure_text(flags, tagline)
-        local sep_w   = bw + tw
-
-        -- animated shimmer: a bright vertical band scrolls across the brand text
-        local shimmer  = (_bh_t * 0.8) % 1.0
-        local shimmer_x = px + shimmer * sep_w
-        local shimmer_a = math.floor(28 * _bh_alpha * (1 - math.abs(shimmer - 0.5) * 2))
-
-        -- glow bar behind separator line
-        renderer.rectangle(px, py + bh + 2, sep_w, 2, r, g, b, math.floor(18 * _bh_alpha))
-
-        -- separator line  (1px, accent)
-        renderer.rectangle(px, py + bh + 3, sep_w, 1, r, g, b, math.floor(90 * _bh_alpha))
-
-        -- shimmer band (bright white vertical slice)
-        if shimmer_a > 0 then
-            renderer.rectangle(math.floor(shimmer_x - 2), py, 4, bh,
-                255, 255, 255, shimmer_a)
-        end
-
-        -- "�" separator between brand and tagline (accent colour)
-        renderer.text(px + bw, py, r, g, b,
-            math.floor(180 * _bh_alpha), flags, 0, "  \xc2\xb7")
-        local dot_w = renderer.measure_text(flags, "  \xc2\xb7")
-
-        -- brand name (accent)
-        renderer.text(px, py, r, g, b, a, flags, 0, brand)
-
-        -- tagline (dim grey, fades in slightly delayed)
-        renderer.text(px + bw + dot_w, py,
-            155, 155, 165, math.floor(190 * _bh_alpha), flags, 0, tagline)
-    end)
-end
-
-
 client.set_event_callback("paint_ui", function() if gui and gui.frame then gui.frame() end end)
 client.set_event_callback("paint_ui", windows.frame)
 
@@ -5983,6 +6441,8 @@ cvar.developer:set_raw_int(0)
 
 
 -- resolver_show_tab: removed in beta build
+
+local resolver_show_tab  -- defined after resolver is created
 
 menu.set_callback(function()
 
@@ -6053,43 +6513,83 @@ menu.set_callback(function()
         end
 
 
-        local dn = _G.__drop_nades
-        if dn then _safe_display(dn.key) end
-        local cr = _G.__chat_reveal
-        if cr then _safe_display(cr.enabled) end
+
+
 
     end
 
     -- ── AIMBOT ──────────────────────────────────────────────────────
     -- Predict, Resolver, Unsafe Charge, Auto OS, Air Teleport, Jump Scout, Dormant
+    if page == "Aimbot" then
+        local p = _G.__predict
+        if p then
+            _safe_display(p.enabled)
+            if p.enabled:get() then _safe_display(p.mode) end
+        end
+
+        _safe_display(shared.enabled)
+
+        local uc = _G.__unsafe_charge
+        if uc then _safe_display(uc.enabled) end
+
+        local aos = _G.__auto_os
+        if aos then
+            _safe_display(aos.enabled)
+            if aos.enabled:get() then
+                _safe_display(aos.states)
+                _safe_display(aos.avoid_weapons)
+            end
+        end
+
+        local at = _G.__air_tel
+        if at then
+            _safe_display(at.enabled)
+            if at.enabled:get() then
+                _safe_display(at.weapons)
+                _safe_display(at.allow_cross)
+            end
+        end
+
+        local js = _G.__jump_scout
+        if js then
+            _safe_display(js.enabled)
+            if js.enabled:get() then _safe_display(js.key) end
+        end
+
+        local da = _G.__dormant_ab
+        if da then
+            _safe_display(da.enabled)
+            if da.enabled:get() then _safe_display(da.damage) end
+        end
+    end
+
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     -- ── DEFENSIVE ────────────────────────────────────────────────────
-    if page == "Builder" then
+        if page == "Builder" then
         local hd = _G._hd_state
         if hd then
             _safe_display(hd.ui_enable)
             if hd.ui_enable:get() then
 
-                -- State editor selector
                 _safe_display(hd.ui_state)
 
                 -- Pitch
+                if hd.lbl_pitch then _safe_display(hd.lbl_pitch) end
                 _safe_display(hd.ui_pitch)
                 if hd.ui_pitch:get() == "Custom" then
                     _safe_display(hd.ui_pitch_custom)
                 end
 
                 -- Yaw
+                if hd.lbl_yaw then _safe_display(hd.lbl_yaw) end
                 _safe_display(hd.ui_yaw_left)
                 _safe_display(hd.ui_yaw_right)
-
                 _safe_display(hd.ui_yaw_rnd_mode)
                 if hd.ui_yaw_rnd_mode:get() ~= "Off" then
                     _safe_display(hd.ui_yaw_rnd_left)
                     _safe_display(hd.ui_yaw_rnd_right)
                 end
-
                 _safe_display(hd.ui_yaw_jitter)
                 if hd.ui_yaw_jitter:get() ~= "Off" then
                     _safe_display(hd.ui_yaw_jitter_deg)
@@ -6097,54 +6597,60 @@ menu.set_callback(function()
                 _safe_display(hd.ui_randomization)
                 _safe_display(hd.ui_switch_chance)
 
-                -- Body yaw
+                -- Body Yaw
+                if hd.lbl_body then _safe_display(hd.lbl_body) end
                 _safe_display(hd.ui_body_yaw)
                 if hd.ui_body_yaw:get() ~= "Off" then
                     _safe_display(hd.ui_body_yaw_deg)
                 end
 
                 -- Delay
+                if hd.lbl_delay then _safe_display(hd.lbl_delay) end
                 _safe_display(hd.ui_delay_from)
                 _safe_display(hd.ui_delay_to)
                 _safe_display(hd.ui_delay_count)
                 _safe_display(hd.ui_delay_tick1)
                 _safe_display(hd.ui_delay_rnd)
 
-                -- Fake lag (right panel / global)
+                -- Fake Lag
+                if hd.lbl_fl then _safe_display(hd.lbl_fl) end
                 _safe_display(hd.ui_fl_settings)
-                _safe_display(hd.ui_vulnlc)
-                _safe_display(hd.ui_edge_yaw)
-                _safe_display(hd.ui_freestanding)
-
-                _safe_display(hd.ui_manual)
-                if hd.ui_manual:get() then
-                    _safe_display(hd.ui_man_left)
-                    _safe_display(hd.ui_man_right)
-                    _safe_display(hd.ui_man_reset)
-                end
-
-                _safe_display(hd.ui_avoid_bs)
-                _safe_display(hd.ui_safehead)
-
-                _safe_display(hd.ui_force_def)
-                if hd.ui_force_def:get() then
-                    _safe_display(hd.ui_def_on)
-                    _safe_display(hd.ui_def_mode)
-                end
-
                 _safe_display(hd.ui_fl_on)
                 if hd.ui_fl_on:get() then
                     _safe_display(hd.ui_fl_mode)
                     _safe_display(hd.ui_fl_variance)
                     _safe_display(hd.ui_fl_limit)
                 end
+                _safe_display(hd.ui_vulnlc)
 
+                -- Controls
+                if hd.lbl_ctrl then _safe_display(hd.lbl_ctrl) end
                 _safe_display(hd.ui_inverter)
+                _safe_display(hd.ui_edge_yaw)
+                _safe_display(hd.ui_freestanding)
+                _safe_display(hd.ui_manual)
+                if hd.ui_manual:get() then
+                    _safe_display(hd.ui_man_left)
+                    _safe_display(hd.ui_man_right)
+                    _safe_display(hd.ui_man_reset)
+                end
+                _safe_display(hd.ui_avoid_bs)
+                _safe_display(hd.ui_safehead)
+                _safe_display(hd.ui_force_def)
+                if hd.ui_force_def:get() then
+                    _safe_display(hd.ui_def_on)
+                    _safe_display(hd.ui_def_mode)
+                end
             end
         end
     end
 
+    if page == "Resolver" then
+        if resolver_show_tab then resolver_show_tab() end
+    end
 
+    -- ── VISUAL ───────────────────────────────────────────────────────
+    -- Widgets, Custom scope, Buy bot, Clientside nickname
     if page == "Visual" then
         _safe_display(widgets.enabled)
         if widgets.enabled:get() then
@@ -6531,21 +7037,18 @@ end
 
 
 -- ======================================================================
---  HOME PAGE  — Umbrella-inspired: brand header + bullet info rows
+--  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
 -- ======================================================================
 do
     local home = {}
     _G.__home = home
 
-    -- ── static labels ────────────────────────────────────────────────
-    -- brand header (drawn via paint_ui, not pui labels)
-    -- stat labels
     home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a71bc78ff\xe2\x96\xb6 Statistics')
     home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x96\xb6 Total time: \a71bc78ff0.0 Hours')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session: \a71bc78ff0 Minutes')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session time: \a71bc78ff0 Minutes')
     home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Headshots: \a71bc78ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Killed: \a71bc78ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Misses: \a71bc78ff0')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Enemy killed: \a71bc78ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'X Misses at me: \a71bc78ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -6554,8 +7057,8 @@ do
     local _last_sv  = 0
 
     local function _get_total()
-        local ok, v = pcall(function() return database.read('zenith_total_time_v1') end)
-        return (ok and type(v) == 'number') and v or 0
+        local ok,v = pcall(function() return database.read('zenith_total_time_v1') end)
+        return (ok and type(v)=='number') and v or 0
     end
     local function _save_total(h)
         pcall(function() database.write('zenith_total_time_v1', h) end)
@@ -6574,64 +7077,21 @@ do
     end)
 
     function home.update()
-        local rt   = globals.realtime and globals.realtime() or 0
+        local rt = globals.realtime and globals.realtime() or 0
         local secs = rt - _s_start
         local mins = math.floor(secs / 60)
         if rt - _last_sv > 60 then
-            _save_total(_get_total() + secs / 3600)
+            _save_total(_get_total() + secs/3600)
             _last_sv = rt
         end
-        local tot    = _get_total()
-        local hs_pct = _s_kills > 0 and math.floor(_s_hs / _s_kills * 100) or 0
-
+        local tot = _get_total()
+        local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
         home.lbl_total:set(string.format('\xe2\x96\xb6 Total time: \a71bc78ff%.1f Hours', tot))
-        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session: \a71bc78ff%d Minutes', mins))
+        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session time: \a71bc78ff%d Minutes', mins))
         home.lbl_hs:set(string.format('Headshots: \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('Killed: \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('Misses: \a71bc78ff%d', _s_misses))
+        home.lbl_kills:set(string.format('Enemy killed: \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('X Misses at me: \a71bc78ff%d', _s_misses))
     end
-
-    -- ── painted header (drawn on paint_ui when menu open + Home page) ─
-    local _header_alpha = 0.0
-
-    client.set_event_callback('paint_ui', function()
-        if not ui.is_menu_open() then
-            _header_alpha = motion.interp(_header_alpha, 0, 0.08)
-            if _header_alpha <= 0 then return end
-        end
-
-        -- only render on Home page
-        local sel_ok, sel = pcall(ui.get, gui.selection:get_ref())
-        if not (sel_ok and sel == 'Home') then
-            _header_alpha = motion.interp(_header_alpha, 0, 0.08)
-            return
-        end
-        _header_alpha = motion.interp(_header_alpha, 1, 0.06)
-        if _header_alpha <= 0.01 then return end
-
-        local r, g, b = widgets.color_picker:rawget()
-        local a       = math.floor(255 * _header_alpha)
-        local flags   = "d"
-
-        -- position: top of the fakelag group panel
-        -- approximate fixed position; adjust if needed
-        local sx, sy  = client.screen_size()
-        local px = math.floor(sx * 0.012)
-        local py = math.floor(sy * 0.045)
-
-        -- "Zenith" in accent colour
-        local brand       = "Zenith"
-        local tagline     = "\xc2\xb7 Powered by Zenith"
-        local bw, bh      = renderer.measure_text(flags, brand)
-        local tw, _       = renderer.measure_text(flags, tagline)
-
-        renderer.text(px, py, r, g, b, a, flags, 0, brand)
-        renderer.text(px + bw + 6, py, 170, 170, 170, math.floor(200 * _header_alpha), flags, 0, tagline)
-
-        -- thin separator line under brand
-        py = py + bh + 4
-        renderer.rectangle(px, py, bw + 6 + tw, 1, r, g, b, math.floor(120 * _header_alpha))
-    end)
 
     function home.show()
         home.update()
@@ -6643,7 +7103,6 @@ do
         _safe_display(home.lbl_misses)
     end
 end
-
 
 --  CLANTAG SYSTEM (zenith.gs)
 -- ======================================================================
@@ -6721,6 +7180,13 @@ do
     end)
     client.set_event_callback('round_poststart', function()
         _win_panel = false
+        if mp.ct_en and mp.ct_en:get() then
+            local ok2, txt = pcall(ui.get, mp.ct_text.ref)
+            client.set_clan_tag((ok2 and txt and txt ~= '') and txt or 'zenith.gs')
+        end
+    end)
+    client.set_event_callback('round_start', function()
+        _old_tick = -999
     end)
 
     local function play_tag(frames, speed, count)
