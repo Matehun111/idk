@@ -2616,90 +2616,300 @@ do
     : record("aa","hd::state") : save()
 
     -- =========================================================
-    --  UI  --  PER-STATE EDITOR WIDGETS
-    --  (shared controls; values swapped on state change)
+    --  UI  --  PER-STATE EDITOR WIDGETS  (visible controls)
     -- =========================================================
 
     -- Pitch
     hd.ui_pitch = menu.new_item(ui.new_combobox, G, GR,
         merge{"Pitch", "\n", "hd::pitch"},
         {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::pitch") : save()
 
     hd.ui_pitch_custom = menu.new_item(ui.new_slider, G, GR,
         merge{"  Custom pitch", "\n", "hd::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::pitch_custom") : save()
 
     -- Yaw left / right
     hd.ui_yaw_left = menu.new_item(ui.new_slider, G, GR,
         merge{"Yaw left", "\n", "hd::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::yaw_left") : save()
 
     hd.ui_yaw_right = menu.new_item(ui.new_slider, G, GR,
         merge{"Yaw right", "\n", "hd::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::yaw_right") : save()
 
     -- Yaw random
     hd.ui_yaw_rnd_mode = menu.new_item(ui.new_combobox, G, GR,
         merge{"Yaw random mode", "\n", "hd::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::yaw_rnd_mode") : save()
 
     hd.ui_yaw_rnd_left = menu.new_item(ui.new_slider, G, GR,
         merge{"  Yaw left random", "\n", "hd::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::yaw_rnd_left") : save()
 
     hd.ui_yaw_rnd_right = menu.new_item(ui.new_slider, G, GR,
         merge{"  Yaw right random", "\n", "hd::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::yaw_rnd_right") : save()
 
     -- Yaw jitter
     hd.ui_yaw_jitter = menu.new_item(ui.new_combobox, G, GR,
         merge{"Yaw jitter", "\n", "hd::yaw_jitter"},
         {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::yaw_jitter") : save()
 
     hd.ui_yaw_jitter_deg = menu.new_item(ui.new_slider, G, GR,
         merge{"  Jitter degree", "\n", "hd::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::yaw_jitter_deg") : save()
 
     hd.ui_randomization = menu.new_item(ui.new_slider, G, GR,
         merge{"Randomization", "\n", "hd::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::randomization") : save()
 
     hd.ui_switch_chance = menu.new_item(ui.new_slider, G, GR,
         merge{"Switch chance", "\n", "hd::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::switch_chance") : save()
 
     -- Body yaw
     hd.ui_body_yaw = menu.new_item(ui.new_combobox, G, GR,
         merge{"Body yaw", "\n", "hd::body_yaw"},
         {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::body_yaw") : save()
 
     hd.ui_body_yaw_deg = menu.new_item(ui.new_slider, G, GR,
         merge{"  Body yaw degree", "\n", "hd::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::body_yaw_deg") : save()
 
     -- Delay
     hd.ui_delay_from = menu.new_item(ui.new_slider, G, GR,
         merge{"Delay from", "\n", "hd::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::delay_from") : save()
 
     hd.ui_delay_to = menu.new_item(ui.new_slider, G, GR,
         merge{"Delay to", "\n", "hd::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::delay_to") : save()
 
     hd.ui_delay_count = menu.new_item(ui.new_slider, G, GR,
         merge{"Delay tick count", "\n", "hd::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::delay_count") : save()
 
     hd.ui_delay_tick1 = menu.new_item(ui.new_slider, G, GR,
         merge{"Delay tick \xc2\xb11", "\n", "hd::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::delay_tick1") : save()
 
     hd.ui_delay_rnd = menu.new_item(ui.new_slider, G, GR,
         merge{"Delay randomization", "\n", "hd::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::delay_rnd") : save()
+
+    -- =========================================================
+    --  HIDDEN STORAGE: one config item per state per field
+    --  These are never displayed; they just persist values.
+    --  Keys:  hd::<state>::<field>
+    -- =========================================================
+    hd.store = {}   -- hd.store[state_id][field] = menu_item
+    hd.store["stand"] = {}
+    hd.store["stand"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::pitch","\n","hd::stand::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
+    : record("aa","hd::stand::pitch") : save()
+    hd.store["stand"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::pitch_custom","\n","hd::stand::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::stand::pitch_custom") : save()
+    hd.store["stand"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_left","\n","hd::stand::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::stand::yaw_left") : save()
+    hd.store["stand"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_right","\n","hd::stand::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::stand::yaw_right") : save()
+    hd.store["stand"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::yaw_rnd_mode","\n","hd::stand::yaw_rnd_mode"}, {"Off","Percent","Range"})
+    : record("aa","hd::stand::yaw_rnd_mode") : save()
+    hd.store["stand"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_rnd_left","\n","hd::stand::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::stand::yaw_rnd_left") : save()
+    hd.store["stand"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_rnd_right","\n","hd::stand::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::stand::yaw_rnd_right") : save()
+    hd.store["stand"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::yaw_jitter","\n","hd::stand::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::stand::yaw_jitter") : save()
+    hd.store["stand"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_jitter_deg","\n","hd::stand::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::stand::yaw_jitter_deg") : save()
+    hd.store["stand"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::randomization","\n","hd::stand::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::stand::randomization") : save()
+    hd.store["stand"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::switch_chance","\n","hd::stand::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::stand::switch_chance") : save()
+    hd.store["stand"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::body_yaw","\n","hd::stand::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::stand::body_yaw") : save()
+    hd.store["stand"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::body_yaw_deg","\n","hd::stand::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::stand::body_yaw_deg") : save()
+    hd.store["stand"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_from","\n","hd::stand::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::stand::delay_from") : save()
+    hd.store["stand"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_to","\n","hd::stand::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::stand::delay_to") : save()
+    hd.store["stand"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_count","\n","hd::stand::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::stand::delay_count") : save()
+    hd.store["stand"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_tick1","\n","hd::stand::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::stand::delay_tick1") : save()
+    hd.store["stand"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_rnd","\n","hd::stand::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::stand::delay_rnd") : save()
+    hd.store["run"] = {}
+    hd.store["run"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::pitch","\n","hd::run::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
+    : record("aa","hd::run::pitch") : save()
+    hd.store["run"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::pitch_custom","\n","hd::run::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::run::pitch_custom") : save()
+    hd.store["run"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_left","\n","hd::run::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::run::yaw_left") : save()
+    hd.store["run"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_right","\n","hd::run::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::run::yaw_right") : save()
+    hd.store["run"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::yaw_rnd_mode","\n","hd::run::yaw_rnd_mode"}, {"Off","Percent","Range"})
+    : record("aa","hd::run::yaw_rnd_mode") : save()
+    hd.store["run"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_rnd_left","\n","hd::run::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::run::yaw_rnd_left") : save()
+    hd.store["run"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_rnd_right","\n","hd::run::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::run::yaw_rnd_right") : save()
+    hd.store["run"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::yaw_jitter","\n","hd::run::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::run::yaw_jitter") : save()
+    hd.store["run"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_jitter_deg","\n","hd::run::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::run::yaw_jitter_deg") : save()
+    hd.store["run"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::randomization","\n","hd::run::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::run::randomization") : save()
+    hd.store["run"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::switch_chance","\n","hd::run::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::run::switch_chance") : save()
+    hd.store["run"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::body_yaw","\n","hd::run::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::run::body_yaw") : save()
+    hd.store["run"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::body_yaw_deg","\n","hd::run::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::run::body_yaw_deg") : save()
+    hd.store["run"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_from","\n","hd::run::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::run::delay_from") : save()
+    hd.store["run"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_to","\n","hd::run::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::run::delay_to") : save()
+    hd.store["run"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_count","\n","hd::run::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::run::delay_count") : save()
+    hd.store["run"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_tick1","\n","hd::run::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::run::delay_tick1") : save()
+    hd.store["run"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_rnd","\n","hd::run::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::run::delay_rnd") : save()
+    hd.store["walk"] = {}
+    hd.store["walk"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::pitch","\n","hd::walk::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
+    : record("aa","hd::walk::pitch") : save()
+    hd.store["walk"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::pitch_custom","\n","hd::walk::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::walk::pitch_custom") : save()
+    hd.store["walk"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_left","\n","hd::walk::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::walk::yaw_left") : save()
+    hd.store["walk"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_right","\n","hd::walk::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::walk::yaw_right") : save()
+    hd.store["walk"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::yaw_rnd_mode","\n","hd::walk::yaw_rnd_mode"}, {"Off","Percent","Range"})
+    : record("aa","hd::walk::yaw_rnd_mode") : save()
+    hd.store["walk"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_rnd_left","\n","hd::walk::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::walk::yaw_rnd_left") : save()
+    hd.store["walk"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_rnd_right","\n","hd::walk::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::walk::yaw_rnd_right") : save()
+    hd.store["walk"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::yaw_jitter","\n","hd::walk::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::walk::yaw_jitter") : save()
+    hd.store["walk"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_jitter_deg","\n","hd::walk::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::walk::yaw_jitter_deg") : save()
+    hd.store["walk"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::randomization","\n","hd::walk::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::walk::randomization") : save()
+    hd.store["walk"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::switch_chance","\n","hd::walk::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::walk::switch_chance") : save()
+    hd.store["walk"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::body_yaw","\n","hd::walk::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::walk::body_yaw") : save()
+    hd.store["walk"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::body_yaw_deg","\n","hd::walk::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::walk::body_yaw_deg") : save()
+    hd.store["walk"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_from","\n","hd::walk::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::walk::delay_from") : save()
+    hd.store["walk"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_to","\n","hd::walk::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::walk::delay_to") : save()
+    hd.store["walk"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_count","\n","hd::walk::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::walk::delay_count") : save()
+    hd.store["walk"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_tick1","\n","hd::walk::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::walk::delay_tick1") : save()
+    hd.store["walk"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_rnd","\n","hd::walk::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::walk::delay_rnd") : save()
+    hd.store["crouch"] = {}
+    hd.store["crouch"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::pitch","\n","hd::crouch::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
+    : record("aa","hd::crouch::pitch") : save()
+    hd.store["crouch"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::pitch_custom","\n","hd::crouch::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::crouch::pitch_custom") : save()
+    hd.store["crouch"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_left","\n","hd::crouch::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::crouch::yaw_left") : save()
+    hd.store["crouch"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_right","\n","hd::crouch::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::crouch::yaw_right") : save()
+    hd.store["crouch"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::yaw_rnd_mode","\n","hd::crouch::yaw_rnd_mode"}, {"Off","Percent","Range"})
+    : record("aa","hd::crouch::yaw_rnd_mode") : save()
+    hd.store["crouch"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_rnd_left","\n","hd::crouch::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::crouch::yaw_rnd_left") : save()
+    hd.store["crouch"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_rnd_right","\n","hd::crouch::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::crouch::yaw_rnd_right") : save()
+    hd.store["crouch"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::yaw_jitter","\n","hd::crouch::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::crouch::yaw_jitter") : save()
+    hd.store["crouch"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_jitter_deg","\n","hd::crouch::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::crouch::yaw_jitter_deg") : save()
+    hd.store["crouch"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::randomization","\n","hd::crouch::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::crouch::randomization") : save()
+    hd.store["crouch"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::switch_chance","\n","hd::crouch::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::crouch::switch_chance") : save()
+    hd.store["crouch"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::body_yaw","\n","hd::crouch::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::crouch::body_yaw") : save()
+    hd.store["crouch"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::body_yaw_deg","\n","hd::crouch::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::crouch::body_yaw_deg") : save()
+    hd.store["crouch"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_from","\n","hd::crouch::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::crouch::delay_from") : save()
+    hd.store["crouch"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_to","\n","hd::crouch::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::crouch::delay_to") : save()
+    hd.store["crouch"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_count","\n","hd::crouch::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::crouch::delay_count") : save()
+    hd.store["crouch"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_tick1","\n","hd::crouch::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::crouch::delay_tick1") : save()
+    hd.store["crouch"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_rnd","\n","hd::crouch::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::crouch::delay_rnd") : save()
+    hd.store["air"] = {}
+    hd.store["air"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::pitch","\n","hd::air::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
+    : record("aa","hd::air::pitch") : save()
+    hd.store["air"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::pitch_custom","\n","hd::air::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::air::pitch_custom") : save()
+    hd.store["air"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_left","\n","hd::air::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::air::yaw_left") : save()
+    hd.store["air"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_right","\n","hd::air::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::air::yaw_right") : save()
+    hd.store["air"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::yaw_rnd_mode","\n","hd::air::yaw_rnd_mode"}, {"Off","Percent","Range"})
+    : record("aa","hd::air::yaw_rnd_mode") : save()
+    hd.store["air"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_rnd_left","\n","hd::air::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::air::yaw_rnd_left") : save()
+    hd.store["air"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_rnd_right","\n","hd::air::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::air::yaw_rnd_right") : save()
+    hd.store["air"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::yaw_jitter","\n","hd::air::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::air::yaw_jitter") : save()
+    hd.store["air"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_jitter_deg","\n","hd::air::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::air::yaw_jitter_deg") : save()
+    hd.store["air"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::randomization","\n","hd::air::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::air::randomization") : save()
+    hd.store["air"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::switch_chance","\n","hd::air::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::air::switch_chance") : save()
+    hd.store["air"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::body_yaw","\n","hd::air::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::air::body_yaw") : save()
+    hd.store["air"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::body_yaw_deg","\n","hd::air::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::air::body_yaw_deg") : save()
+    hd.store["air"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_from","\n","hd::air::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::air::delay_from") : save()
+    hd.store["air"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_to","\n","hd::air::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::air::delay_to") : save()
+    hd.store["air"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_count","\n","hd::air::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::air::delay_count") : save()
+    hd.store["air"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_tick1","\n","hd::air::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::air::delay_tick1") : save()
+    hd.store["air"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_rnd","\n","hd::air::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::air::delay_rnd") : save()
+    hd.store["airduck"] = {}
+    hd.store["airduck"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::pitch","\n","hd::airduck::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
+    : record("aa","hd::airduck::pitch") : save()
+    hd.store["airduck"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::pitch_custom","\n","hd::airduck::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
+    : record("aa","hd::airduck::pitch_custom") : save()
+    hd.store["airduck"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_left","\n","hd::airduck::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
+    : record("aa","hd::airduck::yaw_left") : save()
+    hd.store["airduck"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_right","\n","hd::airduck::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
+    : record("aa","hd::airduck::yaw_right") : save()
+    hd.store["airduck"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::yaw_rnd_mode","\n","hd::airduck::yaw_rnd_mode"}, {"Off","Percent","Range"})
+    : record("aa","hd::airduck::yaw_rnd_mode") : save()
+    hd.store["airduck"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_rnd_left","\n","hd::airduck::yaw_rnd_left"}, 0, 100, 0, true, "%")
+    : record("aa","hd::airduck::yaw_rnd_left") : save()
+    hd.store["airduck"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_rnd_right","\n","hd::airduck::yaw_rnd_right"}, 0, 100, 0, true, "%")
+    : record("aa","hd::airduck::yaw_rnd_right") : save()
+    hd.store["airduck"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::yaw_jitter","\n","hd::airduck::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
+    : record("aa","hd::airduck::yaw_jitter") : save()
+    hd.store["airduck"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_jitter_deg","\n","hd::airduck::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
+    : record("aa","hd::airduck::yaw_jitter_deg") : save()
+    hd.store["airduck"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::randomization","\n","hd::airduck::randomization"}, 0, 100, 0, true, "%")
+    : record("aa","hd::airduck::randomization") : save()
+    hd.store["airduck"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::switch_chance","\n","hd::airduck::switch_chance"}, 0, 100, 100, true, "%")
+    : record("aa","hd::airduck::switch_chance") : save()
+    hd.store["airduck"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::body_yaw","\n","hd::airduck::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
+    : record("aa","hd::airduck::body_yaw") : save()
+    hd.store["airduck"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::body_yaw_deg","\n","hd::airduck::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
+    : record("aa","hd::airduck::body_yaw_deg") : save()
+    hd.store["airduck"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_from","\n","hd::airduck::delay_from"}, 0, 14, 0, true, "t")
+    : record("aa","hd::airduck::delay_from") : save()
+    hd.store["airduck"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_to","\n","hd::airduck::delay_to"}, 0, 14, 0, true, "t")
+    : record("aa","hd::airduck::delay_to") : save()
+    hd.store["airduck"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_count","\n","hd::airduck::delay_count"}, 1, 14, 1, true, "")
+    : record("aa","hd::airduck::delay_count") : save()
+    hd.store["airduck"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_tick1","\n","hd::airduck::delay_tick1"}, 0, 14, 0, true, "t")
+    : record("aa","hd::airduck::delay_tick1") : save()
+    hd.store["airduck"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_rnd","\n","hd::airduck::delay_rnd"}, 0, 100, 0, true, "%")
+    : record("aa","hd::airduck::delay_rnd") : save()
 
     -- =========================================================
     --  UI  --  FAKE LAG  (global, not per-state)
@@ -2781,7 +2991,7 @@ do
     hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "\xa771bc78ff\xe2\x96\xba Controls")
 
     -- =========================================================
-    --  PRESET SAVE / LOAD   (editor <-> presets table)
+    --  PRESET SAVE / LOAD  (editor <-> presets <-> hidden storage)
     -- =========================================================
 
     local function get_selected_id()
@@ -2792,75 +3002,96 @@ do
         return STATES[1].id
     end
 
-    -- read widgets -> save into preset for current state
-    local function preset_save()
-        local p = hd.presets[get_selected_id()]
-        if not p then return end
-        p.yaw_left       = hd.ui_yaw_left:get()
-        p.yaw_right      = hd.ui_yaw_right:get()
-        p.yaw_rnd_mode   = hd.ui_yaw_rnd_mode:get()
-        p.yaw_rnd_left   = hd.ui_yaw_rnd_left:get()
-        p.yaw_rnd_right  = hd.ui_yaw_rnd_right:get()
-        p.yaw_jitter     = hd.ui_yaw_jitter:get()
-        p.yaw_jitter_deg = hd.ui_yaw_jitter_deg:get()
-        p.randomization  = hd.ui_randomization:get()
-        p.switch_chance  = hd.ui_switch_chance:get()
-        p.pitch          = hd.ui_pitch:get()
-        p.pitch_custom   = hd.ui_pitch_custom:get()
-        p.body_yaw       = hd.ui_body_yaw:get()
-        p.body_yaw_deg   = hd.ui_body_yaw_deg:get()
-        p.delay_from     = hd.ui_delay_from:get()
-        p.delay_to       = hd.ui_delay_to:get()
-        p.delay_count    = hd.ui_delay_count:get()
-        p.delay_tick1    = hd.ui_delay_tick1:get()
-        p.delay_rnd      = hd.ui_delay_rnd:get()
-    end
-
-    -- load preset for current state -> push into widgets
-    local function preset_load()
-        local p = hd.presets[get_selected_id()]
-        if not p then return end
-        hd.ui_yaw_left:set(p.yaw_left)
-        hd.ui_yaw_right:set(p.yaw_right)
-        hd.ui_yaw_rnd_mode:set(p.yaw_rnd_mode)
-        hd.ui_yaw_rnd_left:set(p.yaw_rnd_left)
-        hd.ui_yaw_rnd_right:set(p.yaw_rnd_right)
-        hd.ui_yaw_jitter:set(p.yaw_jitter)
-        hd.ui_yaw_jitter_deg:set(p.yaw_jitter_deg)
-        hd.ui_randomization:set(p.randomization)
-        hd.ui_switch_chance:set(p.switch_chance)
-        hd.ui_pitch:set(p.pitch)
-        hd.ui_pitch_custom:set(p.pitch_custom)
-        hd.ui_body_yaw:set(p.body_yaw)
-        hd.ui_body_yaw_deg:set(p.body_yaw_deg)
-        hd.ui_delay_from:set(p.delay_from)
-        hd.ui_delay_to:set(p.delay_to)
-        hd.ui_delay_count:set(p.delay_count)
-        hd.ui_delay_tick1:set(p.delay_tick1)
-        hd.ui_delay_rnd:set(p.delay_rnd)
-    end
-
-    -- wire up: any editor widget change -> auto-save current state preset
-    local editor_widgets = {
-        hd.ui_yaw_left, hd.ui_yaw_right,
-        hd.ui_yaw_rnd_mode, hd.ui_yaw_rnd_left, hd.ui_yaw_rnd_right,
-        hd.ui_yaw_jitter, hd.ui_yaw_jitter_deg, hd.ui_randomization,
-        hd.ui_switch_chance,
-        hd.ui_pitch, hd.ui_pitch_custom,
-        hd.ui_body_yaw, hd.ui_body_yaw_deg,
-        hd.ui_delay_from, hd.ui_delay_to, hd.ui_delay_count,
-        hd.ui_delay_tick1, hd.ui_delay_rnd,
+    -- Map field name -> editor widget
+    local EDITOR_MAP = {
+        pitch          = hd.ui_pitch,
+        pitch_custom   = hd.ui_pitch_custom,
+        yaw_left       = hd.ui_yaw_left,
+        yaw_right      = hd.ui_yaw_right,
+        yaw_rnd_mode   = hd.ui_yaw_rnd_mode,
+        yaw_rnd_left   = hd.ui_yaw_rnd_left,
+        yaw_rnd_right  = hd.ui_yaw_rnd_right,
+        yaw_jitter     = hd.ui_yaw_jitter,
+        yaw_jitter_deg = hd.ui_yaw_jitter_deg,
+        randomization  = hd.ui_randomization,
+        switch_chance  = hd.ui_switch_chance,
+        body_yaw       = hd.ui_body_yaw,
+        body_yaw_deg   = hd.ui_body_yaw_deg,
+        delay_from     = hd.ui_delay_from,
+        delay_to       = hd.ui_delay_to,
+        delay_count    = hd.ui_delay_count,
+        delay_tick1    = hd.ui_delay_tick1,
+        delay_rnd      = hd.ui_delay_rnd,
     }
-    for _, w in ipairs(editor_widgets) do
-        if w and w.set_callback then w:set_callback(preset_save) end
+    local FIELD_ORDER = {
+        "pitch","pitch_custom",
+        "yaw_left","yaw_right",
+        "yaw_rnd_mode","yaw_rnd_left","yaw_rnd_right",
+        "yaw_jitter","yaw_jitter_deg",
+        "randomization","switch_chance",
+        "body_yaw","body_yaw_deg",
+        "delay_from","delay_to","delay_count","delay_tick1","delay_rnd",
+    }
+
+    -- Read hidden storage -> hd.presets (called once on startup)
+    local function storage_to_presets()
+        for _, sid in ipairs({"stand","run","walk","crouch","air","airduck"}) do
+            local p  = hd.presets[sid]
+            local st = hd.store[sid]
+            if p and st then
+                for _, field in ipairs(FIELD_ORDER) do
+                    if st[field] then
+                        p[field] = st[field]:get()
+                    end
+                end
+            end
+        end
     end
 
-    -- state combobox change -> save old, load new
+    -- Write editor widgets -> hd.presets[sid] AND hidden storage[sid]
+    local function preset_save()
+        local sid = get_selected_id()
+        local p   = hd.presets[sid]
+        local st  = hd.store[sid]
+        if not p or not st then return end
+        for _, field in ipairs(FIELD_ORDER) do
+            local w = EDITOR_MAP[field]
+            if w then
+                local v = w:get()
+                p[field] = v
+                if st[field] then
+                    pcall(function() st[field]:set(v) end)
+                end
+            end
+        end
+    end
+
+    -- Load hd.presets[selected_sid] -> editor widgets
+    local function preset_load()
+        local sid = get_selected_id()
+        local p   = hd.presets[sid]
+        if not p then return end
+        for _, field in ipairs(FIELD_ORDER) do
+            local w = EDITOR_MAP[field]
+            if w then pcall(function() w:set(p[field]) end) end
+        end
+    end
+
+    -- Wire callbacks: any editor widget change -> preset_save
+    for _, field in ipairs(FIELD_ORDER) do
+        local w = EDITOR_MAP[field]
+        if w and w.set_callback then
+            w:set_callback(preset_save)
+        end
+    end
+
+    -- State combobox: save current, then load new
     hd.ui_state:set_callback(function()
         preset_load()
     end)
 
-    -- initial load
+    -- On startup: pull from config (hidden storage) -> presets -> editor
+    storage_to_presets()
     preset_load()
 
     -- =========================================================
