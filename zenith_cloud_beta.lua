@@ -2990,12 +2990,12 @@ do
     : record("aa","hd::inverter") : save()
 
     -- section header labels  \a71bc78ff = green accent, \xe2\x96\xba = filled triangle
-    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "71bc78ff► Pitch")
-    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "71bc78ff► Yaw")
-    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "71bc78ff► Body Yaw")
-    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "71bc78ff► Delay")
-    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "71bc78ff► Fake Lag")
-    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "71bc78ff► Controls")
+    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "▸ Pitch ────────────")
+    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "▸ Yaw ──────────────")
+    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "▸ Body Yaw ─────────")
+    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "▸ Delay ────────────")
+    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "▸ Fake Lag ─────────")
+    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "▸ Controls ─────────")
 
     -- =========================================================
     --  PRESET SAVE / LOAD  (editor <-> presets <-> hidden storage)
@@ -3097,9 +3097,17 @@ do
         preset_load()
     end)
 
-    -- On startup: pull from config (hidden storage) -> presets -> editor
-    storage_to_presets()
-    preset_load()
+    -- GS applies config AFTER the script finishes loading (via ui.set_callback).
+    -- So we must defer storage_to_presets() + preset_load() to the first frame.
+    local _hd_boot_done = false
+    local _hd_boot_cb
+    _hd_boot_cb = client.set_event_callback('setup_command', function()
+        if _hd_boot_done then return end
+        _hd_boot_done = true
+        storage_to_presets()
+        preset_load()
+        pcall(client.unset_event_callback, 'setup_command', _hd_boot_cb)
+    end)
 
     -- =========================================================
     --  RUNTIME: get the active preset for the current game state
@@ -4480,13 +4488,13 @@ LPH_NO_VIRTUALIZE(function ()
             update_timer(nci, globals.frametime())
             if nci == nil then return end
 
-            local flags = "d"
+            local flags  = "d"
             local r, g, b = widgets.color_picker:rawget()
-            local a  = alpha
-            local ia = math.floor(255 * a)
+            local a   = alpha
+            local ia  = math.floor(255 * a)
             local screen = vector(client.screen_size())
 
-            -- collect tokens
+            -- collect info tokens (right side)
             local tokens = {}
             if widgets.display:have_key("Username") then
                 local nick = USERNAME
@@ -4507,52 +4515,67 @@ LPH_NO_VIRTUALIZE(function ()
                 tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
             end
 
-            local LOGO_W = texture ~= nil and 26 or 0
-            local PAD    = 8
+            -- measure
+            local LOGO_W = texture ~= nil and 24 or 0
+            local PAD_X  = 9
+            local PAD_Y  = 6
+            local SEP_W  = 9   -- gap around the vert separator
+            local DOT_W  = 6   -- bullet separator width
             local brand  = "Zenith"
             local bw, bh = renderer.measure_text(flags, brand)
 
-            local info_w = 0
+            local tok_w = 0
             for _, t in ipairs(tokens) do
-                info_w = info_w + renderer.measure_text(flags, t.label)
+                tok_w = tok_w + renderer.measure_text(flags, t.label)
             end
-            if #tokens > 0 then info_w = info_w + #tokens * 18 end
+            -- dots between tokens
+            local dot_str = " · "   -- UTF-8 middle dot
+            local dw = renderer.measure_text(flags, dot_str)
+            if #tokens > 1 then tok_w = tok_w + (#tokens - 1) * dw end
 
-            local box_w = LOGO_W + PAD * 2 + bw + info_w
-            local box_h = bh + PAD * 2 - 2
-            local px    = screen.x - 9 - box_w
-            local py    = 9
+            local has_tokens = #tokens > 0
+            local sep_block  = has_tokens and (SEP_W * 2 + 1) or 0
+            local box_w = LOGO_W + PAD_X * 2 + bw + sep_block + tok_w
+            local box_h = bh + PAD_Y * 2
+            local px    = screen.x - 8 - box_w
+            local py    = 8
 
-            -- card
-            graphics.rectangle(px, py, box_w, box_h, 8, 8, 11, math.floor(200 * a), 4)
-            -- left accent strip
-            renderer.rectangle(px, py + 4, 2, box_h - 8, r, g, b, ia)
-            -- bottom line
-            renderer.rectangle(px + 4, py + box_h - 1, box_w - 8, 1, r, g, b, math.floor(60 * a))
+            -- dark card bg
+            graphics.rectangle(px, py, box_w, box_h, 9, 9, 13, math.floor(205 * a), 4)
 
+            -- left accent strip (2px, full inner height)
+            renderer.rectangle(px, py + 3, 2, box_h - 6, r, g, b, ia)
+
+            -- logo texture
             if texture ~= nil then
-                renderer.texture(texture, px + PAD, py + (box_h - 22) * 0.5,
-                    22, 22, 255, 255, 255, ia, "f")
+                renderer.texture(texture, px + PAD_X, py + (box_h - 20) * 0.5,
+                    20, 20, 255, 255, 255, math.floor(200 * a), "f")
             end
 
-            local tx = px + LOGO_W + PAD
+            -- brand label
+            local tx = px + LOGO_W + PAD_X
             local ty = py + (box_h - bh) * 0.5
             renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
             tx = tx + bw
 
-            if #tokens > 0 then
-                renderer.rectangle(tx + 6, py + 4, 1, box_h - 8, 55, 55, 60, math.floor(150 * a))
-                tx = tx + 14
+            -- separator line between brand and tokens
+            if has_tokens then
+                renderer.rectangle(tx + SEP_W, py + 4, 1, box_h - 8,
+                    60, 60, 66, math.floor(160 * a))
+                tx = tx + sep_block
+
+                -- tokens with middle-dot separators
                 for i, t in ipairs(tokens) do
-                    local cr = t.accent and r or 175
-                    local cg = t.accent and g or 175
-                    local cb = t.accent and b or 180
+                    local cr = t.accent and r   or 170
+                    local cg = t.accent and g   or 170
+                    local cb = t.accent and b   or 176
+                    local ca = t.accent and ia  or math.floor(210 * a)
                     local tw2 = renderer.measure_text(flags, t.label)
-                    renderer.text(tx, ty, cr, cg, cb, math.floor(230 * a), flags, 0, t.label)
+                    renderer.text(tx, ty, cr, cg, cb, ca, flags, 0, t.label)
                     tx = tx + tw2
                     if i < #tokens then
-                        renderer.text(tx, ty, 50, 50, 55, math.floor(160 * a), flags, 0, "  |  ")
-                        tx = tx + renderer.measure_text(flags, "  |  ")
+                        renderer.text(tx, ty, 52, 52, 58, math.floor(130 * a), flags, 0, dot_str)
+                        tx = tx + dw
                     end
                 end
             end
@@ -4795,37 +4818,38 @@ LPH_NO_VIRTUALIZE(function ()
             if alpha <= 0 then return end
 
             local r, g, b = widgets.color_picker:get()
-            local PAD_X   = 10
-            local PAD_Y   = 5
-            local RADIUS  = 4
-            local ROW_H   = 18
+            local PAD_X  = 10
+            local PAD_Y  = 4
+            local RADIUS = 4
+            local ROW_H  = 17   -- compact rows
 
-            -- measure header "keybinds"
             local hw, hh = renderer.measure_text(flags, "keybinds")
 
-            local min_w  = PAD_X * 4 + hw
-            local row_w  = name_width + 12 + badge_width + PAD_X * 2
-            width = motion.interp(width, math.max(min_w, row_w, 130), 0.045)
+            local min_w = PAD_X * 4 + hw
+            local row_w = name_width + 14 + badge_width + PAD_X * 2
+            width = motion.interp(width, math.max(min_w, row_w, 120), 0.045)
 
             local box_w = math.floor(width + 0.85)
             local box_h = hh + PAD_Y * 2
 
-            local ha = math.floor(255 * alpha * holding)
+            local ha  = math.floor(255 * alpha * holding)
             local pos = window.pos
 
-            -- -- header card -------------------------------------------
-            graphics.rectangle(pos.x, pos.y, box_w, box_h, 10, 10, 14, math.floor(190 * alpha * holding), RADIUS)
-            -- top accent bar
-            renderer.rectangle(pos.x + RADIUS, pos.y, box_w - RADIUS*2, 2, r, g, b, ha)
-            -- header label centred
+            -- header: dark pill with LEFT accent strip
+            graphics.rectangle(pos.x, pos.y, box_w, box_h, 10, 10, 14,
+                math.floor(195 * alpha * holding), RADIUS)
+            renderer.rectangle(pos.x, pos.y + 3, 2, box_h - 6,
+                r, g, b, ha)
+
+            -- header label: dim white, centred
             renderer.text(
                 pos.x + (box_w - hw) * 0.5,
                 pos.y + (box_h - hh) * 0.5,
-                r, g, b, ha, flags, 0, "keybinds"
+                175, 175, 182, ha, flags, 0, "keybinds"
             )
 
-            -- rows
-            local row_y = pos.y + box_h + 1
+            -- rows (stacked below header)
+            local row_y = pos.y + box_h + 2
 
             for _, v in pairs(active_keys) do
                 local fade_a = math.min(1.0, alpha * v.alpha * 1.25)
@@ -4835,16 +4859,30 @@ LPH_NO_VIRTUALIZE(function ()
                 local rh = utils.round(ROW_H * fade_a)
                 if rh < 2 then goto skip end
 
-                graphics.rectangle(pos.x, row_y, box_w, rh, 12, 12, 16,
-                    math.floor(160 * fade_a * holding), 3)
+                -- row bg: very dark, minimal
+                graphics.rectangle(pos.x, row_y, box_w, rh, 10, 10, 13,
+                    math.floor(175 * fade_a * holding), 3)
+
+                -- left strip (accent)
                 renderer.rectangle(pos.x, row_y + 2, 2, rh - 4,
-                    r, g, b, math.floor(210 * fade_a * holding))
+                    r, g, b, math.floor(220 * fade_a * holding))
 
                 local ty2 = row_y + (rh - v.height) * 0.5
+
+                -- key name (brighter white)
                 renderer.text(pos.x + PAD_X, ty2,
-                    220, 220, 225, row_a, flags, 0, v.name)
-                renderer.text(pos.x + box_w - PAD_X - v.mode_width, ty2,
-                    r, g, b, math.floor(row_a * 0.9), flags, 0, v.mode)
+                    215, 215, 222, row_a, flags, 0, v.name)
+
+                -- mode badge: accent-tinted background pill
+                local bpad   = 4
+                local badge_x = pos.x + box_w - PAD_X - v.mode_width - bpad * 2
+                local badge_h = math.min(rh - 2, v.height + 4)
+                local badge_y = row_y + (rh - badge_h) * 0.5
+                graphics.rectangle(badge_x, badge_y, v.mode_width + bpad * 2, badge_h,
+                    math.floor(r * 0.18), math.floor(g * 0.18), math.floor(b * 0.18),
+                    math.floor(200 * fade_a * holding), 2)
+                renderer.text(badge_x + bpad, ty2,
+                    r, g, b, math.floor(row_a * 0.95), flags, 0, v.mode)
 
                 row_y = row_y + rh + 1
                 ::skip::
@@ -4951,11 +4989,11 @@ LPH_NO_VIRTUALIZE(function ()
 
                 -- pill background
                 graphics.rectangle(pos.x, pos.y, rect_sz.x, rect_sz.y,
-                    12, 12, 16, math.floor(180 * da), 4)
+                    11, 11, 15, math.floor(185 * da), 4)
 
-                -- top accent bar on pill
-                renderer.rectangle(pos.x + 4, pos.y, rect_sz.x - 8, 2,
-                    r1, g1, b1, math.floor(200 * da))
+                -- left accent strip (consistent with other widgets)
+                renderer.rectangle(pos.x, pos.y + 3, 2, rect_sz.y - 6,
+                    r1, g1, b1, math.floor(210 * da))
 
                 if damage_moving > 0 then
                     graphics.rectangle_outline(pos.x, pos.y, rect_sz.x, rect_sz.y,
@@ -4976,43 +5014,31 @@ LPH_NO_VIRTUALIZE(function ()
             local cx = center.x + utils.round(10 * align)
             local cy = center.y + 22
 
-            -- "Z E N I T H" wave brand line
-            do
-                local text   = "Z E N I T H"
-                local tw, th = renderer.measure_text(flags, text)
-                tw = tw + 1
-                local ox = (tw * 0.5) * (1 - align)
-                text = decorations.wave(text, clock, r1, g1, b1, 255, 255, 255, 255, 255)
-                graphics.text(cx - utils.round(ox), cy, r, g, b,
-                    math.floor(a * alpha), flags, 0, text)
-                cy = cy + th + 1
-            end
-
-            -- state badge (pill background)
+            -- state badge
             do
                 local state  = get_statement()
                 local dflags = "d"
                 local tw, th = renderer.measure_text(dflags, state)
                 tw = tw + 1
-                local BPAD   = 5
-                local bw     = tw + BPAD * 2
-                local bh     = th + 4
-                local bx     = cx - utils.round((bw * 0.5) * (1 - align * 0.5) + (tw * 0.5) * align)
-                local by     = cy
+                local BPAD  = 7
+                local bw    = tw + BPAD * 2
+                local bh    = th + 6
+                local bx    = cx - utils.round((bw * 0.5) * (1 - align * 0.5) + (tw * 0.5) * align)
+                local by    = cy
 
-                -- pill bg
-                graphics.rectangle(bx, by, bw, bh, 14, 14, 20,
-                    math.floor(140 * alpha), 3)
-                -- left glow stripe
-                renderer.rectangle(bx, by + 1, 2, bh - 2, r, g, b,
-                    math.floor(180 * alpha))
-
+                -- dark pill bg
+                graphics.rectangle(bx, by, bw, bh, 11, 11, 16,
+                    math.floor(165 * alpha), 3)
+                -- left accent strip
+                renderer.rectangle(bx, by + 2, 2, bh - 4, r, g, b,
+                    math.floor(210 * alpha))
+                -- state text (bright)
                 renderer.text(bx + BPAD, by + (bh - th) * 0.5,
-                    185, 185, 195, math.floor(220 * alpha), dflags, 0, state)
-                cy = cy + bh + 3
+                    210, 210, 218, math.floor(235 * alpha), dflags, 0, state)
+                cy = cy + bh + 2
             end
 
-            -- feature pills (DT / OS / FD / DMG) -- each with background
+            -- feature pills (DT / OS / FD / DMG) -- compact, accent tinted
             for i = 1, #features do
                 local feat = features[i]
                 feat.alpha  = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
@@ -5024,22 +5050,23 @@ LPH_NO_VIRTUALIZE(function ()
                     local dflags = "d"
                     local tw, th = renderer.measure_text(dflags, feat.text)
                     tw = tw + 1
-                    local BPAD = 5
+                    local BPAD = 6
                     local bw   = tw + BPAD * 2
                     local bh   = th + 4
                     local ox   = (bw * 0.5) * (1 - align)
                     local bx   = cx - utils.round(ox)
                     local by   = cy
 
-                    -- pill bg (accent tinted)
+                    -- accent-tinted pill (no side strip)
                     graphics.rectangle(bx, by, bw, bh,
-                        math.floor(r * 0.12), math.floor(g * 0.12), math.floor(b * 0.12),
-                        math.floor(160 * fa), 3)
-                    renderer.rectangle(bx, by + 1, 2, bh - 2, r, g, b,
-                        math.floor(200 * fa))
+                        math.floor(r * 0.15), math.floor(g * 0.15), math.floor(b * 0.15),
+                        math.floor(170 * fa), 3)
+                    -- thin bottom accent line instead of side strip
+                    renderer.rectangle(bx + 3, by + bh - 1, bw - 6, 1,
+                        r, g, b, math.floor(180 * fa))
 
                     renderer.text(bx + BPAD, by + (bh - th) * 0.5,
-                        r, g, b, math.floor(255 * fa), dflags, 0, feat.text)
+                        r, g, b, math.floor(245 * fa), dflags, 0, feat.text)
 
                     cy = cy + utils.round((bh + 2) * feat.alpha)
                 end
