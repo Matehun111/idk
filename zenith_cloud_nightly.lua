@@ -2965,6 +2965,19 @@ do
         -- when defensive fires, use original state settings
         local pd = is_def and p_orig or p
 
+        -- DEBUG: log every 32 ticks
+        if globals.tickcount() % 32 == 0 then
+            local daa = p_orig.defensiveAA:get()
+            local trigs_dbg = p_orig.defensiveTriggers:get() or {}
+            local trigs_str = table.concat(trigs_dbg, ",")
+            client.color_log(255,200,100,string.format(
+                "[ZenithAA] state=%d orig=%d def=%s is_def=%s trigs=[%s] dt=%s tb_def=%s",
+                pState, pState_orig, tostring(daa), tostring(is_def), trigs_str,
+                tostring(software.is_double_tap and software.is_double_tap()),
+                tostring(def_tracker.is_def)
+            ))
+        end
+
         -- yaw base
         ctx.yaw_base = p.yawBase:get()
 
