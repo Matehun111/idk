@@ -973,14 +973,35 @@ local group_fakelag = pui.group('AA', 'Fake lag')
 local group         = pui.group('AA', 'Anti-aimbot angles')
 local group_other   = pui.group('AA', 'Other')
 
-pui.macros.dot = '\v•  \r'
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ZENITH PREMIUM MENU ICONS & STYLING
+-- ═══════════════════════════════════════════════════════════════════════════
+pui.macros.dot = '\v\xE2\x96\xB8  \r'  -- Right-pointing triangle
+
+-- Menu Icons (UTF-8 encoded)
+local ICONS = {
+    diamond     = '\xE2\x97\x86',  -- ◆
+    user        = '\xE2\x96\xB8',  -- ▸
+    branch      = '\xE2\x94\x94',  -- └
+    version     = '\xE2\x96\xA3',  -- ▣
+    online      = '\xE2\x97\x89',  -- ◉
+    info        = '\xE2\x93\x98',  -- ⓘ
+    clock       = '\xE2\x97\x8B',  -- ○
+    stats       = '\xE2\x96\xA0',  -- ■
+    check       = '\xE2\x9C\x93',  -- ✓
+    arrow_r     = '\xE2\x96\xB6',  -- ▶
+    bullet      = '\xE2\x80\xA2',  -- •
+    line_v      = '\xE2\x94\x82',  -- │
+    line_h      = '\xE2\x94\x80',  -- ─
+    corner      = '\xE2\x94\x8C',  -- ┌
+}
 
 -- ── TAB SELECTOR ───────────────────────────────────────────────────────
 local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff�  \a666666ffElegance in Execution.')
+    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff' .. ICONS.diamond .. '  \a666666ffElegance in Execution.')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -1008,10 +1029,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup = group_fakelag:label(string.format('\a888888ff | \affffffffUser   \a888888ff> \a71bc78ff%s', USERNAME))
-shared.fl_build = group_fakelag:label('\a888888ff | \affffffffBranch  \a888888ff> \a71bc78ffNightly')
-shared.fl_version = group_fakelag:label('\a888888ff | \affffffffVersion  \a888888ff> \a71bc78ff3.0')
-shared.fl_online = group_fakelag:label('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff...')
+shared.fl_whatsup = group_fakelag:label(string.format('\a888888ff %s \affffffffUser   \a888888ff> \a71bc78ff%s', ICONS.user, USERNAME))
+shared.fl_build = group_fakelag:label(string.format('\a888888ff %s \affffffffBranch  \a888888ff> \a71bc78ffStable', ICONS.branch))
+shared.fl_version = group_fakelag:label(string.format('\a888888ff %s \affffffffVersion  \a888888ff> \a71bc78ff3.0', ICONS.version))
+shared.fl_online = group_fakelag:label(string.format('\a888888ff %s \affffffffOnline  \a888888ff> \affd700ff...', ICONS.online))
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1041,7 +1062,7 @@ do
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> %s%d', col, n))
+            shared.fl_online:set(string.format('\a888888ff \xE2\x97\x89 \affffffffOnline  \a888888ff> %s%d', col, n))
         end
     end
 
@@ -1085,10 +1106,10 @@ end
 do
     vars.statistics = {}
 
-    vars.statistics.label_info  = group_other:label('\f<dot>Information')
-    vars.statistics.user        = group_other:label('\f<dot>User: \v'..USERNAME)
-    vars.statistics.loaded      = group_other:label(string.format('\f<dot>Times Loaded: \v%d', _G._zenith_load_count or 0))
-    vars.statistics.time_in_game= group_other:label('\f<dot>Session: ')
+    vars.statistics.label_info  = group_other:label('\a7ec8e3ff\xE2\x93\x98 \affffffffInformation')
+    vars.statistics.user        = group_other:label('\a888888ff\xE2\x96\xB8 \affffffffUser: \a71bc78ff'..USERNAME)
+    vars.statistics.loaded      = group_other:label(string.format('\a888888ff\xE2\x96\xA0 \affffffffTimes Loaded: \affd700ff%d', _G._zenith_load_count or 0))
+    vars.statistics.time_in_game= group_other:label('\a888888ff\xE2\x97\x8B \affffffffSession: \a71bc78ff')
 end
 
 -- ── HELPERS (Zenith helpers table) ───────────────────────────────────
@@ -4274,6 +4295,7 @@ LPH_NO_VIRTUALIZE(function ()
             local ia = math.floor(255 * a)
             local screen = vector(client.screen_size())
 
+            -- ── Collect info tokens ────────────────────────────────────────────
             local tokens = {}
             if widgets.display:have_key("Username") then
                 local nick = USERNAME
@@ -4281,110 +4303,127 @@ LPH_NO_VIRTUALIZE(function ()
                     local cn = ui.get(widgets.custom_name_value:get_ref())
                     if #cn ~= 0 then nick = cn end
                 end
-                tokens[#tokens+1] = { label = nick, accent = true }
+                tokens[#tokens+1] = { label = nick,  icon = "\xE2\x96\xB8", accent = true }
             end
             if widgets.display:have_key("Latency") then
                 local p = get_ping(nci)
-                if p then tokens[#tokens+1] = { label = p } end
+                if p then tokens[#tokens+1] = { label = p, icon = "\xE2\x97\x8B" } end
             end
             if widgets.display:have_key("FPS") then
-                tokens[#tokens+1] = { label = f("%dfps", math.floor(1 / get_framerate())) }
+                tokens[#tokens+1] = { label = f("%d fps", math.floor(1 / get_framerate())), icon = "\xE2\x96\xA0" }
             end
             if widgets.display:have_key("Time") then
-                tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
+                tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()), icon = "\xE2\x97\x8F" }
             end
 
-            -- FANCY WATERMARK with glow, icons, and modern styling
-            local LOGO_W  = texture ~= nil and 24 or 0
-            local PAD_X   = 10
+            -- ── Layout constants ───────────────────────────────────────────────
+            local LOGO_W  = texture ~= nil and 26 or 0
+            local PAD_X   = 11
             local PAD_Y   = 6
-            local SEP_GAP = 10
-            local brand   = "ZENITH"
-            local bw, bh  = renderer.measure_text(flags, brand)
-            local dot_str = "  |  "
-            local dw      = renderer.measure_text(flags, dot_str)
-            local tok_w   = 0
-            
-            -- Icon characters for different stats
-            local icons = {
-                Username = ">>",
-                Latency = "~",
-                FPS = "#",
-                Time = "@",
-            }
-            
+            local SEP_W   = 8   -- gap each side of the divider line
+
+            -- Brand text: "ZENITH  3.0" with a tiny separator
+            local brand_core  = "ZENITH"
+            local brand_ver   = "  3.0"
+            local bw_core, bh = renderer.measure_text(flags, brand_core)
+            local bw_ver,  _  = renderer.measure_text(flags, brand_ver)
+            local brand_w     = bw_core + bw_ver
+
+            -- Token widths
+            local sep_char = "  \xE2\x94\x82  "
+            local sep_cw   = renderer.measure_text(flags, sep_char)
+            local tok_total = 0
+            local tok_items = {}
             for _, t in ipairs(tokens) do
-                tok_w = tok_w + renderer.measure_text(flags, t.label)
+                local display = t.icon .. " " .. t.label
+                local dw = renderer.measure_text(flags, display)
+                tok_items[#tok_items+1] = { display = display, dw = dw, accent = t.accent }
+                tok_total = tok_total + dw
             end
-            if #tokens > 1 then tok_w = tok_w + (#tokens - 1) * dw end
+            if #tok_items > 1 then tok_total = tok_total + (#tok_items - 1) * sep_cw end
 
-            local has_tok = #tokens > 0
-            local sep_blk = has_tok and (SEP_GAP * 2 + 2) or 0
-            local box_w   = 3 + LOGO_W + PAD_X * 2 + bw + sep_blk + tok_w
-            local box_h   = bh + PAD_Y * 2 + 2
-            local px      = screen.x - 10 - box_w
-            local py      = 10
+            local has_tok  = #tok_items > 0
+            local divider_blk = has_tok and (SEP_W * 2 + 1) or 0
 
-            -- Animated glow effect
-            glow_t = glow_t + globals.frametime() * 2
-            local glow_pulse = 0.7 + 0.3 * math.sin(glow_t)
-            
-            -- Outer glow (accent color, subtle)
-            for i = 3, 1, -1 do
-                local glow_a = math.floor(15 * glow_pulse * a * (4 - i) / 3)
-                renderer.rectangle(px - i, py - i, box_w + i*2, box_h + i*2, r, g, b, glow_a)
+            local box_w = 4 + LOGO_W + PAD_X * 2 + brand_w + divider_blk + tok_total + PAD_X
+            local box_h = bh + PAD_Y * 2 + 2
+            local px    = screen.x - 12 - box_w
+            local py    = 10
+
+            -- ── Animated glow ─────────────────────────────────────────────────
+            glow_t = glow_t + globals.frametime() * 1.2
+            local pulse = 0.55 + 0.45 * math.sin(glow_t)
+
+            -- Diffuse outer glow (5 layers, very soft)
+            for i = 5, 1, -1 do
+                local ga = math.floor(9 * pulse * a * (6 - i) / 5)
+                renderer.rectangle(px - i, py - i, box_w + i*2, box_h + i*2, r, g, b, ga)
             end
-            
-            -- Main background with gradient effect (darker at edges)
-            renderer.rectangle(px, py, box_w, box_h, 12, 12, 16, math.floor(235 * a))
-            renderer.rectangle(px, py, box_w, 1, 20, 20, 26, math.floor(180 * a))
-            
-            -- Left accent strip with gradient
-            renderer.rectangle(px, py, 3, box_h, r, g, b, ia)
-            renderer.rectangle(px, py, 1, box_h, 
-                math.min(255, r + 60), math.min(255, g + 60), math.min(255, b + 60), 
-                math.floor(180 * a))
-            
-            -- Bottom accent line
-            renderer.rectangle(px + 3, py + box_h - 1, box_w - 3, 1, r, g, b, math.floor(80 * a))
 
+            -- ── Panel body ────────────────────────────────────────────────────
+            -- Dark glass background
+            renderer.rectangle(px, py, box_w, box_h, 6, 6, 9, math.floor(248 * a))
+            -- Inner top-edge highlight
+            renderer.rectangle(px + 4, py + 1, box_w - 8, 1, 255, 255, 255, math.floor(8 * a))
+
+            -- Left accent bar (3-layer fade for smooth look)
+            renderer.rectangle(px,     py, 4, box_h, r, g, b, ia)
+            renderer.rectangle(px,     py, 2, box_h,
+                math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
+                math.floor(140 * a))
+            renderer.rectangle(px,     py, 1, box_h, 255, 255, 255, math.floor(35 * a))
+
+            -- Bottom accent hairline
+            renderer.rectangle(px + 4, py + box_h - 1, box_w - 4, 1, r, g, b, math.floor(110 * a))
+
+            -- ── Logo texture ──────────────────────────────────────────────────
             if texture ~= nil then
-                renderer.texture(texture, px + 3 + PAD_X, py + (box_h - 22) * 0.5,
-                    22, 22, 255, 255, 255, math.floor(220 * a), "f")
+                renderer.texture(texture, px + 4 + PAD_X, py + math.floor((box_h - 22) * 0.5),
+                    22, 22, 255, 255, 255, math.floor(235 * a), "f")
             end
 
-            local tx = px + 3 + LOGO_W + PAD_X
-            local ty = py + (box_h - bh) * 0.5
-            
-            -- Brand name with accent color and slight shadow
-            renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(60 * a), flags, 0, brand)
-            renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
-            tx = tx + bw
+            -- ── Brand name ────────────────────────────────────────────────────
+            local tx = px + 4 + LOGO_W + PAD_X
+            local ty = py + math.floor((box_h - bh) * 0.5)
 
+            -- "ZENITH" in accent colour
+            renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(70 * a), flags, 0, brand_core)
+            renderer.text(tx,     ty,     r, g, b, ia,                  flags, 0, brand_core)
+            tx = tx + bw_core
+
+            -- "  3.0" in a dimmed accent (version tag)
+            local vr = math.floor(r * 0.65 + 0.5)
+            local vg = math.floor(g * 0.65 + 0.5)
+            local vb = math.floor(b * 0.65 + 0.5)
+            renderer.text(tx, ty, vr, vg, vb, math.floor(200 * a), flags, 0, brand_ver)
+            tx = tx + bw_ver
+
+            -- ── Token divider ─────────────────────────────────────────────────
             if has_tok then
-                -- Vertical separator with glow
-                local sep_x = tx + SEP_GAP
-                renderer.rectangle(sep_x, py + 4, 2, box_h - 8, r, g, b, math.floor(40 * a))
-                renderer.rectangle(sep_x, py + 4, 1, box_h - 8, 50, 50, 58, math.floor(200 * a))
-                tx = tx + sep_blk
-                
-                for i, t in ipairs(tokens) do
-                    local cr = t.accent and r or 180
-                    local cg = t.accent and g or 180
-                    local cb = t.accent and b or 186
-                    local ca = math.floor((t.accent and 255 or 220) * a)
-                    local tw2 = renderer.measure_text(flags, t.label)
-                    
-                    -- Token with subtle glow for accent items
+                tx = tx + SEP_W
+                -- hairline divider
+                renderer.rectangle(tx, py + 5, 1, box_h - 10, 55, 55, 65, math.floor(210 * a))
+                -- soft glow around divider
+                renderer.rectangle(tx - 1, py + 5, 3, box_h - 10, r, g, b, math.floor(22 * a))
+                tx = tx + 1 + SEP_W
+
+                -- ── Tokens ────────────────────────────────────────────────────
+                for i, t in ipairs(tok_items) do
+                    local cr = t.accent and r   or 185
+                    local cg = t.accent and g   or 185
+                    local cb = t.accent and b   or 192
+                    local ca = math.floor((t.accent and 255 or 225) * a)
+
+                    -- subtle shadow for username
                     if t.accent then
-                        renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(40 * a), flags, 0, t.label)
+                        renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(45 * a), flags, 0, t.display)
                     end
-                    renderer.text(tx, ty, cr, cg, cb, ca, flags, 0, t.label)
-                    tx = tx + tw2
-                    
-                    if i < #tokens then
-                        renderer.text(tx, ty, 45, 45, 52, math.floor(160 * a), flags, 0, dot_str)
-                        tx = tx + dw
+                    renderer.text(tx, ty, cr, cg, cb, ca, flags, 0, t.display)
+                    tx = tx + t.dw
+
+                    if i < #tok_items then
+                        renderer.text(tx, ty, 48, 48, 58, math.floor(170 * a), flags, 0, sep_char)
+                        tx = tx + sep_cw
                     end
                 end
             end
@@ -4630,80 +4669,89 @@ LPH_NO_VIRTUALIZE(function ()
             local PAD_X = 10
             local ROW_H = 18
 
-            -- Fancy header with icon
-            local header_text = "[ KEYBINDS ]"
-            local hw, hh = renderer.measure_text(flags, header_text)
+            -- Header label: icon + "KEYBINDS"
+            local hdr_icon = "\xE2\x96\xA0 "
+            local hdr_label = hdr_icon .. "KEYBINDS"
+            local hw, hh = renderer.measure_text(flags, hdr_label)
             local min_w  = PAD_X * 4 + hw
             local row_w  = name_width + 14 + badge_width + PAD_X * 2
-            width = motion.interp(width, math.max(min_w, row_w, 130), 0.045)
+            width = motion.interp(width, math.max(min_w, row_w, 134), 0.045)
 
-            local box_w = math.floor(width + 0.85)
-            local hdr_h = hh + 8
-            local ha    = math.floor(255 * alpha * holding)
-            local pos   = window.pos
+            local box_w  = math.floor(width + 0.85)
+            local hdr_h  = hh + 9
+            local ha     = math.floor(255 * alpha * holding)
+            local ab     = alpha * holding
+            local pos    = window.pos
 
-            -- FANCY header with glow and gradient
-            -- Outer glow
-            for i = 2, 1, -1 do
-                local glow_a = math.floor(10 * alpha * holding * (3 - i) / 2)
-                renderer.rectangle(pos.x - i, pos.y - i, box_w + i*2, hdr_h + i*2, r, g, b, glow_a)
+            -- ── Header panel ──────────────────────────────────────────────────
+            -- Soft glow layers
+            for i = 4, 1, -1 do
+                local ga = math.floor(8 * ab * (5 - i) / 4)
+                renderer.rectangle(pos.x - i, pos.y - i, box_w + i*2, hdr_h + i*2, r, g, b, ga)
             end
-            
-            -- Header background with subtle gradient
-            renderer.rectangle(pos.x, pos.y, box_w, hdr_h, 14, 14, 18, math.floor(240 * alpha * holding))
-            renderer.rectangle(pos.x, pos.y, box_w, 1, 22, 22, 28, math.floor(160 * alpha * holding))
-            
-            -- Left accent strip with gradient effect
-            renderer.rectangle(pos.x, pos.y, 3, hdr_h, r, g, b, ha)
-            renderer.rectangle(pos.x, pos.y, 1, hdr_h, 
-                math.min(255, r + 50), math.min(255, g + 50), math.min(255, b + 50), 
-                math.floor(160 * alpha * holding))
-            
-            -- Header text with subtle shadow
-            renderer.text(
-                pos.x + (box_w - hw) * 0.5 + 1,
-                pos.y + (hdr_h - hh) * 0.5 + 1,
-                0, 0, 0, math.floor(40 * alpha * holding), flags, 0, header_text
-            )
-            renderer.text(
-                pos.x + (box_w - hw) * 0.5,
-                pos.y + (hdr_h - hh) * 0.5,
-                r, g, b, math.floor(200 * alpha * holding), flags, 0, header_text
-            )
 
-            local row_y = pos.y + hdr_h + 1
+            -- Dark glass header bg
+            renderer.rectangle(pos.x, pos.y, box_w, hdr_h, 6, 6, 9, math.floor(248 * ab))
+            -- Top highlight
+            renderer.rectangle(pos.x + 4, pos.y + 1, box_w - 8, 1, 255, 255, 255, math.floor(8 * ab))
+
+            -- Left accent bar
+            renderer.rectangle(pos.x, pos.y, 4, hdr_h, r, g, b, ha)
+            renderer.rectangle(pos.x, pos.y, 2, hdr_h,
+                math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
+                math.floor(135 * ab))
+            renderer.rectangle(pos.x, pos.y, 1, hdr_h, 255, 255, 255, math.floor(32 * ab))
+
+            -- Bottom hairline
+            renderer.rectangle(pos.x + 4, pos.y + hdr_h - 1, box_w - 4, 1, r, g, b, math.floor(105 * ab))
+
+            -- Centered header text with shadow
+            local htx = pos.x + math.floor((box_w - hw) * 0.5)
+            local hty = pos.y + math.floor((hdr_h - hh) * 0.5)
+            renderer.text(htx + 1, hty + 1, 0, 0, 0, math.floor(55 * ab), flags, 0, hdr_label)
+            renderer.text(htx,     hty,     r, g, b, math.floor(215 * ab), flags, 0, hdr_label)
+
+            -- ── Rows ──────────────────────────────────────────────────────────
+            local row_y = pos.y + hdr_h
 
             for _, v in pairs(active_keys) do
                 local fade_a = math.min(1.0, alpha * v.alpha * 1.25)
-                local row_a  = math.floor(255 * fade_a * holding)
+                local row_ab = fade_a * holding
+                local row_a  = math.floor(255 * row_ab)
                 if row_a < 4 then goto skip end
 
                 local rh = utils.round(ROW_H * fade_a)
                 if rh < 2 then goto skip end
 
-                -- Row background with subtle gradient
-                renderer.rectangle(pos.x, row_y, box_w, rh, 12, 12, 15, math.floor(220 * fade_a * holding))
-                
+                -- Row background
+                renderer.rectangle(pos.x, row_y, box_w, rh, 10, 10, 13, math.floor(228 * row_ab))
+
                 -- Left accent strip
-                renderer.rectangle(pos.x, row_y, 3, rh, r, g, b, math.floor(180 * fade_a * holding))
-                
-                -- Bottom separator line
-                renderer.rectangle(pos.x + 3, row_y + rh - 1, box_w - 3, 1, 25, 25, 30, math.floor(100 * fade_a * holding))
+                renderer.rectangle(pos.x,     row_y, 4, rh, r, g, b, math.floor(190 * row_ab))
+                renderer.rectangle(pos.x,     row_y, 2, rh,
+                    math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
+                    math.floor(130 * row_ab))
 
-                local ty2 = row_y + (rh - v.height) * 0.5
-                
-                -- Feature icon bullet
-                renderer.text(pos.x + 6, ty2, r, g, b, math.floor(row_a * 0.6), flags, 0, ">")
-                
+                -- Separator hairline at bottom
+                renderer.rectangle(pos.x + 4, row_y + rh - 1, box_w - 4, 1, 28, 28, 34, math.floor(120 * row_ab))
+
+                local ty2 = row_y + math.floor((rh - v.height) * 0.5)
+
+                -- Arrow icon before name
+                renderer.text(pos.x + 7, ty2, r, g, b, math.floor(row_a * 0.55), flags, 0, "\xE2\x96\xB8")
+
                 -- Feature name
-                renderer.text(pos.x + PAD_X + 6, ty2, 210, 210, 218, row_a, flags, 0, v.name)
-                
-                -- Mode badge with background
-                local badge_x = pos.x + box_w - PAD_X - v.mode_width - 6
-                renderer.rectangle(badge_x - 3, ty2 - 1, v.mode_width + 6, v.height + 2, r, g, b, math.floor(35 * fade_a * holding))
-                renderer.text(badge_x, ty2, r, g, b, math.floor(row_a * 0.95), flags, 0, v.mode)
+                renderer.text(pos.x + PAD_X + 6, ty2, 205, 205, 215, row_a, flags, 0, v.name)
 
-                row_y = row_y + rh + 1
+                -- Mode badge: small accent-tinted pill
+                local badge_x = pos.x + box_w - PAD_X - v.mode_width - 5
+                renderer.rectangle(badge_x - 4, ty2 - 1, v.mode_width + 8, v.height + 2,
+                    r, g, b, math.floor(32 * row_ab))
+                renderer.rectangle(badge_x - 4, ty2 - 1, 1, v.height + 2,
+                    r, g, b, math.floor(160 * row_ab))
+                renderer.text(badge_x, ty2, r, g, b, math.floor(row_a * 0.92), flags, 0, v.mode)
+
+                row_y = row_y + rh
                 ::skip::
             end
 
@@ -4827,111 +4875,129 @@ LPH_NO_VIRTUALIZE(function ()
 
             if alpha <= 0 then return end
 
-            -- -- FANCY crosshair indicator --------------------------------------
+            -- ── Crosshair indicator ───────────────────────────────────────────
+            -- Positioned just below the crosshair centre, shifts right when scoped
             local cx = center.x + utils.round(10 * align)
-            local cy = center.y + 22
-            
-            -- State icons mapping
+            local cy = center.y + 20
+
+            -- Per-state icon glyphs (UTF-8 geometric shapes)
             local state_icons = {
-                EDGE = "[E]",
-                SAFE = "[S]",
-                AIR = "[^]",
-                CROUCH = "[C]",
-                WALK = "[~]",
-                RUN = "[>]",
-                STAND = "[=]"
-            }
-            
-            -- Feature icons
-            local feat_icons = {
-                DT = ">>",
-                OS = "<>",
-                FD = "[]",
-                DMG = "##"
+                EDGE   = "\xE2\x97\x86",  -- ◆
+                SAFE   = "\xE2\x9C\x93",  -- ✓
+                AIR    = "\xE2\x96\xB2",  -- ▲
+                CROUCH = "\xE2\x96\xBC",  -- ▼
+                WALK   = "\xE2\x96\xB8",  -- ▸
+                RUN    = "\xE2\x96\xB6",  -- ▶
+                STAND  = "\xE2\x96\xA0",  -- ■
             }
 
-            -- FANCY state badge with glow and modern styling
+            -- Per-feature icon glyphs
+            local feat_icons = {
+                DT  = "\xE2\x96\xB6\xE2\x96\xB6",  -- ▶▶
+                OS  = "\xE2\x97\x8E",               -- ◎
+                FD  = "\xE2\x96\xBC",               -- ▼
+                DMG = "\xE2\x96\xA0",               -- ■
+            }
+
+            -- ── State badge ───────────────────────────────────────────────────
             do
                 local state  = get_statement()
-                local icon   = state_icons[state] or "[?]"
-                local display_text = icon .. " " .. state
+                local icon   = state_icons[state] or "\xE2\x80\xA2"
+                local display_text = icon .. "  " .. state
                 local dflags = "d"
                 local tw, th = renderer.measure_text(dflags, display_text)
-                tw = tw + 1
-                local BPAD = 8
-                local bw   = tw + BPAD * 2 + 3
-                local bh   = th + 8
-                local bx   = cx - utils.round((bw * 0.5) * (1 - align * 0.5) + (tw * 0.5) * align)
-                local by   = cy
+                local BPAD   = 9
+                local bw     = tw + BPAD * 2 + 4
+                local bh     = th + 9
+                -- Centre below crosshair; shift right proportionally when scoped
+                local bx = cx - utils.round(bw * 0.5 * (1 - align * 0.45))
+                local by = cy
 
-                -- Outer glow effect
-                for i = 2, 1, -1 do
-                    local glow_a = math.floor(12 * alpha * (3 - i) / 2)
-                    renderer.rectangle(bx - i, by - i, bw + i*2, bh + i*2, r, g, b, glow_a)
+                -- Layered glow (5 passes, very soft)
+                for i = 5, 1, -1 do
+                    local ga = math.floor(7 * alpha * (6 - i) / 5)
+                    renderer.rectangle(bx - i, by - i, bw + i*2, bh + i*2, r, g, b, ga)
                 end
-                
-                -- Main background
-                renderer.rectangle(bx, by, bw, bh, 14, 14, 18, math.floor(240 * alpha))
-                renderer.rectangle(bx, by, bw, 1, 22, 22, 28, math.floor(140 * alpha))
-                
-                -- Left accent strip with gradient
-                renderer.rectangle(bx, by, 3, bh, r, g, b, math.floor(255 * alpha))
-                renderer.rectangle(bx, by, 1, bh, 
-                    math.min(255, r + 50), math.min(255, g + 50), math.min(255, b + 50), 
-                    math.floor(180 * alpha))
-                
-                -- Bottom accent line
-                renderer.rectangle(bx + 3, by + bh - 1, bw - 3, 1, r, g, b, math.floor(100 * alpha))
-                
-                -- Text with shadow
-                renderer.text(bx + BPAD + 3 + 1, by + (bh - th) * 0.5 + 1,
-                    0, 0, 0, math.floor(50 * alpha), dflags, 0, display_text)
-                renderer.text(bx + BPAD + 3, by + (bh - th) * 0.5,
-                    r, g, b, math.floor(255 * alpha), dflags, 0, display_text)
+
+                -- Panel: dark glass
+                renderer.rectangle(bx, by, bw, bh, 6, 6, 9, math.floor(248 * alpha))
+                -- Top inner highlight
+                renderer.rectangle(bx + 4, by + 1, bw - 8, 1, 255, 255, 255, math.floor(10 * alpha))
+
+                -- Left accent bar
+                renderer.rectangle(bx,     by, 4, bh, r, g, b, math.floor(255 * alpha))
+                renderer.rectangle(bx,     by, 2, bh,
+                    math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
+                    math.floor(145 * alpha))
+                renderer.rectangle(bx,     by, 1, bh, 255, 255, 255, math.floor(38 * alpha))
+
+                -- Bottom hairline
+                renderer.rectangle(bx + 4, by + bh - 1, bw - 4, 1, r, g, b, math.floor(115 * alpha))
+
+                -- "ZENITH" sub-label drawn above state badge
+                local sub_label = "ZENITH  3.0"
+                local slw, slh  = renderer.measure_text(dflags, sub_label)
+                local slx = bx + math.floor((bw - slw) * 0.5)
+                -- Draw tiny label just above the badge
+                local sub_r = math.floor(r * 0.6)
+                local sub_g = math.floor(g * 0.6)
+                local sub_b = math.floor(b * 0.6)
+                renderer.text(slx, by - slh - 3, sub_r, sub_g, sub_b, math.floor(170 * alpha), dflags, 0, sub_label)
+
+                -- State text + icon
+                local ttx = bx + BPAD + 4
+                local tty = by + math.floor((bh - th) * 0.5)
+                renderer.text(ttx + 1, tty + 1, 0, 0, 0, math.floor(55 * alpha), dflags, 0, display_text)
+                renderer.text(ttx,     tty,     r, g, b, math.floor(255 * alpha), dflags, 0, display_text)
+
                 cy = cy + bh + 3
             end
 
-            -- FANCY feature tags with icons and glow
+            -- ── Feature tags ──────────────────────────────────────────────────
             for i = 1, #features do
-                local feat = features[i]
-                feat.alpha  = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
-                feat.hold_a = motion.interp(feat.hold_a, feat.alpha > 0.5 and 1 or 0, 0.08)
+                local feat   = features[i]
+                feat.alpha   = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
+                feat.hold_a  = motion.interp(feat.hold_a, feat.alpha > 0.5 and 1 or 0, 0.08)
                 if feat.alpha <= 0.02 then goto cont end
 
                 do
                     local fa     = feat.alpha * alpha
                     local dflags = "d"
-                    local icon   = feat_icons[feat.text] or ">"
-                    local display_text = icon .. " " .. feat.text
+                    local icon   = feat_icons[feat.text] or "\xE2\x96\xB8"
+                    local display_text = icon .. "  " .. feat.text
                     local tw, th = renderer.measure_text(dflags, display_text)
-                    tw = tw + 1
-                    local BPAD = 6
-                    local bw   = tw + BPAD * 2
-                    local bh   = th + 6
-                    local ox   = (bw * 0.5) * (1 - align)
-                    local bx   = cx - utils.round(ox)
-                    local by   = cy
+                    local BPAD   = 7
+                    local bw     = tw + BPAD * 2 + 4
+                    local bh     = th + 7
+                    local ox     = bw * 0.5 * (1 - align)
+                    local bx     = cx - utils.round(ox)
+                    local by     = cy
 
-                    -- Subtle glow for active features
-                    for j = 2, 1, -1 do
-                        local glow_a = math.floor(8 * fa * (3 - j) / 2)
-                        renderer.rectangle(bx - j, by - j, bw + j*2, bh + j*2, r, g, b, glow_a)
+                    -- Soft glow
+                    for j = 3, 1, -1 do
+                        local ga = math.floor(7 * fa * (4 - j) / 3)
+                        renderer.rectangle(bx - j, by - j, bw + j*2, bh + j*2, r, g, b, ga)
                     end
-                    
-                    -- Background
-                    renderer.rectangle(bx, by, bw, bh, 12, 12, 15, math.floor(200 * fa))
-                    
-                    -- Left mini-accent
-                    renderer.rectangle(bx, by, 2, bh, r, g, b, math.floor(220 * fa))
-                    
-                    -- Bottom accent line
-                    renderer.rectangle(bx + 2, by + bh - 1, bw - 2, 1, r, g, b, math.floor(180 * fa))
-                    
-                    -- Text with shadow
-                    renderer.text(bx + BPAD + 1, by + (bh - th) * 0.5 + 1,
-                        0, 0, 0, math.floor(40 * fa), dflags, 0, display_text)
-                    renderer.text(bx + BPAD, by + (bh - th) * 0.5,
-                        r, g, b, math.floor(255 * fa), dflags, 0, display_text)
+
+                    -- Panel
+                    renderer.rectangle(bx, by, bw, bh, 7, 7, 10, math.floor(235 * fa))
+                    renderer.rectangle(bx + 4, by + 1, bw - 8, 1, 255, 255, 255, math.floor(7 * fa))
+
+                    -- Left accent
+                    renderer.rectangle(bx, by, 4, bh, r, g, b, math.floor(230 * fa))
+                    renderer.rectangle(bx, by, 2, bh,
+                        math.min(255, r + 65), math.min(255, g + 65), math.min(255, b + 65),
+                        math.floor(130 * fa))
+                    renderer.rectangle(bx, by, 1, bh, 255, 255, 255, math.floor(30 * fa))
+
+                    -- Bottom hairline
+                    renderer.rectangle(bx + 4, by + bh - 1, bw - 4, 1, r, g, b, math.floor(120 * fa))
+
+                    -- Text
+                    local ttx = bx + BPAD + 4
+                    local tty = by + math.floor((bh - th) * 0.5)
+                    renderer.text(ttx + 1, tty + 1, 0, 0, 0, math.floor(45 * fa), dflags, 0, display_text)
+                    renderer.text(ttx,     tty,     r, g, b, math.floor(255 * fa), dflags, 0, display_text)
 
                     cy = cy + utils.round((bh + 3) * feat.alpha)
                 end
@@ -6139,7 +6205,7 @@ client.set_event_callback("shutdown", antiaim.shutdown)
 
 
 -- ======================================================================
---  BRAND HEADER -- animated Zenith � Elegance in Execution.
+--  BRAND HEADER -- Premium animated Zenith branding with icons
 -- ======================================================================
 do
     local _bh_alpha = 0.0
@@ -6160,8 +6226,10 @@ do
         local px      = math.floor(sx * 0.012)
         local py      = math.floor(sy * 0.048)
 
-        local brand   = "Zenith"
-        local tagline = "  Elegance in Execution."
+        -- Premium icons
+        local diamond_icon = "\xE2\x97\x86"  -- ◆
+        local brand   = diamond_icon .. " Zenith"
+        local tagline = "  \xE2\x94\x82  Elegance in Execution."
 
         local bw, bh  = renderer.measure_text(flags, brand)
         local tw, _   = renderer.measure_text(flags, tagline)
@@ -6184,16 +6252,11 @@ do
                 255, 255, 255, shimmer_a)
         end
 
-        -- "�" separator between brand and tagline (accent colour)
-        renderer.text(px + bw, py, r, g, b,
-            math.floor(180 * _bh_alpha), flags, 0, "  \xc2\xb7")
-        local dot_w = renderer.measure_text(flags, "  \xc2\xb7")
-
-        -- brand name (accent)
+        -- brand name with icon (accent)
         renderer.text(px, py, r, g, b, a, flags, 0, brand)
 
-        -- tagline (dim grey, fades in slightly delayed)
-        renderer.text(px + bw + dot_w, py,
+        -- tagline with separator (dim grey, fades in slightly delayed)
+        renderer.text(px + bw, py,
             155, 155, 165, math.floor(190 * _bh_alpha), flags, 0, tagline)
     end)
 end
