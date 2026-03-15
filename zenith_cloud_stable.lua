@@ -2529,846 +2529,536 @@ end
 
 
 --- region defensive
+-- Valkyrie AA System (ported to Zenith ctx API)
 do
-    local function norm_yaw(a)    return ((a + 180) % 360) - 180 end
-    local function clamp(v,lo,hi) return v < lo and lo or v > hi and hi or v end
-    local function lerp(a,b,t)    return a + (b-a)*t end
+    local G  = "AA"
+    local GR = "Anti-aimbot angles"
+
+    -- helpers
+    local function norm_yaw(a) return ((a + 180) % 360) - 180 end
     local function has(list, val)
         if not list then return false end
         for _,v in ipairs(list) do if v == val then return true end end
         return false
     end
 
-    local hd = {}
-    hd.lifetime    = 0
-    hd.switch      = false
-    hd.jitter_t    = 0
-    hd.delay_t     = 0
-    hd.manual_side = nil
+    -- state definitions (8 states matching Valkyrie)
+    local AA_STATES = {"Global","Standing","Moving","Slowwalking","Crouching","Air","Air-Crouching","Snaking"}
+    local AA_STATE_SHORT = {"G","S","M","SW","C","A","AC","SN"}
 
-    local G  = "AA"
-    local GR = "Anti-aimbot angles"
+    -- ── UI: team picker + copy ────────────────────────────────────────
+    local ui_team = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Team", "\n", "hd::team"}, "CT", "T")
+        :record("aa","hd::team"):save()
+    local ui_copy = menu.new_item(ui.new_button, G, GR,
+        merge{"Copy to other team", "\n", "hd::copy"}, function() end)
 
-    -- =========================================================
-    --  STATE LIST  (id = runtime key,  label = UI display name)
-    -- =========================================================
-    local STATES = {
-        { id="stand",   label="Standing"   },
-        { id="run",     label="Moving"     },
-        { id="walk",    label="Slow Walk"  },
-        { id="crouch",  label="Crouching"  },
-        { id="air",     label="In-Air"     },
-        { id="airduck", label="Air-Crouch" },
-    }
-    local STATE_LABELS = {}
-    for i,s in ipairs(STATES) do STATE_LABELS[i] = s.label end
+    -- ── UI: state selector ────────────────────────────────────────────
+    local ui_state = menu.new_item(ui.new_combobox, G, GR,
+        merge{"State", "\n", "hd::state"}, table.unpack(AA_STATES))
+        :record("aa","hd::state"):save()
 
-    -- =========================================================
-    --  DEFAULT PRESET  (template for each state)
-    -- =========================================================
-    local function default_preset()
-        return {
-            -- yaw
-            yaw_left       = -19,
-            yaw_right      = 36,
-            yaw_rnd_mode   = "Off",
-            yaw_rnd_left   = 0,
-            yaw_rnd_right  = 0,
-            yaw_jitter     = "Off",
-            yaw_jitter_deg = 0,
-            randomization  = 0,
-            switch_chance  = 100,
-            -- pitch
-            pitch          = "Down",   -- Down / Up / Custom / Zero
-            pitch_custom   = -89,
-            -- body yaw
-            body_yaw       = "Off",
-            body_yaw_deg   = 60,
-            -- delay
-            delay_from     = 0,
-            delay_to       = 0,
-            delay_count    = 1,
-            delay_tick1    = 0,
-            delay_rnd      = 0,
+    -- ── UI: per-state AA items (all 8 states) ─────────────────────────
+    local ab = {}   -- ab[state_idx] = { all ui items }
+    for i = 1, #AA_STATES do
+        local sfx = "_s"..i
+        ab[i] = {
+            enableState  = menu.new_item(ui.new_checkbox,    G,GR, merge{"Enable "..AA_STATES[i].."\n","hd::en"..sfx}):record("aa","hd::en"..sfx):save(),
+            pitch        = menu.new_item(ui.new_combobox,    G,GR, merge{"Pitch\n","hd::pitch"..sfx},  "Off","Default","Up","Down","Minimal","Random","Custom"):record("aa","hd::pitch"..sfx):save(),
+            pitchSlider  = menu.new_item(ui.new_slider,      G,GR, merge{"Pitch add\n","hd::pitchs"..sfx}, -89,89,0,true,"deg",1):record("aa","hd::pitchs"..sfx):save(),
+            yawBase      = menu.new_item(ui.new_combobox,    G,GR, merge{"Yaw base\n","hd::yb"..sfx}, "Local view","At targets"):record("aa","hd::yb"..sfx):save(),
+            yaw          = menu.new_item(ui.new_combobox,    G,GR, merge{"Yaw\n","hd::yaw"..sfx}, "Off","180","Spin","Slow Yaw","L&R"):record("aa","hd::yaw"..sfx):save(),
+            yawStatic    = menu.new_item(ui.new_slider,      G,GR, merge{"Yaw offset\n","hd::ys"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::ys"..sfx):save(),
+            yawLeft      = menu.new_item(ui.new_slider,      G,GR, merge{"Left\n","hd::yl"..sfx}, -180,180,-19,true,"deg",1):record("aa","hd::yl"..sfx):save(),
+            yawRight     = menu.new_item(ui.new_slider,      G,GR, merge{"Right\n","hd::yr"..sfx}, -180,180,36,true,"deg",1):record("aa","hd::yr"..sfx):save(),
+            yawDelay     = menu.new_item(ui.new_slider,      G,GR, merge{"Yaw delay\n","hd::yd"..sfx}, 1,128,16,true,"t",1):record("aa","hd::yd"..sfx):save(),
+            yawJitter    = menu.new_item(ui.new_combobox,    G,GR, merge{"Yaw jitter\n","hd::yj"..sfx}, "Off","Offset","Center","L&R","3-Way"):record("aa","hd::yj"..sfx):save(),
+            yawJitterStatic = menu.new_item(ui.new_slider,   G,GR, merge{"Jitter offset\n","hd::yjs"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::yjs"..sfx):save(),
+            yawJitterLeft  = menu.new_item(ui.new_slider,    G,GR, merge{"Jitter L\n","hd::yjl"..sfx}, -180,180,-14,true,"deg",1):record("aa","hd::yjl"..sfx):save(),
+            yawJitterRight = menu.new_item(ui.new_slider,    G,GR, merge{"Jitter R\n","hd::yjr"..sfx}, -180,180,14,true,"deg",1):record("aa","hd::yjr"..sfx):save(),
+            wayFirst     = menu.new_item(ui.new_slider,      G,GR, merge{"Way 1\n","hd::w1"..sfx}, -180,180,21,true,"deg",1):record("aa","hd::w1"..sfx):save(),
+            waySecond    = menu.new_item(ui.new_slider,      G,GR, merge{"Way 2\n","hd::w2"..sfx}, -180,180,-18,true,"deg",1):record("aa","hd::w2"..sfx):save(),
+            wayThird     = menu.new_item(ui.new_slider,      G,GR, merge{"Way 3\n","hd::w3"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::w3"..sfx):save(),
+            bodyYaw      = menu.new_item(ui.new_combobox,    G,GR, merge{"Body yaw\n","hd::by"..sfx}, "Off","Opposite","Jitter","Static"):record("aa","hd::by"..sfx):save(),
+            bodyYawStatic= menu.new_item(ui.new_slider,      G,GR, merge{"Body yaw offset\n","hd::bys"..sfx}, -180,180,180,true,"deg",1):record("aa","hd::bys"..sfx):save(),
+            -- Defensive AA
+            defensiveAA     = menu.new_item(ui.new_checkbox,    G,GR, merge{"Defensive AA\n","hd::daa"..sfx}):record("aa","hd::daa"..sfx):save(),
+            defensiveTriggers=menu.new_item(ui.new_multiselect, G,GR, merge{"Def triggers\n","hd::dtr"..sfx}, "Always","Tick","Weapon switch"):record("aa","hd::dtr"..sfx):save(),
+            defensiveTickTrigger=menu.new_item(ui.new_slider,   G,GR, merge{"Trigger tick\n","hd::dtt"..sfx}, 1,13,1,true,"t",1):record("aa","hd::dtt"..sfx):save(),
+            defensivePitch  = menu.new_item(ui.new_combobox,    G,GR, merge{"Def pitch\n","hd::dp"..sfx}, "Static","Random","Spin","Jitter","Sine Wave","Random Logic"):record("aa","hd::dp"..sfx):save(),
+            defensivePitchMin=menu.new_item(ui.new_slider,      G,GR, merge{"Def pitch min\n","hd::dpm"..sfx}, -89,89,-89,true,"deg",1):record("aa","hd::dpm"..sfx):save(),
+            defensivePitchMax=menu.new_item(ui.new_slider,      G,GR, merge{"Def pitch max\n","hd::dpM"..sfx}, -89,89,89,true,"deg",1):record("aa","hd::dpM"..sfx):save(),
+            defensivePitchSpeed=menu.new_item(ui.new_slider,    G,GR, merge{"Def pitch spd\n","hd::dps"..sfx}, 1,18,6,true,"t",1):record("aa","hd::dps"..sfx):save(),
+            defensiveYaw    = menu.new_item(ui.new_combobox,    G,GR, merge{"Def yaw\n","hd::dy"..sfx}, "Off","Static","Random","Spin","Jitter","Logic Shift","Zenith Bypass"):record("aa","hd::dy"..sfx):save(),
+            defensiveYawStatic=menu.new_item(ui.new_slider,     G,GR, merge{"Def yaw offset\n","hd::dys"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::dys"..sfx):save(),
+            defensiveYawSpinLeft=menu.new_item(ui.new_slider,   G,GR, merge{"Spin L\n","hd::dysl"..sfx}, -180,180,-120,true,"deg",1):record("aa","hd::dysl"..sfx):save(),
+            defensiveYawSpinRight=menu.new_item(ui.new_slider,  G,GR, merge{"Spin R\n","hd::dysr"..sfx}, -180,180,120,true,"deg",1):record("aa","hd::dysr"..sfx):save(),
+            defensiveYawSpinSpeed=menu.new_item(ui.new_slider,  G,GR, merge{"Spin spd\n","hd::dyss"..sfx}, 1,16,6,true,"t",1):record("aa","hd::dyss"..sfx):save(),
+            defensiveYawJitterRange=menu.new_item(ui.new_slider,G,GR, merge{"Jitter range\n","hd::dyjr"..sfx}, 0,180,90,true,"deg",1):record("aa","hd::dyjr"..sfx):save(),
+            defensiveYawJitterDelay=menu.new_item(ui.new_slider,G,GR, merge{"Jitter delay\n","hd::dyjd"..sfx}, 1,16,1,true,"t",1):record("aa","hd::dyjd"..sfx):save(),
         }
+        -- Global state (index 1) always enabled
+        if i == 1 then ab[i].enableState:set(true) end
     end
 
-    -- per-state preset table
-    hd.presets = {}
-    for _,s in ipairs(STATES) do hd.presets[s.id] = default_preset() end
+    -- ── Extra controls (from old Zenith hd) ───────────────────────────
+    local ui_edge_yaw    = menu.new_item(ui.new_hotkey, G,GR, merge{"Edge yaw","\n","hd::edge_yaw"}):record("aa","hd::edge_yaw"):save()
+    local ui_freestand   = menu.new_item(ui.new_hotkey, G,GR, merge{"Freestanding","\n","hd::freestand"}):record("aa","hd::freestand"):save()
+    local ui_inverter    = menu.new_item(ui.new_hotkey, G,GR, merge{"Inverter","\n","hd::inverter"}):record("aa","hd::inverter"):save()
+    local ui_man_en      = menu.new_item(ui.new_checkbox, G,GR, "Manual Yaw"):record("aa","hd::man_en"):save()
+    local ui_man_left    = menu.new_item(ui.new_hotkey, G,GR, merge{"  Left","\n","hd::man_l"}):record("aa","hd::man_l"):save()
+    local ui_man_right   = menu.new_item(ui.new_hotkey, G,GR, merge{"  Right","\n","hd::man_r"}):record("aa","hd::man_r"):save()
+    local ui_man_reset   = menu.new_item(ui.new_hotkey, G,GR, merge{"  Reset","\n","hd::man_rs"}):record("aa","hd::man_rs"):save()
+    local ui_vulnlc      = menu.new_item(ui.new_multiselect, G,GR,
+        merge{"LC Breaker","\n","hd::vulnlc"}, "Charged","Shifting","Uncharged")
+        :record("aa","hd::vulnlc"):save()
+    local ui_safehead    = menu.new_item(ui.new_multiselect, G,GR,
+        merge{"Safe head","\n","hd::safehead"}, "Always","Low HP","Knife","Zeus")
+        :record("aa","hd::safehead"):save()
+    -- Fake lag
+    local ui_fl_on       = menu.new_item(ui.new_checkbox, G,GR, merge{"Fake Lag","\n","hd::fl_on"}):record("aa","hd::fl_on"):save()
+    local ui_fl_mode     = menu.new_item(ui.new_combobox, G,GR, merge{"Amount","\n","hd::fl_mode"}, "Dynamic","Maximum","Fluctuate"):record("aa","hd::fl_mode"):save()
+    local ui_fl_variance = menu.new_item(ui.new_slider, G,GR, merge{"Variance","\n","hd::fl_var"}, 0,100,59,true,"%"):record("aa","hd::fl_var"):save()
+    local ui_fl_limit    = menu.new_item(ui.new_slider, G,GR, merge{"Limit","\n","hd::fl_lim"}, 1,14,14,true,"t"):record("aa","hd::fl_lim"):save()
+    local ui_fl_settings = menu.new_item(ui.new_combobox, G,GR, merge{"Settings","\n","hd::fl_settings"}, "Custom","Minimum","Maximum"):record("aa","hd::fl_settings"):save()
 
-    -- =========================================================
-    --  UI  --  GLOBAL (not per-state)
-    -- =========================================================
+    -- ── Runtime state ─────────────────────────────────────────────────
+    local pState         = 1
+    local last_state_raw = 1
+    local aa_inverter    = false
+    local aa_inverter_tick = 0
+    local manual_side    = nil
+    local def_persistent = { yaw_spin=0, pitch_spin=0, last_weapon_switch=0 }
 
-    -- master enable
-    hd.ui_enable = menu.new_item(ui.new_checkbox, G, GR, "Zenith AA")
-    : record("aa","hd::enable") : save()
+    -- CT/T persistence
+    local aa_persistence = { CT={}, T={} }
+    local aa_last_team   = "CT"
 
-    -- state picker  (the editor "page selector")
-    hd.ui_state = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Edit state", "\n", "hd::state"}, STATE_LABELS)
-    : record("aa","hd::state") : save()
-
-    -- =========================================================
-    --  UI  --  PER-STATE EDITOR WIDGETS  (visible controls)
-    -- =========================================================
-
-    -- Pitch
-    hd.ui_pitch = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Pitch", "\n", "hd::pitch"},
-        {"Down","Up","Minimal","Zero","Random","Custom"})
-
-    hd.ui_pitch_custom = menu.new_item(ui.new_slider, G, GR,
-        merge{"  Custom pitch", "\n", "hd::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-
-    -- Yaw left / right
-    hd.ui_yaw_left = menu.new_item(ui.new_slider, G, GR,
-        merge{"Yaw left", "\n", "hd::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-
-    hd.ui_yaw_right = menu.new_item(ui.new_slider, G, GR,
-        merge{"Yaw right", "\n", "hd::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-
-    -- Yaw random
-    hd.ui_yaw_rnd_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Yaw random mode", "\n", "hd::yaw_rnd_mode"}, {"Off","Percent","Range"})
-
-    hd.ui_yaw_rnd_left = menu.new_item(ui.new_slider, G, GR,
-        merge{"  Yaw left random", "\n", "hd::yaw_rnd_left"}, 0, 100, 0, true, "%")
-
-    hd.ui_yaw_rnd_right = menu.new_item(ui.new_slider, G, GR,
-        merge{"  Yaw right random", "\n", "hd::yaw_rnd_right"}, 0, 100, 0, true, "%")
-
-    -- Yaw jitter
-    hd.ui_yaw_jitter = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Yaw jitter", "\n", "hd::yaw_jitter"},
-        {"Off","Offset","Switch","Random","Spin"})
-
-    hd.ui_yaw_jitter_deg = menu.new_item(ui.new_slider, G, GR,
-        merge{"  Jitter degree", "\n", "hd::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-
-    hd.ui_randomization = menu.new_item(ui.new_slider, G, GR,
-        merge{"Randomization", "\n", "hd::randomization"}, 0, 100, 0, true, "%")
-
-    hd.ui_switch_chance = menu.new_item(ui.new_slider, G, GR,
-        merge{"Switch chance", "\n", "hd::switch_chance"}, 0, 100, 100, true, "%")
-
-    -- Body yaw
-    hd.ui_body_yaw = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Body yaw", "\n", "hd::body_yaw"},
-        {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-
-    hd.ui_body_yaw_deg = menu.new_item(ui.new_slider, G, GR,
-        merge{"  Body yaw degree", "\n", "hd::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-
-    -- Delay
-    hd.ui_delay_from = menu.new_item(ui.new_slider, G, GR,
-        merge{"Delay from", "\n", "hd::delay_from"}, 0, 14, 0, true, "t")
-
-    hd.ui_delay_to = menu.new_item(ui.new_slider, G, GR,
-        merge{"Delay to", "\n", "hd::delay_to"}, 0, 14, 0, true, "t")
-
-    hd.ui_delay_count = menu.new_item(ui.new_slider, G, GR,
-        merge{"Delay tick count", "\n", "hd::delay_count"}, 1, 14, 1, true, "")
-
-    hd.ui_delay_tick1 = menu.new_item(ui.new_slider, G, GR,
-        merge{"Delay tick \xc2\xb11", "\n", "hd::delay_tick1"}, 0, 14, 0, true, "t")
-
-    hd.ui_delay_rnd = menu.new_item(ui.new_slider, G, GR,
-        merge{"Delay randomization", "\n", "hd::delay_rnd"}, 0, 100, 0, true, "%")
-
-    -- =========================================================
-    --  HIDDEN STORAGE: one config item per state per field
-    --  These are never displayed; they just persist values.
-    --  Keys:  hd::<state>::<field>
-    -- =========================================================
-    hd.store = {}   -- hd.store[state_id][field] = menu_item
-    hd.store["stand"] = {}
-    hd.store["stand"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::pitch","\n","hd::stand::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::stand::pitch") : save()
-    hd.store["stand"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::pitch_custom","\n","hd::stand::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::stand::pitch_custom") : save()
-    hd.store["stand"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_left","\n","hd::stand::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::stand::yaw_left") : save()
-    hd.store["stand"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_right","\n","hd::stand::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::stand::yaw_right") : save()
-    hd.store["stand"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::yaw_rnd_mode","\n","hd::stand::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::stand::yaw_rnd_mode") : save()
-    hd.store["stand"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_rnd_left","\n","hd::stand::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::stand::yaw_rnd_left") : save()
-    hd.store["stand"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_rnd_right","\n","hd::stand::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::stand::yaw_rnd_right") : save()
-    hd.store["stand"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::yaw_jitter","\n","hd::stand::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::stand::yaw_jitter") : save()
-    hd.store["stand"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::yaw_jitter_deg","\n","hd::stand::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::stand::yaw_jitter_deg") : save()
-    hd.store["stand"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::randomization","\n","hd::stand::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::stand::randomization") : save()
-    hd.store["stand"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::switch_chance","\n","hd::stand::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::stand::switch_chance") : save()
-    hd.store["stand"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::stand::body_yaw","\n","hd::stand::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::stand::body_yaw") : save()
-    hd.store["stand"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::body_yaw_deg","\n","hd::stand::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::stand::body_yaw_deg") : save()
-    hd.store["stand"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_from","\n","hd::stand::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::stand::delay_from") : save()
-    hd.store["stand"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_to","\n","hd::stand::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::stand::delay_to") : save()
-    hd.store["stand"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_count","\n","hd::stand::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::stand::delay_count") : save()
-    hd.store["stand"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_tick1","\n","hd::stand::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::stand::delay_tick1") : save()
-    hd.store["stand"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::stand::delay_rnd","\n","hd::stand::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::stand::delay_rnd") : save()
-    hd.store["run"] = {}
-    hd.store["run"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::pitch","\n","hd::run::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::run::pitch") : save()
-    hd.store["run"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::pitch_custom","\n","hd::run::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::run::pitch_custom") : save()
-    hd.store["run"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_left","\n","hd::run::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::run::yaw_left") : save()
-    hd.store["run"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_right","\n","hd::run::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::run::yaw_right") : save()
-    hd.store["run"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::yaw_rnd_mode","\n","hd::run::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::run::yaw_rnd_mode") : save()
-    hd.store["run"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_rnd_left","\n","hd::run::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::run::yaw_rnd_left") : save()
-    hd.store["run"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_rnd_right","\n","hd::run::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::run::yaw_rnd_right") : save()
-    hd.store["run"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::yaw_jitter","\n","hd::run::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::run::yaw_jitter") : save()
-    hd.store["run"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::yaw_jitter_deg","\n","hd::run::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::run::yaw_jitter_deg") : save()
-    hd.store["run"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::randomization","\n","hd::run::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::run::randomization") : save()
-    hd.store["run"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::switch_chance","\n","hd::run::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::run::switch_chance") : save()
-    hd.store["run"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::run::body_yaw","\n","hd::run::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::run::body_yaw") : save()
-    hd.store["run"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::body_yaw_deg","\n","hd::run::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::run::body_yaw_deg") : save()
-    hd.store["run"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_from","\n","hd::run::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::run::delay_from") : save()
-    hd.store["run"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_to","\n","hd::run::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::run::delay_to") : save()
-    hd.store["run"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_count","\n","hd::run::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::run::delay_count") : save()
-    hd.store["run"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_tick1","\n","hd::run::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::run::delay_tick1") : save()
-    hd.store["run"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::run::delay_rnd","\n","hd::run::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::run::delay_rnd") : save()
-    hd.store["walk"] = {}
-    hd.store["walk"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::pitch","\n","hd::walk::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::walk::pitch") : save()
-    hd.store["walk"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::pitch_custom","\n","hd::walk::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::walk::pitch_custom") : save()
-    hd.store["walk"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_left","\n","hd::walk::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::walk::yaw_left") : save()
-    hd.store["walk"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_right","\n","hd::walk::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::walk::yaw_right") : save()
-    hd.store["walk"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::yaw_rnd_mode","\n","hd::walk::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::walk::yaw_rnd_mode") : save()
-    hd.store["walk"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_rnd_left","\n","hd::walk::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::walk::yaw_rnd_left") : save()
-    hd.store["walk"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_rnd_right","\n","hd::walk::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::walk::yaw_rnd_right") : save()
-    hd.store["walk"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::yaw_jitter","\n","hd::walk::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::walk::yaw_jitter") : save()
-    hd.store["walk"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::yaw_jitter_deg","\n","hd::walk::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::walk::yaw_jitter_deg") : save()
-    hd.store["walk"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::randomization","\n","hd::walk::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::walk::randomization") : save()
-    hd.store["walk"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::switch_chance","\n","hd::walk::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::walk::switch_chance") : save()
-    hd.store["walk"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::walk::body_yaw","\n","hd::walk::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::walk::body_yaw") : save()
-    hd.store["walk"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::body_yaw_deg","\n","hd::walk::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::walk::body_yaw_deg") : save()
-    hd.store["walk"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_from","\n","hd::walk::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::walk::delay_from") : save()
-    hd.store["walk"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_to","\n","hd::walk::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::walk::delay_to") : save()
-    hd.store["walk"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_count","\n","hd::walk::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::walk::delay_count") : save()
-    hd.store["walk"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_tick1","\n","hd::walk::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::walk::delay_tick1") : save()
-    hd.store["walk"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::walk::delay_rnd","\n","hd::walk::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::walk::delay_rnd") : save()
-    hd.store["crouch"] = {}
-    hd.store["crouch"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::pitch","\n","hd::crouch::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::crouch::pitch") : save()
-    hd.store["crouch"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::pitch_custom","\n","hd::crouch::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::crouch::pitch_custom") : save()
-    hd.store["crouch"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_left","\n","hd::crouch::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::crouch::yaw_left") : save()
-    hd.store["crouch"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_right","\n","hd::crouch::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::crouch::yaw_right") : save()
-    hd.store["crouch"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::yaw_rnd_mode","\n","hd::crouch::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::crouch::yaw_rnd_mode") : save()
-    hd.store["crouch"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_rnd_left","\n","hd::crouch::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::crouch::yaw_rnd_left") : save()
-    hd.store["crouch"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_rnd_right","\n","hd::crouch::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::crouch::yaw_rnd_right") : save()
-    hd.store["crouch"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::yaw_jitter","\n","hd::crouch::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::crouch::yaw_jitter") : save()
-    hd.store["crouch"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::yaw_jitter_deg","\n","hd::crouch::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::crouch::yaw_jitter_deg") : save()
-    hd.store["crouch"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::randomization","\n","hd::crouch::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::crouch::randomization") : save()
-    hd.store["crouch"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::switch_chance","\n","hd::crouch::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::crouch::switch_chance") : save()
-    hd.store["crouch"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::crouch::body_yaw","\n","hd::crouch::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::crouch::body_yaw") : save()
-    hd.store["crouch"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::body_yaw_deg","\n","hd::crouch::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::crouch::body_yaw_deg") : save()
-    hd.store["crouch"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_from","\n","hd::crouch::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::crouch::delay_from") : save()
-    hd.store["crouch"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_to","\n","hd::crouch::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::crouch::delay_to") : save()
-    hd.store["crouch"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_count","\n","hd::crouch::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::crouch::delay_count") : save()
-    hd.store["crouch"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_tick1","\n","hd::crouch::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::crouch::delay_tick1") : save()
-    hd.store["crouch"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::crouch::delay_rnd","\n","hd::crouch::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::crouch::delay_rnd") : save()
-    hd.store["air"] = {}
-    hd.store["air"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::pitch","\n","hd::air::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::air::pitch") : save()
-    hd.store["air"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::pitch_custom","\n","hd::air::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::air::pitch_custom") : save()
-    hd.store["air"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_left","\n","hd::air::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::air::yaw_left") : save()
-    hd.store["air"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_right","\n","hd::air::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::air::yaw_right") : save()
-    hd.store["air"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::yaw_rnd_mode","\n","hd::air::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::air::yaw_rnd_mode") : save()
-    hd.store["air"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_rnd_left","\n","hd::air::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::air::yaw_rnd_left") : save()
-    hd.store["air"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_rnd_right","\n","hd::air::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::air::yaw_rnd_right") : save()
-    hd.store["air"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::yaw_jitter","\n","hd::air::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::air::yaw_jitter") : save()
-    hd.store["air"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::yaw_jitter_deg","\n","hd::air::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::air::yaw_jitter_deg") : save()
-    hd.store["air"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::randomization","\n","hd::air::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::air::randomization") : save()
-    hd.store["air"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::switch_chance","\n","hd::air::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::air::switch_chance") : save()
-    hd.store["air"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::air::body_yaw","\n","hd::air::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::air::body_yaw") : save()
-    hd.store["air"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::body_yaw_deg","\n","hd::air::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::air::body_yaw_deg") : save()
-    hd.store["air"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_from","\n","hd::air::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::air::delay_from") : save()
-    hd.store["air"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_to","\n","hd::air::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::air::delay_to") : save()
-    hd.store["air"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_count","\n","hd::air::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::air::delay_count") : save()
-    hd.store["air"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_tick1","\n","hd::air::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::air::delay_tick1") : save()
-    hd.store["air"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::air::delay_rnd","\n","hd::air::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::air::delay_rnd") : save()
-    hd.store["airduck"] = {}
-    hd.store["airduck"]["pitch"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::pitch","\n","hd::airduck::pitch"}, {"Down","Up","Minimal","Zero","Random","Custom"})
-    : record("aa","hd::airduck::pitch") : save()
-    hd.store["airduck"]["pitch_custom"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::pitch_custom","\n","hd::airduck::pitch_custom"}, -89, 89, -89, true, "\xc2\xb0")
-    : record("aa","hd::airduck::pitch_custom") : save()
-    hd.store["airduck"]["yaw_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_left","\n","hd::airduck::yaw_left"}, -180, 0, -19, true, "\xc2\xb0")
-    : record("aa","hd::airduck::yaw_left") : save()
-    hd.store["airduck"]["yaw_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_right","\n","hd::airduck::yaw_right"}, 0, 180, 36, true, "\xc2\xb0")
-    : record("aa","hd::airduck::yaw_right") : save()
-    hd.store["airduck"]["yaw_rnd_mode"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::yaw_rnd_mode","\n","hd::airduck::yaw_rnd_mode"}, {"Off","Percent","Range"})
-    : record("aa","hd::airduck::yaw_rnd_mode") : save()
-    hd.store["airduck"]["yaw_rnd_left"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_rnd_left","\n","hd::airduck::yaw_rnd_left"}, 0, 100, 0, true, "%")
-    : record("aa","hd::airduck::yaw_rnd_left") : save()
-    hd.store["airduck"]["yaw_rnd_right"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_rnd_right","\n","hd::airduck::yaw_rnd_right"}, 0, 100, 0, true, "%")
-    : record("aa","hd::airduck::yaw_rnd_right") : save()
-    hd.store["airduck"]["yaw_jitter"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::yaw_jitter","\n","hd::airduck::yaw_jitter"}, {"Off","Offset","Switch","Random","Spin"})
-    : record("aa","hd::airduck::yaw_jitter") : save()
-    hd.store["airduck"]["yaw_jitter_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::yaw_jitter_deg","\n","hd::airduck::yaw_jitter_deg"}, -180, 180, 0, true, "\xc2\xb0")
-    : record("aa","hd::airduck::yaw_jitter_deg") : save()
-    hd.store["airduck"]["randomization"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::randomization","\n","hd::airduck::randomization"}, 0, 100, 0, true, "%")
-    : record("aa","hd::airduck::randomization") : save()
-    hd.store["airduck"]["switch_chance"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::switch_chance","\n","hd::airduck::switch_chance"}, 0, 100, 100, true, "%")
-    : record("aa","hd::airduck::switch_chance") : save()
-    hd.store["airduck"]["body_yaw"] = menu.new_item(ui.new_combobox, G, GR, merge{"\nhd::airduck::body_yaw","\n","hd::airduck::body_yaw"}, {"Off","Jitter","X-way","Spin","Static","Freestanding"})
-    : record("aa","hd::airduck::body_yaw") : save()
-    hd.store["airduck"]["body_yaw_deg"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::body_yaw_deg","\n","hd::airduck::body_yaw_deg"}, -180, 180, 60, true, "\xc2\xb0")
-    : record("aa","hd::airduck::body_yaw_deg") : save()
-    hd.store["airduck"]["delay_from"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_from","\n","hd::airduck::delay_from"}, 0, 14, 0, true, "t")
-    : record("aa","hd::airduck::delay_from") : save()
-    hd.store["airduck"]["delay_to"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_to","\n","hd::airduck::delay_to"}, 0, 14, 0, true, "t")
-    : record("aa","hd::airduck::delay_to") : save()
-    hd.store["airduck"]["delay_count"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_count","\n","hd::airduck::delay_count"}, 1, 14, 1, true, "")
-    : record("aa","hd::airduck::delay_count") : save()
-    hd.store["airduck"]["delay_tick1"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_tick1","\n","hd::airduck::delay_tick1"}, 0, 14, 0, true, "t")
-    : record("aa","hd::airduck::delay_tick1") : save()
-    hd.store["airduck"]["delay_rnd"] = menu.new_item(ui.new_slider, G, GR, merge{"\nhd::airduck::delay_rnd","\n","hd::airduck::delay_rnd"}, 0, 100, 0, true, "%")
-    : record("aa","hd::airduck::delay_rnd") : save()
-
-    -- =========================================================
-    --  UI  --  FAKE LAG  (global, not per-state)
-    -- =========================================================
-
-    hd.ui_fl_settings = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Settings", "\n", "hd::fl_settings"}, {"Main","Aggressive","Passive","Custom"})
-    : record("aa","hd::fl_settings") : save()
-
-    hd.ui_vulnlc = menu.new_item(ui.new_multiselect, G, GR,
-        merge{"Break LC triggers", "\n", "hd::vulnlc"},
-        {"Can't shoot","Jumping","Crouching"})
-    : record("aa","hd::vulnlc") : save()
-
-    hd.ui_edge_yaw = menu.new_item(ui.new_hotkey, G, GR,
-        merge{"Edge yaw", "\n", "hd::edge_yaw"})
-    : record("aa","hd::edge_yaw") : save()
-
-    hd.ui_freestanding = menu.new_item(ui.new_hotkey, G, GR,
-        merge{"Freestanding", "\n", "hd::freestanding"})
-    : record("aa","hd::freestanding") : save()
-
-    hd.ui_manual = menu.new_item(ui.new_checkbox, G, GR, "Manual Yaw")
-    : record("aa","hd::manual") : save()
-
-    hd.ui_man_left  = menu.new_item(ui.new_hotkey, G, GR, merge{"  Left",  "\n","hd::man_left"})
-    : record("aa","hd::man_left") : save()
-    hd.ui_man_right = menu.new_item(ui.new_hotkey, G, GR, merge{"  Right", "\n","hd::man_right"})
-    : record("aa","hd::man_right") : save()
-    hd.ui_man_reset = menu.new_item(ui.new_hotkey, G, GR, merge{"  Reset", "\n","hd::man_reset"})
-    : record("aa","hd::man_reset") : save()
-
-    hd.ui_avoid_bs = menu.new_item(ui.new_checkbox, G, GR, "Avoid backstab")
-    : record("aa","hd::avoid_bs") : save()
-
-    hd.ui_safehead = menu.new_item(ui.new_multiselect, G, GR,
-        merge{"Safe head", "\n", "hd::safehead"}, {"Air melee","Height difference"})
-    : record("aa","hd::safehead") : save()
-
-    hd.ui_force_def = menu.new_item(ui.new_checkbox, G, GR, "Force defensive")
-    : record("aa","hd::force_def") : save()
-
-    hd.ui_def_on = menu.new_item(ui.new_multiselect, G, GR,
-        merge{"Defensive on", "\n", "hd::def_on"},
-        {"Double tap","Hide shots","On shot"})
-    : record("aa","hd::def_on") : save()
-
-    hd.ui_def_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Defensive mode", "\n", "hd::def_mode"},
-        {"Always on","While shooting","On peek"})
-    : record("aa","hd::def_mode") : save()
-
-    hd.ui_fl_on = menu.new_item(ui.new_checkbox, G, GR,
-        merge{"Enabled", "\n", "hd::fl_on"})
-    : record("aa","hd::fl_on") : save()
-
-    hd.ui_fl_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"Amount", "\n", "hd::fl_mode"}, {"Dynamic","Maximum","Fluctuate"})
-    : record("aa","hd::fl_mode") : save()
-
-    hd.ui_fl_variance = menu.new_item(ui.new_slider, G, GR,
-        merge{"Variance", "\n", "hd::fl_variance"}, 0, 100, 59, true, "%")
-    : record("aa","hd::fl_variance") : save()
-
-    hd.ui_fl_limit = menu.new_item(ui.new_slider, G, GR,
-        merge{"Limit", "\n", "hd::fl_limit"}, 1, 14, 13, true, "t")
-    : record("aa","hd::fl_limit") : save()
-
-    hd.ui_inverter = menu.new_item(ui.new_hotkey, G, GR,
-        merge{"Inverter", "\n", "hd::inverter"})
-    : record("aa","hd::inverter") : save()
-
-    -- section header labels  \a71bc78ff = green accent, \xe2\x96\xba = filled triangle
-    hd.lbl_pitch = menu.new_item(ui.new_label, G, GR, "▸ Pitch ────────────")
-    hd.lbl_yaw   = menu.new_item(ui.new_label, G, GR, "▸ Yaw ──────────────")
-    hd.lbl_body  = menu.new_item(ui.new_label, G, GR, "▸ Body Yaw ─────────")
-    hd.lbl_delay = menu.new_item(ui.new_label, G, GR, "▸ Delay ────────────")
-    hd.lbl_fl    = menu.new_item(ui.new_label, G, GR, "▸ Fake Lag ─────────")
-    hd.lbl_ctrl  = menu.new_item(ui.new_label, G, GR, "▸ Controls ─────────")
-
-    -- =========================================================
-    --  PRESET SAVE / LOAD  (editor <-> presets <-> hidden storage)
-    -- =========================================================
-
-    local function get_selected_id()
-        local label = hd.ui_state:get()
-        for _,s in ipairs(STATES) do
-            if s.label == label then return s.id end
+    local function get_team_state()
+        local data = {}
+        for i = 1, #AA_STATES do
+            data[i] = {}
+            for k,v in pairs(ab[i]) do
+                local ok, val = pcall(function() return v:get() end)
+                if ok then data[i][k] = val end
+            end
         end
-        return STATES[1].id
+        return data
     end
-
-    -- Map field name -> editor widget
-    local EDITOR_MAP = {
-        pitch          = hd.ui_pitch,
-        pitch_custom   = hd.ui_pitch_custom,
-        yaw_left       = hd.ui_yaw_left,
-        yaw_right      = hd.ui_yaw_right,
-        yaw_rnd_mode   = hd.ui_yaw_rnd_mode,
-        yaw_rnd_left   = hd.ui_yaw_rnd_left,
-        yaw_rnd_right  = hd.ui_yaw_rnd_right,
-        yaw_jitter     = hd.ui_yaw_jitter,
-        yaw_jitter_deg = hd.ui_yaw_jitter_deg,
-        randomization  = hd.ui_randomization,
-        switch_chance  = hd.ui_switch_chance,
-        body_yaw       = hd.ui_body_yaw,
-        body_yaw_deg   = hd.ui_body_yaw_deg,
-        delay_from     = hd.ui_delay_from,
-        delay_to       = hd.ui_delay_to,
-        delay_count    = hd.ui_delay_count,
-        delay_tick1    = hd.ui_delay_tick1,
-        delay_rnd      = hd.ui_delay_rnd,
-    }
-    local FIELD_ORDER = {
-        "pitch","pitch_custom",
-        "yaw_left","yaw_right",
-        "yaw_rnd_mode","yaw_rnd_left","yaw_rnd_right",
-        "yaw_jitter","yaw_jitter_deg",
-        "randomization","switch_chance",
-        "body_yaw","body_yaw_deg",
-        "delay_from","delay_to","delay_count","delay_tick1","delay_rnd",
-    }
-
-    -- Read hidden storage -> hd.presets (called once on startup)
-    local function storage_to_presets()
-        for _, sid in ipairs({"stand","run","walk","crouch","air","airduck"}) do
-            local p  = hd.presets[sid]
-            local st = hd.store[sid]
-            if p and st then
-                for _, field in ipairs(FIELD_ORDER) do
-                    if st[field] then
-                        p[field] = st[field]:get()
+    local function set_team_state(data)
+        if not data then return end
+        for i = 1, #AA_STATES do
+            if data[i] then
+                for k,v in pairs(ab[i]) do
+                    if data[i][k] ~= nil then
+                        pcall(function() v:set(data[i][k]) end)
                     end
                 end
             end
         end
     end
 
-    -- Write editor widgets -> hd.presets[sid] AND hidden storage[sid]
-    local function preset_save()
-        local sid = get_selected_id()
-        local p   = hd.presets[sid]
-        local st  = hd.store[sid]
-        if not p or not st then return end
-        for _, field in ipairs(FIELD_ORDER) do
-            local w = EDITOR_MAP[field]
-            if w then
-                local v = w:get()
-                p[field] = v
-                if st[field] then
-                    pcall(function() st[field]:set(v) end)
-                end
-            end
+    ui.set_callback(ui_team.ref, function()
+        local new_team = ui_team:get()
+        if new_team == aa_last_team then return end
+        aa_persistence[aa_last_team] = get_team_state()
+        if not aa_persistence[new_team] then
+            aa_persistence[new_team] = get_team_state()
         end
-    end
-
-    -- Load hd.presets[selected_sid] -> editor widgets
-    local function preset_load()
-        local sid = get_selected_id()
-        local p   = hd.presets[sid]
-        if not p then return end
-        for _, field in ipairs(FIELD_ORDER) do
-            local w = EDITOR_MAP[field]
-            if w then pcall(function() w:set(p[field]) end) end
-        end
-    end
-
-    -- Wire callbacks: any editor widget change -> preset_save
-    for _, field in ipairs(FIELD_ORDER) do
-        local w = EDITOR_MAP[field]
-        if w and w.set_callback then
-            w:set_callback(preset_save)
-        end
-    end
-
-    -- State combobox: save current, then load new
-    hd.ui_state:set_callback(function()
-        preset_load()
+        set_team_state(aa_persistence[new_team])
+        aa_last_team = new_team
+    end)
+    ui.set_callback(ui_copy.ref, function()
+        local cur   = ui_team:get()
+        local other = cur == "CT" and "T" or "CT"
+        aa_persistence[other] = get_team_state()
+        client.color_log(150,200,60,"[Zenith] Copied "..cur.." AA to "..other)
     end)
 
-    -- GS applies config AFTER the script finishes loading (via ui.set_callback).
-    -- So we must defer storage_to_presets() + preset_load() to the first frame.
-    local _hd_boot_done = false
-    local _hd_boot_cb
-    _hd_boot_cb = client.set_event_callback('setup_command', function()
-        if _hd_boot_done then return end
-        _hd_boot_done = true
-        storage_to_presets()
-        preset_load()
-        pcall(client.unset_event_callback, 'setup_command', _hd_boot_cb)
+    client.set_event_callback("item_equip", function(e)
+        if client.userid_to_entindex(e.userid) == entity.get_local_player() then
+            def_persistent.last_weapon_switch = globals.curtime()
+        end
     end)
 
-    -- =========================================================
-    --  RUNTIME: get the active preset for the current game state
-    -- =========================================================
-    local function get_active_id()
-        local lp = entity.get_local_player()
-        if not lp or not entity.is_alive(lp) then return "stand" end
-        if localplayer.is_airborne then
-            return localplayer.is_crouched and "airduck" or "air"
-        end
-        if localplayer.is_crouched then return "crouch" end
-        if localplayer.is_moving then
-            return software.is_slow_motion() and "walk" or "run"
-        end
-        return "stand"
-    end
-
-    local function get_active_preset()
-        return hd.presets[get_active_id()] or hd.presets["stand"]
-    end
-
-    -- =========================================================
-    --  RUNTIME: per-preset logic helpers
-    -- =========================================================
-
-    local function get_jitter(p)
-        local mode = p.yaw_jitter
-        local deg  = p.yaw_jitter_deg
-        if mode == "Off"    then return 0 end
-        if mode == "Offset" then return hd.switch and deg or -deg end
-        if mode == "Switch" then return hd.switch and deg or 0 end
-        if mode == "Random" then return math.random(-math.abs(deg), math.abs(deg)) end
-        if mode == "Spin"   then return lerp(-deg, deg, globals.curtime() * 3 % 2 - 1) end
-        return 0
-    end
-
-    local function get_body(p)
-        local mode = p.body_yaw
-        local deg  = p.body_yaw_deg
-        if mode == "Off"          then return nil, nil end
-        if mode == "Static"       then return "Static", deg end
-        if mode == "Freestanding" then return "Freestanding", deg end
-        if mode == "Jitter"       then return "Static", hd.switch and deg or -deg end
-        if mode == "X-way"        then
-            hd.jitter_t = (hd.jitter_t + 1) % 2
-            return "Static", hd.jitter_t == 0 and deg or -deg
-        end
-        if mode == "Spin" then
-            return "Static", lerp(-deg, deg, globals.curtime() * 3 % 2 - 1)
-        end
-        return nil, nil
-    end
-
-    local function get_pitch_value(p)
-        -- returns native GS pitch[1] string + optional pitch[2] offset (nil = don't set)
-        local mode = p.pitch
-        if mode == "Down"    then return "Down",    nil end
-        if mode == "Up"      then return "Up",      nil end
-        if mode == "Minimal" then return "Minimal", nil end
-        if mode == "Random"  then return "Random",  nil end
-        if mode == "Zero"    then return "Custom",  0   end
-        if mode == "Custom"  then return "Custom",  clamp(p.pitch_custom, -89, 89) end
-        return "Down", nil
-    end
-
-    local function get_delay(p)
-        local from = p.delay_from
-        local to   = p.delay_to
-        if from == 0 and to == 0 then return 0 end
-        local base = (from == to) and from or math.random(math.min(from,to), math.max(from,to))
-        if p.delay_rnd > 0 and math.random(100) <= p.delay_rnd then
-            base = base + p.delay_tick1
-        end
-        return clamp(base, 0, 14)
-    end
-
-    local function should_switch(p)
-        local chance = p.switch_chance
-        if chance >= 100 then return true end
-        if chance <= 0   then return false end
-        return math.random(100) <= chance
-    end
-
-    -- =========================================================
-    --  RUNTIME: global feature helpers
-    -- =========================================================
-
-    local fl_overridden = false
+    -- ── Fake lag ──────────────────────────────────────────────────────
     local function apply_fakelag()
-        local re  = pui.reference("AA", "Fake lag", "Enabled")
-        local ra  = pui.reference("AA", "Fake lag", "Amount")
-        local rv  = pui.reference("AA", "Fake lag", "Variance")
-        local rl  = pui.reference("AA", "Fake lag", "Limit")
-
-        if not hd.ui_fl_on:get() then
-            if fl_overridden then
-                re:override(); ra:override()
-                rv:override(); rl:override()
-                fl_overridden = false
-            end
-            return
+        if not ui_fl_on:get() then
+            software.fakelag.set_amount(0); return
         end
-        fl_overridden = true
-        re:override(true)
-        ra:override(hd.ui_fl_mode:get())
-        rl:override(hd.ui_fl_limit:get())
-        pcall(function() rv:override(hd.ui_fl_variance:get()) end)
+        local mode = ui_fl_mode:get()
+        local lim  = ui_fl_limit:get()
+        local var  = ui_fl_variance:get() / 100
+        if mode == "Dynamic" then
+            software.fakelag.set_amount(math.random(1, math.max(1, lim)))
+        elseif mode == "Maximum" then
+            software.fakelag.set_amount(lim)
+        elseif mode == "Fluctuate" then
+            software.fakelag.set_amount(math.random(1, math.max(1, math.floor(lim * (1 - var * 0.5)))))
+        end
     end
 
+    -- ── LC breaker ────────────────────────────────────────────────────
     local function apply_vulnlc(cmd)
-        local items = hd.ui_vulnlc:get()
-        if not items or #items == 0 then return end
-        local dt = exploit.get()
-        if not (dt and dt.shift) then return end
-        local lp = entity.get_local_player()
-        if not lp then return end
-        if has(items,"Can't shoot") then
-            local wpn  = entity.get_player_weapon(lp)
-            local info = wpn and csgo_weapons(wpn)
-            if info and info.weapon_type_int ~= 9 then
-                local na   = entity.get_prop(lp,"m_flNextAttack") or 0
-                local st   = entity.get_prop(lp,"m_flSimulationTime") or 0
-                if toticks(na - st - 1) > 0 then
-                    cmd.force_defensive = true; return
+        local modes = ui_vulnlc:get()
+        if not modes or #modes == 0 then return end
+        local charge = exploit.get and exploit.get().charge or 0
+        if has(modes,"Charged")   and charge >= 1.0 then cmd.force_send = true end
+        if has(modes,"Shifting")  and charge > 0 and charge < 1.0 then cmd.force_send = true end
+        if has(modes,"Uncharged") and charge == 0 then cmd.force_send = true end
+    end
+
+    -- ── Builder page show function ────────────────────────────────────
+    local function show_state_items(s)
+        local p = ab[s]
+        _safe_display(p.enableState)
+        local en = (s == 1) or p.enableState:get()
+        if not en then return end
+
+        _safe_display(p.pitch)
+        if p.pitch:get() == "Custom" then _safe_display(p.pitchSlider) end
+        _safe_display(p.yawBase)
+        _safe_display(p.yaw)
+        local ym = p.yaw:get()
+        if ym == "Slow Yaw" or ym == "L&R" then
+            _safe_display(p.yawLeft); _safe_display(p.yawRight); _safe_display(p.yawDelay)
+        elseif ym ~= "Off" then
+            _safe_display(p.yawStatic)
+        end
+        _safe_display(p.yawJitter)
+        local jm = p.yawJitter:get()
+        if jm == "L&R" then
+            _safe_display(p.yawJitterLeft); _safe_display(p.yawJitterRight); _safe_display(p.yawDelay)
+        elseif jm == "3-Way" then
+            _safe_display(p.wayFirst); _safe_display(p.waySecond); _safe_display(p.wayThird)
+        elseif jm ~= "Off" then
+            _safe_display(p.yawJitterStatic)
+        end
+        _safe_display(p.bodyYaw)
+        if p.bodyYaw:get() ~= "Off" and p.bodyYaw:get() ~= "Opposite" then
+            _safe_display(p.bodyYawStatic)
+        end
+        -- Defensive AA
+        _safe_display(p.defensiveAA)
+        if p.defensiveAA:get() then
+            _safe_display(p.defensiveTriggers)
+            if has(p.defensiveTriggers:get(), "Tick") then
+                _safe_display(p.defensiveTickTrigger)
+            end
+            _safe_display(p.defensivePitch)
+            local dpm = p.defensivePitch:get()
+            if dpm ~= "Random Logic" then
+                _safe_display(p.defensivePitchMin)
+                if dpm == "Random" or dpm == "Spin" or dpm == "Jitter" or dpm == "Sine Wave" then
+                    _safe_display(p.defensivePitchMax)
                 end
             end
-        end
-        if has(items,"Jumping")   and localplayer.is_airborne then
-            cmd.force_defensive = true end
-        if has(items,"Crouching") and localplayer.is_crouched
-           and not localplayer.is_airborne then
-            cmd.force_defensive = true end
-    end
-
-    local function apply_safe_head(ctx)
-        local sh = hd.ui_safehead:get()
-        if not sh or #sh == 0 then return end
-        local lp = entity.get_local_player()
-        if not lp then return end
-        local threat = client.current_threat()
-        if not threat or entity.is_dormant(threat) then return end
-        local my = vector(entity.get_prop(lp,"m_vecOrigin"))
-        local th = vector(entity.get_origin(threat))
-        local hdiff = my.z - th.z
-        local dist  = my:dist(th)
-        local ex,ey,ez = client.eye_position()
-        local _,tent = client.trace_line(lp,ex,ey,ez,th.x,th.y,th.z+56)
-        local vis = tent == threat
-        local wpn = entity.get_player_weapon(lp)
-        local wi  = wpn and csgo_weapons(wpn)
-        local mel = wi and wi.weapon_type_int == 0
-        if (has(sh,"Air melee") and localplayer.is_airborne and mel and hdiff > -32)
-        or (has(sh,"Height difference") and hdiff > 64 and (vis or dist < 1024)) then
-            ctx.yaw_offset=20; ctx.body_yaw="Static"; ctx.body_yaw_offset=1
-            ctx.pitch="Custom"; ctx.pitch_offset=89
+            if dpm == "Spin" or dpm == "Sine Wave" then _safe_display(p.defensivePitchSpeed) end
+            _safe_display(p.defensiveYaw)
+            local dym = p.defensiveYaw:get()
+            if dym == "Static" or dym == "Random" then
+                _safe_display(p.defensiveYawStatic)
+            elseif dym == "Spin" then
+                _safe_display(p.defensiveYawSpinLeft); _safe_display(p.defensiveYawSpinRight)
+                _safe_display(p.defensiveYawSpinSpeed)
+            elseif dym == "Jitter" or dym == "Logic Shift" then
+                _safe_display(p.defensiveYawJitterRange); _safe_display(p.defensiveYawJitterDelay)
+            end
         end
     end
 
-    local function apply_force_def(cmd)
-        if not hd.ui_force_def:get() then return end
-        local on  = hd.ui_def_on:get()
-        local mode= hd.ui_def_mode:get()
-        local dt  = software.is_double_tap()
-        local os  = software.is_on_shot_antiaim()
-        if mode == "Always on"
-        or (has(on,"Double tap") and dt)
-        or (has(on,"On shot")    and os)
-        or (has(on,"Hide shots") and (dt or os)) then
-            cmd.force_defensive = true
+    -- This is called by the Builder page renderer
+    function defensive.show_builder()
+        _safe_display(ui_team); _safe_display(ui_copy)
+        _safe_display(ui_state)
+        local s = ui_state:get()
+        -- find state index
+        local si = 1
+        for i,nm in ipairs(AA_STATES) do if nm == s then si = i; break end end
+        show_state_items(si)
+        -- Controls section
+        _safe_display(ui_fl_settings)
+        _safe_display(ui_vulnlc)
+        _safe_display(ui_edge_yaw); _safe_display(ui_freestand)
+        _safe_display(ui_inverter)
+        _safe_display(ui_man_en)
+        if ui_man_en:get() then
+            _safe_display(ui_man_left); _safe_display(ui_man_right); _safe_display(ui_man_reset)
+        end
+        _safe_display(ui_safehead)
+        _safe_display(ui_fl_on)
+        if ui_fl_on:get() then
+            _safe_display(ui_fl_mode); _safe_display(ui_fl_variance); _safe_display(ui_fl_limit)
         end
     end
 
-    local function update_manual()
-        if not hd.ui_manual:get() then hd.manual_side=nil; return end
-        if hd.ui_man_reset:get()  then hd.manual_side=nil; return end
-        if hd.ui_man_left:get()   then hd.manual_side= 1; return end
-        if hd.ui_man_right:get()  then hd.manual_side=-1 end
-    end
-
-    -- =========================================================
-    --  MAIN CALLBACK
-    -- =========================================================
-    local function hd_setup_command(cmd, ctx)
-        if not hd.ui_enable:get() then return end
+    -- ── Main AA logic (called by defensive.handle each tick) ──────────
+    local function hd_apply(cmd, ctx)
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        hd.lifetime = hd.lifetime + 1
+        -- inverter tick
+        if cmd.chokedcommands == 0 then
+            aa_inverter = not aa_inverter
+            aa_inverter_tick = aa_inverter_tick + 1
+        end
 
-        -- get active preset for current movement state
-        local p = get_active_preset()
+        -- auto-switch team
+        local my_team_num = entity.get_prop(lp, "m_iTeamNum")
+        local my_team = (my_team_num == 3) and "CT" or (my_team_num == 2 and "T" or nil)
+        if not ui.is_menu_open() and my_team and ui_team:get() ~= my_team then
+            ui_team:set(my_team)
+        end
 
-        -- switch / jitter tick
-        if should_switch(p) then hd.switch = not hd.switch end
+        -- state detection
+        local flags    = entity.get_prop(lp, "m_fFlags") or 0
+        local onground = bit.band(flags,1) ~= 0
+        local vel      = entity.get_prop(lp, "m_vecVelocity") -- table {x,y,z} or 3 values
+        local vx, vy   = 0, 0
+        if type(vel) == "table" then vx=vel[1] or 0; vy=vel[2] or 0
+        else vx = entity.get_prop(lp,"m_vecVelocity[0]") or 0
+             vy = entity.get_prop(lp,"m_vecVelocity[1]") or 0
+        end
+        local spd2    = math.sqrt(vx*vx + vy*vy)
+        local pStill  = spd2 < 5
+        local duck    = entity.get_prop(lp,"m_flDuckAmount") or 0
+        local isSlow  = software.is_slow_motion and software.is_slow_motion() or false
 
-        -- manual yaw update
-        update_manual()
+        local raw = 1
+        if pStill         then raw = 2 end
+        if not pStill     then raw = 3 end
+        if isSlow         then raw = 4 end
+        if duck > 0.1 then
+            if pStill then raw = 5 else raw = 8 end
+        end
+        if not onground   then raw = 6 end
+        if not onground and duck > 0.1 then raw = 7 end
 
-        -- force defensive
-        apply_force_def(cmd)
+        if raw ~= last_state_raw then last_state_raw = raw end
+        pState = raw
+        if ab[pState] and not ab[pState].enableState:get() and pState ~= 1 then
+            pState = 1
+        end
 
-        -- LC breaker
+        local p = ab[pState]
+        if not p then return end
+
+        apply_fakelag()
         apply_vulnlc(cmd)
 
-        -- fake lag (global, not per-state)
-        apply_fakelag()
-
-        -- delay
-        local delay = get_delay(p)
-        if delay > 0 then
-            hd.delay_t = (hd.delay_t + 1) % delay
-            if hd.delay_t ~= 0 then ctx.defensive_ticks = delay end
+        -- manual yaw
+        if ui_man_en:get() then
+            if ui_man_reset:rawget() then manual_side = nil
+            elseif ui_man_left:rawget() then manual_side = -1
+            elseif ui_man_right:rawget() then manual_side = 1
+            end
+        else
+            manual_side = nil
         end
 
-        -- pitch (from preset)
-        local pitch_mode, pitch_val = get_pitch_value(p)
-        ctx.pitch        = pitch_mode
-        ctx.pitch_offset = pitch_val
-
-        -- yaw
-        if hd.manual_side then
+        if manual_side then
             ctx.yaw_base   = "Local view"
-            ctx.yaw_offset = hd.manual_side * 90
+            ctx.yaw        = "180"
+            ctx.yaw_offset = manual_side * 90
             ctx.yaw_jitter = "Off"
             ctx.body_yaw   = "Static"
-        else
-            local left  = p.yaw_left
-            local right = p.yaw_right
-            if p.yaw_rnd_mode ~= "Off" then
-                left  = left  + math.random(0, math.abs(p.yaw_rnd_left))
-                right = right + math.random(0, math.abs(p.yaw_rnd_right))
+            ctx.body_yaw_offset = -180
+            if ui_edge_yaw:rawget() then ctx.edge_yaw = true end
+            if ui_freestand:rawget() then ctx.freestanding = true end
+            return
+        end
+
+        -- check defensive activation
+        local is_def = false
+        if p.defensiveAA:get() then
+            local trigs = p.defensiveTriggers:get() or {}
+            if has(trigs,"Always") then is_def = true end
+            if has(trigs,"Tick") then
+                local tm = p.defensiveTickTrigger:get()
+                if globals.tickcount() % 16 < tm then is_def = true end
             end
-
-            local base = hd.switch and norm_yaw(right) or norm_yaw(left)
-            local jit  = get_jitter(p)
-            if p.randomization > 0 then
-                jit = jit + math.random(
-                    -math.floor(p.randomization/2),
-                     math.floor(p.randomization/2))
-            end
-
-            ctx.yaw        = "180"
-            ctx.yaw_offset = norm_yaw(base + jit)
-
-            local bmode, bdeg = get_body(p)
-            if bmode then
-                ctx.body_yaw        = bmode
-                ctx.body_yaw_offset = bdeg or 0
+            if has(trigs,"Weapon switch") then
+                if globals.curtime() - def_persistent.last_weapon_switch < 1.0 then is_def = true end
             end
         end
 
-        -- edge yaw / freestanding hotkeys
-        if hd.ui_edge_yaw:rawget()    then ctx.edge_yaw    = true end
-        if hd.ui_freestanding:rawget() then ctx.freestanding = true end
+        -- yaw base
+        ctx.yaw_base = p.yawBase:get()
+
+        if is_def then
+            -- ── Defensive pitch ───────────────────────────────────────
+            local dpm   = p.defensivePitch:get()
+            local dmin  = p.defensivePitchMin:get()
+            local dmax  = p.defensivePitchMax:get()
+            local dspd  = p.defensivePitchSpeed:get()
+            local rmin  = math.min(dmin,dmax); local rmax = math.max(dmin,dmax)
+            ctx.pitch = "Custom"
+            if dpm == "Static" then
+                ctx.pitch_offset = dmin
+            elseif dpm == "Random" then
+                ctx.pitch_offset = math.random(rmin,rmax)
+            elseif dpm == "Spin" then
+                def_persistent.pitch_spin = def_persistent.pitch_spin + dspd/2
+                if def_persistent.pitch_spin > rmax or def_persistent.pitch_spin < rmin then
+                    def_persistent.pitch_spin = rmin
+                end
+                ctx.pitch_offset = def_persistent.pitch_spin
+            elseif dpm == "Jitter" then
+                local t = globals.tickcount() % (dspd*2) < dspd
+                ctx.pitch_offset = t and dmin or dmax
+            elseif dpm == "Sine Wave" then
+                ctx.pitch_offset = math.sin(globals.curtime()*dspd) * (rmax-rmin)/2 + (rmax+rmin)/2
+            elseif dpm == "Random Logic" then
+                local r = math.random(0,100)
+                ctx.pitch_offset = r > 80 and 0 or (math.random(0,1)==0 and 89 or -89)
+            end
+
+            -- ── Defensive yaw ─────────────────────────────────────────
+            local dym  = p.defensiveYaw:get()
+            local dys  = p.defensiveYawStatic:get()
+            ctx.yaw = "180"
+            if dym == "Static" then
+                ctx.yaw_offset = dys
+            elseif dym == "Random" then
+                ctx.yaw_offset = math.random(-180,180)
+            elseif dym == "Spin" then
+                local sl = p.defensiveYawSpinLeft:get()
+                local sr = p.defensiveYawSpinRight:get()
+                local ss = p.defensiveYawSpinSpeed:get()
+                def_persistent.yaw_spin = def_persistent.yaw_spin + ss
+                if def_persistent.yaw_spin > sr then def_persistent.yaw_spin = sl end
+                ctx.yaw_offset = def_persistent.yaw_spin
+            elseif dym == "Jitter" then
+                local range = p.defensiveYawJitterRange:get()
+                local delay = p.defensiveYawJitterDelay:get()
+                ctx.yaw_offset = globals.tickcount() % (delay*2) < delay and range or -range
+            elseif dym == "Logic Shift" then
+                local range = p.defensiveYawJitterRange:get()
+                local delay = p.defensiveYawJitterDelay:get()
+                local shift = (globals.tickcount()%32 < 16) and 0 or (globals.tickcount()%64 < 32 and 90 or -90)
+                local jitter = globals.tickcount() % (delay*2) < delay and range or -range
+                ctx.yaw_offset = norm_yaw(shift + jitter)
+            elseif dym == "Zenith Bypass" then
+                local t = aa_inverter_tick % 32
+                local fl = aa_inverter
+                if t == 31 then
+                    ctx.yaw_offset = (aa_inverter_tick%64 < 32) and 180 or 0
+                elseif t < 16 then
+                    ctx.yaw_offset = norm_yaw(110 + (fl and 2 or -2))
+                else
+                    ctx.yaw_offset = norm_yaw(-110 + (fl and 2 or -2))
+                end
+                ctx.body_yaw = "Static"
+                ctx.body_yaw_offset = fl and 60 or -60
+            else
+                ctx.yaw = "Off"
+            end
+        else
+            -- ── Normal pitch ──────────────────────────────────────────
+            local pm = p.pitch:get()
+            if pm == "Custom" then
+                ctx.pitch = "Custom"; ctx.pitch_offset = p.pitchSlider:get()
+            elseif pm == "Off" then
+                ctx.pitch = "Off"
+            else
+                ctx.pitch = pm
+            end
+
+            -- ── Normal yaw ────────────────────────────────────────────
+            local ym     = p.yaw:get()
+            local yd     = p.yawDelay:get()
+            local ysw    = globals.tickcount() % (yd*2) < yd
+            ctx.yaw      = "180"
+            if ym == "Off" then
+                ctx.yaw = "Off"; ctx.yaw_offset = 0
+            elseif ym == "Slow Yaw" or ym == "L&R" then
+                ctx.yaw_offset = ysw and p.yawLeft:get() or p.yawRight:get()
+            else
+                ctx.yaw_offset = p.yawStatic:get()
+            end
+
+            -- ── Jitter ────────────────────────────────────────────────
+            local jm = p.yawJitter:get()
+            if jm == "L&R" then
+                local jsw = globals.tickcount() % (yd*2) < yd
+                ctx.yaw_jitter  = "Center"
+                ctx.jitter_offset = jsw and p.yawJitterLeft:get() or p.yawJitterRight:get()
+            elseif jm == "3-Way" then
+                ctx.yaw_jitter  = "Center"
+                local ways = {p.wayFirst:get(), p.waySecond:get(), p.wayThird:get()}
+                ctx.jitter_offset = ways[(globals.tickcount()%3)+1]
+            elseif jm ~= "Off" then
+                ctx.yaw_jitter  = jm
+                ctx.jitter_offset = p.yawJitterStatic:get()
+            end
+
+            -- ── Body yaw ──────────────────────────────────────────────
+            local bm = p.bodyYaw:get()
+            if bm ~= "Off" then
+                ctx.body_yaw = bm
+                if bm ~= "Opposite" then
+                    ctx.body_yaw_offset = p.bodyYawStatic:get()
+                end
+            end
+        end
 
         -- inverter
-        if hd.ui_inverter:rawget() then
+        if ui_inverter:rawget() and ctx.yaw_offset then
             ctx.yaw_offset = norm_yaw(ctx.yaw_offset + 180)
         end
 
-        -- safe head (may override above)
-        apply_safe_head(ctx)
+        -- safe head
+        local sh = ui_safehead:get() or {}
+        local lp_hp = entity.get_prop(lp, "m_iHealth") or 100
+        local should_sh = has(sh,"Always")
+            or (has(sh,"Low HP") and lp_hp <= 40)
+            or (has(sh,"Knife")  and (function()
+                local wpn = entity.get_player_weapon(lp)
+                return wpn and (entity.get_classname(wpn) == "CKnife")
+            end)())
+        if should_sh then
+            ctx.pitch="Custom"; ctx.pitch_offset=89
+            ctx.yaw_offset=20; ctx.body_yaw="Static"; ctx.body_yaw_offset=1
+        end
+
+        -- edge yaw / freestanding
+        if ui_edge_yaw:rawget()  then ctx.edge_yaw    = true end
+        if ui_freestand:rawget() then ctx.freestanding = true end
+
+        -- export current state
+        rawset(_G, "_G._hd_pstate", pState)
+        rawset(_G, "_hd_state", {
+            -- keep old references so Builder page still works with _G._hd_state
+            ui_enable    = {get=function() return true end},
+            ui_state     = ui_state,
+            lbl_pitch    = nil, lbl_yaw=nil, lbl_body=nil, lbl_delay=nil, lbl_fl=nil, lbl_ctrl=nil,
+        })
     end
 
     function defensive.handle(cmd, ctx)
-        hd_setup_command(cmd, ctx)
+        hd_apply(cmd, ctx)
     end
 
-    rawset(_G, "_hd_state", hd)
+    -- boot: deferred so config is loaded first
+    local _boot_done = false
+    client.set_event_callback('setup_command', function()
+        if _boot_done then return end
+        _boot_done = true
+        -- auto-set team on first tick
+        local lp = entity.get_local_player()
+        if lp then
+            local tn = entity.get_prop(lp,"m_iTeamNum")
+            local t  = (tn==3) and "CT" or (tn==2 and "T" or nil)
+            if t then ui_team:set(t) end
+        end
+    end)
+
+    -- expose to Builder page renderer
+    rawset(_G, "_valk_ab",     ab)
+    rawset(_G, "_valk_states", AA_STATES)
+    rawset(_G, "_valk_show",   function() defensive.show_builder() end)
+
 end
-
-
-
 
 
 
@@ -6771,6 +6461,7 @@ menu.set_callback(function()
     -- Custom AA angles builder (offset, modifier, desync, limitation)
     -- ── DEFENSIVE ────────────────────────────────────────────────────
         if page == "Builder" then
+        if _G._valk_show then _G._valk_show() end
         local hd = _G._hd_state
         if hd then
             _safe_display(hd.ui_enable)
