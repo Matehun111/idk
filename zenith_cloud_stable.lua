@@ -2597,8 +2597,15 @@ do
             defensiveYawJitterRange=menu.new_item(ui.new_slider,G,GR, merge{"Jitter range\n","hd::dyjr"..sfx}, 0,180,90,true,"deg",1):record("aa","hd::dyjr"..sfx):save(),
             defensiveYawJitterDelay=menu.new_item(ui.new_slider,G,GR, merge{"Jitter delay\n","hd::dyjd"..sfx}, 1,16,1,true,"t",1):record("aa","hd::dyjd"..sfx):save(),
         }
-        -- Global state (index 1) always enabled
-        if i == 1 then ab[i].enableState:set(true) end
+        -- Global state (index 1) always enabled with sane defaults
+        if i == 1 then
+            ab[i].enableState:set(true)
+            client.delay_call(0, function()
+                -- only set defaults if config hasn't loaded custom values
+                if ab[1].pitch:get() == "Off" then ab[1].pitch:set("Down") end
+                if ab[1].yaw:get() == "Off"   then ab[1].yaw:set("L&R")   end
+            end)
+        end
     end
 
     -- ── Extra controls (from old Zenith hd) ───────────────────────────
@@ -2963,24 +2970,24 @@ do
             local pm = p.pitch:get()
             if pm == "Custom" then
                 ctx.pitch = "Custom"; ctx.pitch_offset = p.pitchSlider:get()
-            elseif pm == "Off" then
-                ctx.pitch = "Off"
-            else
+            elseif pm ~= "Off" then
                 ctx.pitch = pm
             end
+            -- "Off" = don't override pitch
 
             -- ── Normal yaw ────────────────────────────────────────────
             local ym     = p.yaw:get()
             local yd     = p.yawDelay:get()
             local ysw    = globals.tickcount() % (yd*2) < yd
-            ctx.yaw      = "180"
-            if ym == "Off" then
-                ctx.yaw = "Off"; ctx.yaw_offset = 0
-            elseif ym == "Slow Yaw" or ym == "L&R" then
-                ctx.yaw_offset = ysw and p.yawLeft:get() or p.yawRight:get()
-            else
-                ctx.yaw_offset = p.yawStatic:get()
+            if ym ~= "Off" then
+                ctx.yaw = "180"
+                if ym == "Slow Yaw" or ym == "L&R" then
+                    ctx.yaw_offset = ysw and p.yawLeft:get() or p.yawRight:get()
+                else
+                    ctx.yaw_offset = p.yawStatic:get()
+                end
             end
+            -- "Off" = don't override yaw, let GS native handle it
 
             -- ── Jitter ────────────────────────────────────────────────
             local jm = p.yawJitter:get()
