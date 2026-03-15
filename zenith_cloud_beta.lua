@@ -4758,42 +4758,18 @@ LPH_NO_VIRTUALIZE(function ()
             if alpha <= 0 then return end
 
             local r, g, b = widgets.color_picker:get()
-            local PAD_X = 10
-            local ROW_H = 18
+            local ROW_H = 16
 
-            local hdr_icon  = "\xE2\x96\xA0 "
-            local hdr_label = hdr_icon .. "KEYBINDS"
-            local hw, hh = renderer.measure_text(flags, hdr_label)
-            local min_w  = PAD_X * 4 + hw
-            local row_w  = name_width + 14 + badge_width + PAD_X * 2
-            width = motion.interp(width, math.max(min_w, row_w, 134), 0.045)
+            -- Measure content width
+            local row_w = name_width + 12 + badge_width
+            width = motion.interp(width, math.max(row_w, 80), 0.045)
 
-            local box_w  = math.floor(width + 0.85)
-            local hdr_h  = hh + 9
-            local ha     = math.floor(255 * alpha * holding)
-            local ab     = alpha * holding
-            local pos    = window.pos
+            local box_w = math.floor(width + 0.85)
+            local ab    = alpha * holding
+            local pos   = window.pos
 
-            for i = 4, 1, -1 do
-                local ga = math.floor(8 * ab * (5 - i) / 4)
-                renderer.rectangle(pos.x - i, pos.y - i, box_w + i*2, hdr_h + i*2, r, g, b, ga)
-            end
-
-            renderer.rectangle(pos.x, pos.y, box_w, hdr_h, 6, 6, 9, math.floor(248 * ab))
-            renderer.rectangle(pos.x + 4, pos.y + 1, box_w - 8, 1, 255, 255, 255, math.floor(8 * ab))
-            renderer.rectangle(pos.x, pos.y, 4, hdr_h, r, g, b, ha)
-            renderer.rectangle(pos.x, pos.y, 2, hdr_h,
-                math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
-                math.floor(135 * ab))
-            renderer.rectangle(pos.x, pos.y, 1, hdr_h, 255, 255, 255, math.floor(32 * ab))
-            renderer.rectangle(pos.x + 4, pos.y + hdr_h - 1, box_w - 4, 1, r, g, b, math.floor(105 * ab))
-
-            local htx = pos.x + math.floor((box_w - hw) * 0.5)
-            local hty = pos.y + math.floor((hdr_h - hh) * 0.5)
-            renderer.text(htx + 1, hty + 1, 0, 0, 0, math.floor(55 * ab), flags, 0, hdr_label)
-            renderer.text(htx,     hty,     r, g, b, math.floor(215 * ab), flags, 0, hdr_label)
-
-            local row_y = pos.y + hdr_h
+            -- ── Clean text rows (no header, no boxes) ─────────────────────────
+            local row_y = pos.y
 
             for _, v in pairs(active_keys) do
                 local fade_a = math.min(1.0, alpha * v.alpha * 1.25)
@@ -4804,30 +4780,22 @@ LPH_NO_VIRTUALIZE(function ()
                 local rh = utils.round(ROW_H * fade_a)
                 if rh < 2 then goto skip end
 
-                renderer.rectangle(pos.x, row_y, box_w, rh, 10, 10, 13, math.floor(228 * row_ab))
-                renderer.rectangle(pos.x, row_y, 4, rh, r, g, b, math.floor(190 * row_ab))
-                renderer.rectangle(pos.x, row_y, 2, rh,
-                    math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
-                    math.floor(130 * row_ab))
-                renderer.rectangle(pos.x + 4, row_y + rh - 1, box_w - 4, 1, 28, 28, 34, math.floor(120 * row_ab))
-
                 local ty2 = row_y + math.floor((rh - v.height) * 0.5)
 
-                renderer.text(pos.x + 7, ty2, r, g, b, math.floor(row_a * 0.55), flags, 0, "\xE2\x96\xB8")
-                renderer.text(pos.x + PAD_X + 6, ty2, 205, 205, 215, row_a, flags, 0, v.name)
+                -- Feature name with shadow (white/grey)
+                renderer.text(pos.x + 1, ty2 + 1, 0, 0, 0, math.floor(90 * row_ab), flags, 0, v.name)
+                renderer.text(pos.x, ty2, 200, 200, 210, row_a, flags, 0, v.name)
 
-                local badge_x = pos.x + box_w - PAD_X - v.mode_width - 5
-                renderer.rectangle(badge_x - 4, ty2 - 1, v.mode_width + 8, v.height + 2,
-                    r, g, b, math.floor(32 * row_ab))
-                renderer.rectangle(badge_x - 4, ty2 - 1, 1, v.height + 2,
-                    r, g, b, math.floor(160 * row_ab))
-                renderer.text(badge_x, ty2, r, g, b, math.floor(row_a * 0.92), flags, 0, v.mode)
+                -- Mode badge with shadow (accent color)
+                local badge_x = pos.x + box_w - v.mode_width
+                renderer.text(badge_x + 1, ty2 + 1, 0, 0, 0, math.floor(80 * row_ab), flags, 0, v.mode)
+                renderer.text(badge_x, ty2, r, g, b, math.floor(row_a * 0.95), flags, 0, v.mode)
 
                 row_y = row_y + rh
                 ::skip::
             end
 
-            window:set_size(vector(box_w, hdr_h))
+            window:set_size(vector(box_w, 16))
             window:update()
         end
     end
@@ -4947,101 +4915,42 @@ LPH_NO_VIRTUALIZE(function ()
 
             if alpha <= 0 then return end
 
-            -- ── Crosshair indicator ───────────────────────────────────────────
+            -- ── Clean crosshair indicator (Valkyrie style) ───────────────────
             local cx = center.x + utils.round(10 * align)
-            local cy = center.y + 20
+            local cy = center.y + 18
+            local dflags = "d"
 
-            local state_icons = {
-                EDGE   = "\xE2\x97\x86",
-                SAFE   = "\xE2\x9C\x93",
-                AIR    = "\xE2\x96\xB2",
-                CROUCH = "\xE2\x96\xBC",
-                WALK   = "\xE2\x96\xB8",
-                RUN    = "\xE2\x96\xB6",
-                STAND  = "\xE2\x96\xA0",
-            }
-            local feat_icons = {
-                DT  = "\xE2\x96\xB6\xE2\x96\xB6",
-                OS  = "\xE2\x97\x8E",
-                FD  = "\xE2\x96\xBC",
-                DMG = "\xE2\x96\xA0",
-            }
+            -- "ZENITH" brand - clean centered text with shadow
+            local brand = "ZENITH"
+            local bw, bh = renderer.measure_text(dflags, brand)
+            local bx = cx - utils.round(bw * 0.5 * (1 - align * 0.5))
 
-            do
-                local state  = get_statement()
-                local icon   = state_icons[state] or "\xE2\x80\xA2"
-                local display_text = icon .. "  " .. state
-                local dflags = "d"
-                local tw, th = renderer.measure_text(dflags, display_text)
-                local BPAD   = 9
-                local bw     = tw + BPAD * 2 + 4
-                local bh     = th + 9
-                local bx = cx - utils.round(bw * 0.5 * (1 - align * 0.45))
-                local by = cy
+            -- Shadow
+            renderer.text(bx + 1, cy + 1, 0, 0, 0, math.floor(120 * alpha), dflags, 0, brand)
+            -- Main text
+            renderer.text(bx, cy, r, g, b, math.floor(255 * alpha), dflags, 0, brand)
 
-                for i = 5, 1, -1 do
-                    local ga = math.floor(7 * alpha * (6 - i) / 5)
-                    renderer.rectangle(bx - i, by - i, bw + i*2, bh + i*2, r, g, b, ga)
-                end
-                renderer.rectangle(bx, by, bw, bh, 6, 6, 9, math.floor(248 * alpha))
-                renderer.rectangle(bx + 4, by + 1, bw - 8, 1, 255, 255, 255, math.floor(10 * alpha))
-                renderer.rectangle(bx, by, 4, bh, r, g, b, math.floor(255 * alpha))
-                renderer.rectangle(bx, by, 2, bh,
-                    math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
-                    math.floor(145 * alpha))
-                renderer.rectangle(bx, by, 1, bh, 255, 255, 255, math.floor(38 * alpha))
-                renderer.rectangle(bx + 4, by + bh - 1, bw - 4, 1, r, g, b, math.floor(115 * alpha))
+            cy = cy + bh + 4
 
-                local sub_label = "ZENITH  3.0"
-                local slw, slh  = renderer.measure_text(dflags, sub_label)
-                local slx = bx + math.floor((bw - slw) * 0.5)
-                renderer.text(slx, by - slh - 3,
-                    math.floor(r * 0.6), math.floor(g * 0.6), math.floor(b * 0.6),
-                    math.floor(170 * alpha), dflags, 0, sub_label)
-
-                local ttx = bx + BPAD + 4
-                local tty = by + math.floor((bh - th) * 0.5)
-                renderer.text(ttx + 1, tty + 1, 0, 0, 0, math.floor(55 * alpha), dflags, 0, display_text)
-                renderer.text(ttx,     tty,     r, g, b, math.floor(255 * alpha), dflags, 0, display_text)
-                cy = cy + bh + 3
-            end
-
+            -- Feature tags - clean text only, no boxes
             for i = 1, #features do
-                local feat   = features[i]
-                feat.alpha   = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
-                feat.hold_a  = motion.interp(feat.hold_a, feat.alpha > 0.5 and 1 or 0, 0.08)
+                local feat = features[i]
+                feat.alpha  = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
+                feat.hold_a = motion.interp(feat.hold_a, feat.alpha > 0.5 and 1 or 0, 0.08)
                 if feat.alpha <= 0.02 then goto cont end
 
                 do
-                    local fa     = feat.alpha * alpha
-                    local dflags = "d"
-                    local icon   = feat_icons[feat.text] or "\xE2\x96\xB8"
-                    local display_text = icon .. "  " .. feat.text
-                    local tw, th = renderer.measure_text(dflags, display_text)
-                    local BPAD   = 7
-                    local bw     = tw + BPAD * 2 + 4
-                    local bh     = th + 7
-                    local bx     = cx - utils.round(bw * 0.5 * (1 - align))
-                    local by     = cy
+                    local fa = feat.alpha * alpha
+                    local tw, th = renderer.measure_text(dflags, feat.text)
+                    local tx = cx - utils.round(tw * 0.5 * (1 - align * 0.5))
+                    local ty = cy
 
-                    for j = 3, 1, -1 do
-                        local ga = math.floor(7 * fa * (4 - j) / 3)
-                        renderer.rectangle(bx - j, by - j, bw + j*2, bh + j*2, r, g, b, ga)
-                    end
-                    renderer.rectangle(bx, by, bw, bh, 7, 7, 10, math.floor(235 * fa))
-                    renderer.rectangle(bx + 4, by + 1, bw - 8, 1, 255, 255, 255, math.floor(7 * fa))
-                    renderer.rectangle(bx, by, 4, bh, r, g, b, math.floor(230 * fa))
-                    renderer.rectangle(bx, by, 2, bh,
-                        math.min(255, r + 65), math.min(255, g + 65), math.min(255, b + 65),
-                        math.floor(130 * fa))
-                    renderer.rectangle(bx, by, 1, bh, 255, 255, 255, math.floor(30 * fa))
-                    renderer.rectangle(bx + 4, by + bh - 1, bw - 4, 1, r, g, b, math.floor(120 * fa))
+                    -- Shadow
+                    renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(100 * fa), dflags, 0, feat.text)
+                    -- Main text
+                    renderer.text(tx, ty, r, g, b, math.floor(255 * fa), dflags, 0, feat.text)
 
-                    local ttx = bx + BPAD + 4
-                    local tty = by + math.floor((bh - th) * 0.5)
-                    renderer.text(ttx + 1, tty + 1, 0, 0, 0, math.floor(45 * fa), dflags, 0, display_text)
-                    renderer.text(ttx,     tty,     r, g, b, math.floor(255 * fa), dflags, 0, display_text)
-                    cy = cy + utils.round((bh + 3) * feat.alpha)
+                    cy = cy + utils.round((th + 3) * feat.alpha)
                 end
                 ::cont::
             end
@@ -6907,7 +6816,7 @@ do
     local cur_sel  = 1
     local MAX_ROWS = 8
 
-    local m_header  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles','Cloud Configs ─────────────────')
+    local m_header  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles','Cloud Configs ─────���───────────')
     local m_rows    = {}
     for i=1,MAX_ROWS do
         m_rows[i] = menu.new_item(ui.new_label, 'AA','Anti-aimbot angles',' ')
