@@ -2783,21 +2783,21 @@ do
     local function show_state_items(s)
         local p = ab[s]
         _safe_display(p.enableState)
-        local en = (s == 1) or p.enableState:get()
+        local en = (s == 1) or p.enableState:rawget()
         if not en then return end
 
         _safe_display(p.pitch)
-        if p.pitch:get() == "Custom" then _safe_display(p.pitchSlider) end
+        if p.pitch:rawget() == "Custom" then _safe_display(p.pitchSlider) end
         _safe_display(p.yawBase)
         _safe_display(p.yaw)
-        local ym = p.yaw:get()
+        local ym = p.yaw:rawget()
         if ym == "Slow Yaw" or ym == "L&R" then
             _safe_display(p.yawLeft); _safe_display(p.yawRight); _safe_display(p.yawDelay)
         elseif ym ~= "Off" then
             _safe_display(p.yawStatic)
         end
         _safe_display(p.yawJitter)
-        local jm = p.yawJitter:get()
+        local jm = p.yawJitter:rawget()
         if jm == "L&R" then
             _safe_display(p.yawJitterLeft); _safe_display(p.yawJitterRight); _safe_display(p.yawDelay)
         elseif jm == "3-Way" then
@@ -2806,18 +2806,18 @@ do
             _safe_display(p.yawJitterStatic)
         end
         _safe_display(p.bodyYaw)
-        if p.bodyYaw:get() ~= "Off" and p.bodyYaw:get() ~= "Opposite" then
+        if p.bodyYaw:rawget() ~= "Off" and p.bodyYaw:rawget() ~= "Opposite" then
             _safe_display(p.bodyYawStatic)
         end
         -- Defensive AA
         _safe_display(p.defensiveAA)
-        if p.defensiveAA:get() then
+        if p.defensiveAA:rawget() then
             _safe_display(p.defensiveTriggers)
-            if has(p.defensiveTriggers:get(), "Tick") then
+            if has(p.defensiveTriggers:rawget(), "Tick") then
                 _safe_display(p.defensiveTickTrigger)
             end
             _safe_display(p.defensivePitch)
-            local dpm = p.defensivePitch:get()
+            local dpm = p.defensivePitch:rawget()
             if dpm ~= "Random Logic" then
                 _safe_display(p.defensivePitchMin)
                 if dpm == "Random" or dpm == "Spin" or dpm == "Jitter" or dpm == "Sine Wave" then
@@ -2826,7 +2826,7 @@ do
             end
             if dpm == "Spin" or dpm == "Sine Wave" then _safe_display(p.defensivePitchSpeed) end
             _safe_display(p.defensiveYaw)
-            local dym = p.defensiveYaw:get()
+            local dym = p.defensiveYaw:rawget()
             if dym == "Static" or dym == "Random" then
                 _safe_display(p.defensiveYawStatic)
             elseif dym == "Spin" then
@@ -2941,37 +2941,37 @@ do
         -- update tickbase tracker
         update_def_tracker(lp)
 
-        -- check defensive activation (use original state, not Global fallback)
+        -- check defensive activation
         local is_def = false
-        if p_orig.defensiveAA:get() then
-            local trigs = p_orig.defensiveTriggers:get() or {}
-            -- auto: tickbase shift (DT/hideshot active)
-            if def_tracker.is_def then is_def = true end
-            -- DT or OS active
-            if software.is_double_tap and software.is_double_tap() then is_def = true end
-            if software.is_on_shot_antiaim and software.is_on_shot_antiaim() then is_def = true end
-            -- manual triggers
+        -- DT/OS always trigger defensive regardless of checkbox
+        if software.is_double_tap and software.is_double_tap() then is_def = true end
+        if software.is_on_shot_antiaim and software.is_on_shot_antiaim() then is_def = true end
+        if def_tracker.is_def then is_def = true end
+        -- per-state manual triggers (only when defensive checkbox is on)
+        if p_orig.defensiveAA:rawget() then
+            local trigs = p_orig.defensiveTriggers:rawget() or {}
             if has(trigs,"Always") then is_def = true end
             if has(trigs,"Tick") then
-                local tm = p_orig.defensiveTickTrigger:get()
+                local tm = p_orig.defensiveTickTrigger:rawget()
                 if globals.tickcount() % 16 < tm then is_def = true end
             end
             if has(trigs,"Weapon switch") then
                 if globals.curtime() - def_persistent.last_weapon_switch < 1.0 then is_def = true end
             end
         end
-        -- when defensive fires, use original state settings
-        local pd = is_def and p_orig or p
+        -- when defensive fires, use original state if it has def settings, else Global
+        local def_src = (p_orig.defensiveAA:rawget() and p_orig) or (ab[1].defensiveAA:rawget() and ab[1]) or p_orig
+        local pd = is_def and def_src or p
 
         -- yaw base
-        ctx.yaw_base = p.yawBase:get()
+        ctx.yaw_base = p.yawBase:rawget()
 
         if is_def then
             -- ── Defensive pitch ───────────────────────────────────────
-            local dpm   = pd.defensivePitch:get()
-            local dmin  = pd.defensivePitchMin:get()
-            local dmax  = pd.defensivePitchMax:get()
-            local dspd  = pd.defensivePitchSpeed:get()
+            local dpm   = pd.defensivePitch:rawget()
+            local dmin  = pd.defensivePitchMin:rawget()
+            local dmax  = pd.defensivePitchMax:rawget()
+            local dspd  = pd.defensivePitchSpeed:rawget()
             local rmin  = math.min(dmin,dmax); local rmax = math.max(dmin,dmax)
             ctx.pitch = "Custom"
             if dpm == "Static" then
@@ -2995,27 +2995,27 @@ do
             end
 
             -- ── Defensive yaw ─────────────────────────────────────────
-            local dym  = pd.defensiveYaw:get()
-            local dys  = pd.defensiveYawStatic:get()
+            local dym  = pd.defensiveYaw:rawget()
+            local dys  = pd.defensiveYawStatic:rawget()
             ctx.yaw = "180"
             if dym == "Static" then
                 ctx.yaw_offset = dys
             elseif dym == "Random" then
                 ctx.yaw_offset = math.random(-180,180)
             elseif dym == "Spin" then
-                local sl = pd.defensiveYawSpinLeft:get()
-                local sr = pd.defensiveYawSpinRight:get()
-                local ss = pd.defensiveYawSpinSpeed:get()
+                local sl = pd.defensiveYawSpinLeft:rawget()
+                local sr = pd.defensiveYawSpinRight:rawget()
+                local ss = pd.defensiveYawSpinSpeed:rawget()
                 def_persistent.yaw_spin = def_persistent.yaw_spin + ss
                 if def_persistent.yaw_spin > sr then def_persistent.yaw_spin = sl end
                 ctx.yaw_offset = def_persistent.yaw_spin
             elseif dym == "Jitter" then
-                local range = pd.defensiveYawJitterRange:get()
-                local delay = pd.defensiveYawJitterDelay:get()
+                local range = pd.defensiveYawJitterRange:rawget()
+                local delay = pd.defensiveYawJitterDelay:rawget()
                 ctx.yaw_offset = globals.tickcount() % (delay*2) < delay and range or -range
             elseif dym == "Logic Shift" then
-                local range = pd.defensiveYawJitterRange:get()
-                local delay = pd.defensiveYawJitterDelay:get()
+                local range = pd.defensiveYawJitterRange:rawget()
+                local delay = pd.defensiveYawJitterDelay:rawget()
                 local shift = (globals.tickcount()%32 < 16) and 0 or (globals.tickcount()%64 < 32 and 90 or -90)
                 local jitter = globals.tickcount() % (delay*2) < delay and range or -range
                 ctx.yaw_offset = norm_yaw(shift + jitter)
@@ -3037,57 +3037,57 @@ do
             end
             -- body yaw from current state (if not set by Zenith Bypass)
             if not ctx.body_yaw then
-                local bm = pd.bodyYaw:get()
+                local bm = pd.bodyYaw:rawget()
                 if bm ~= "Off" then
                     ctx.body_yaw = bm
-                    if bm ~= "Opposite" then ctx.body_yaw_offset = pd.bodyYawStatic:get() end
+                    if bm ~= "Opposite" then ctx.body_yaw_offset = pd.bodyYawStatic:rawget() end
                 end
             end
         else
             -- ── Normal pitch ──────────────────────────────────────────
-            local pm = p.pitch:get()
+            local pm = p.pitch:rawget()
             if pm == "Custom" then
-                ctx.pitch = "Custom"; ctx.pitch_offset = p.pitchSlider:get()
+                ctx.pitch = "Custom"; ctx.pitch_offset = p.pitchSlider:rawget()
             elseif pm ~= "Off" then
                 ctx.pitch = pm
             end
             -- "Off" = don't override pitch
 
             -- ── Normal yaw ────────────────────────────────────────────
-            local ym     = p.yaw:get()
-            local yd     = p.yawDelay:get()
+            local ym     = p.yaw:rawget()
+            local yd     = p.yawDelay:rawget()
             local ysw    = globals.tickcount() % (yd*2) < yd
             if ym ~= "Off" then
                 ctx.yaw = "180"
                 if ym == "Slow Yaw" or ym == "L&R" then
-                    ctx.yaw_offset = ysw and p.yawLeft:get() or p.yawRight:get()
+                    ctx.yaw_offset = ysw and p.yawLeft:rawget() or p.yawRight:rawget()
                 else
-                    ctx.yaw_offset = p.yawStatic:get()
+                    ctx.yaw_offset = p.yawStatic:rawget()
                 end
             end
             -- "Off" = don't override yaw, let GS native handle it
 
             -- ── Jitter ────────────────────────────────────────────────
-            local jm = p.yawJitter:get()
+            local jm = p.yawJitter:rawget()
             if jm == "L&R" then
                 local jsw = globals.tickcount() % (yd*2) < yd
                 ctx.yaw_jitter  = "Center"
-                ctx.jitter_offset = jsw and p.yawJitterLeft:get() or p.yawJitterRight:get()
+                ctx.jitter_offset = jsw and p.yawJitterLeft:rawget() or p.yawJitterRight:rawget()
             elseif jm == "3-Way" then
                 ctx.yaw_jitter  = "Center"
-                local ways = {p.wayFirst:get(), p.waySecond:get(), p.wayThird:get()}
+                local ways = {p.wayFirst:rawget(), p.waySecond:rawget(), p.wayThird:rawget()}
                 ctx.jitter_offset = ways[(globals.tickcount()%3)+1]
             elseif jm ~= "Off" then
                 ctx.yaw_jitter  = jm
-                ctx.jitter_offset = p.yawJitterStatic:get()
+                ctx.jitter_offset = p.yawJitterStatic:rawget()
             end
 
             -- ── Body yaw ──────────────────────────────────────────────
-            local bm = p.bodyYaw:get()
+            local bm = p.bodyYaw:rawget()
             if bm ~= "Off" then
                 ctx.body_yaw = bm
                 if bm ~= "Opposite" then
-                    ctx.body_yaw_offset = p.bodyYawStatic:get()
+                    ctx.body_yaw_offset = p.bodyYawStatic:rawget()
                 end
             end
         end
