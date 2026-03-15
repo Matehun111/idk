@@ -2637,6 +2637,50 @@ do
     local manual_side    = nil
     local def_persistent = { yaw_spin=0, pitch_spin=0, last_weapon_switch=0 }
 
+    -- Tickbase shift tracker (detects DT/hideshot = defensive active)
+    local def_tracker = {
+        max_tb=0, is_def=false, last_valid=0, record_count=0,
+        smoothing=3, ticks_count=0, invalid={}, history={}
+    }
+    local function reset_def_tracker()
+        def_tracker.max_tb=0; def_tracker.is_def=false; def_tracker.last_valid=0
+        def_tracker.record_count=0; def_tracker.ticks_count=0
+        def_tracker.invalid={}; def_tracker.history={}
+    end
+    local function update_def_tracker(lp)
+        if not lp or not entity.is_alive(lp) then reset_def_tracker(); return end
+        local tc = globals.tickcount()
+        local tb = entity.get_prop(lp,"m_nTickBase") or 0
+        local shifted = tb < tc
+        if math.abs(tb - def_tracker.max_tb) > 64 and shifted then reset_def_tracker() end
+        if tb > def_tracker.max_tb then
+            def_tracker.max_tb = tb
+            if not def_tracker.invalid[tb] then
+                def_tracker.record_count = def_tracker.record_count + 1
+                def_tracker.last_valid = tb
+            end
+        elseif tb < def_tracker.max_tb then
+            local diff = def_tracker.max_tb - tb
+            if shifted and diff >= 1 and diff <= 14 then
+                table.insert(def_tracker.history, diff)
+                if #def_tracker.history > def_tracker.smoothing then
+                    table.remove(def_tracker.history, 1)
+                end
+            else
+                def_tracker.history = {}
+            end
+            local total = 0
+            for _,v in ipairs(def_tracker.history) do total=total+v end
+            def_tracker.ticks_count = #def_tracker.history>0 and total/#def_tracker.history or 0
+        end
+        def_tracker.is_def = def_tracker.ticks_count >= 1 and def_tracker.ticks_count <= 14
+        if def_tracker.record_count >= 2 then
+            def_tracker.invalid[def_tracker.last_valid] = true
+            def_tracker.record_count=0; def_tracker.last_valid=0; def_tracker.history={}
+        end
+    end
+    client.set_event_callback("round_start", reset_def_tracker)
+
     -- CT/T persistence
     local aa_persistence = { CT={}, T={} }
     local aa_last_team   = "CT"
@@ -2880,10 +2924,19 @@ do
             return
         end
 
+        -- update tickbase tracker
+        update_def_tracker(lp)
+
         -- check defensive activation
         local is_def = false
         if p.defensiveAA:get() then
             local trigs = p.defensiveTriggers:get() or {}
+            -- auto: tickbase shift (DT/hideshot active)
+            if def_tracker.is_def then is_def = true end
+            -- DT or OS active
+            if software.is_double_tap and software.is_double_tap() then is_def = true end
+            if software.is_on_shot_antiaim and software.is_on_shot_antiaim() then is_def = true end
+            -- manual triggers
             if has(trigs,"Always") then is_def = true end
             if has(trigs,"Tick") then
                 local tm = p.defensiveTickTrigger:get()
