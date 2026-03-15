@@ -979,7 +979,7 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff�  \a666666ffElegance in Execution.')
+    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff�  \a666666ffElegance in Execution.')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -2974,25 +2974,42 @@ do
             local dmax  = pd.defensivePitchMax:rawget()
             local dspd  = pd.defensivePitchSpeed:rawget()
             local rmin  = math.min(dmin,dmax); local rmax = math.max(dmin,dmax)
-            ctx.pitch = "Custom"
+            
+            -- Ensure pitch is applied - use Down/Up for extreme values, Custom for specific offsets
             if dpm == "Static" then
-                ctx.pitch_offset = dmin
-            elseif dpm == "Random" then
-                ctx.pitch_offset = math.random(rmin,rmax)
-            elseif dpm == "Spin" then
-                def_persistent.pitch_spin = def_persistent.pitch_spin + dspd/2
-                if def_persistent.pitch_spin > rmax or def_persistent.pitch_spin < rmin then
-                    def_persistent.pitch_spin = rmin
+                if dmin == -89 then
+                    ctx.pitch = "Up"
+                elseif dmin == 89 then
+                    ctx.pitch = "Down"
+                else
+                    ctx.pitch = "Custom"
+                    ctx.pitch_offset = dmin
                 end
-                ctx.pitch_offset = def_persistent.pitch_spin
+            elseif dpm == "Random" then
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = math.random(rmin, rmax)
+            elseif dpm == "Spin" then
+                -- Improved spin: smooth continuous rotation
+                def_persistent.pitch_spin = def_persistent.pitch_spin + (dspd * 0.5)
+                if def_persistent.pitch_spin > rmax then
+                    def_persistent.pitch_spin = rmin
+                elseif def_persistent.pitch_spin < rmin then
+                    def_persistent.pitch_spin = rmax
+                end
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = math.floor(def_persistent.pitch_spin)
             elseif dpm == "Jitter" then
-                local t = globals.tickcount() % (dspd*2) < dspd
+                local t = globals.tickcount() % (dspd * 2) < dspd
+                ctx.pitch = "Custom"
                 ctx.pitch_offset = t and dmin or dmax
             elseif dpm == "Sine Wave" then
-                ctx.pitch_offset = math.sin(globals.curtime()*dspd) * (rmax-rmin)/2 + (rmax+rmin)/2
+                local wave = math.sin(globals.curtime() * dspd * 0.5) * (rmax - rmin) / 2 + (rmax + rmin) / 2
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = math.floor(wave)
             elseif dpm == "Random Logic" then
-                local r = math.random(0,100)
-                ctx.pitch_offset = r > 80 and 0 or (math.random(0,1)==0 and 89 or -89)
+                local r = math.random(0, 100)
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = r > 80 and 0 or (math.random(0, 1) == 0 and 89 or -89)
             end
 
             -- ── Defensive yaw ─────────────────────────────────────────
@@ -3007,9 +3024,16 @@ do
                 local sl = pd.defensiveYawSpinLeft:rawget()
                 local sr = pd.defensiveYawSpinRight:rawget()
                 local ss = pd.defensiveYawSpinSpeed:rawget()
-                def_persistent.yaw_spin = def_persistent.yaw_spin + ss
-                if def_persistent.yaw_spin > sr then def_persistent.yaw_spin = sl end
-                ctx.yaw_offset = def_persistent.yaw_spin
+                -- Improved spin: continuous smooth rotation through full range
+                def_persistent.yaw_spin = def_persistent.yaw_spin + (ss * 2)
+                local spin_min = math.min(sl, sr)
+                local spin_max = math.max(sl, sr)
+                if def_persistent.yaw_spin > spin_max then 
+                    def_persistent.yaw_spin = spin_min 
+                elseif def_persistent.yaw_spin < spin_min then
+                    def_persistent.yaw_spin = spin_max
+                end
+                ctx.yaw_offset = norm_yaw(def_persistent.yaw_spin)
             elseif dym == "Jitter" then
                 local range = pd.defensiveYawJitterRange:rawget()
                 local delay = pd.defensiveYawJitterDelay:rawget()
@@ -4283,57 +4307,96 @@ LPH_NO_VIRTUALIZE(function ()
                 tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
             end
 
-            -- THEME C: sharp, left strip, accent brand, dim tokens
-            local LOGO_W  = texture ~= nil and 22 or 0
-            local PAD_X   = 8
-            local PAD_Y   = 5
-            local SEP_GAP = 8
-            local brand   = "Zenith"
+            -- FANCY WATERMARK with glow, icons, and modern styling
+            local LOGO_W  = texture ~= nil and 24 or 0
+            local PAD_X   = 10
+            local PAD_Y   = 6
+            local SEP_GAP = 10
+            local brand   = "ZENITH"
             local bw, bh  = renderer.measure_text(flags, brand)
-            local dot_str = " · "
+            local dot_str = "  |  "
             local dw      = renderer.measure_text(flags, dot_str)
             local tok_w   = 0
+            
+            -- Icon characters for different stats
+            local icons = {
+                Username = ">>",
+                Latency = "~",
+                FPS = "#",
+                Time = "@",
+            }
+            
             for _, t in ipairs(tokens) do
                 tok_w = tok_w + renderer.measure_text(flags, t.label)
             end
             if #tokens > 1 then tok_w = tok_w + (#tokens - 1) * dw end
 
             local has_tok = #tokens > 0
-            local sep_blk = has_tok and (SEP_GAP * 2 + 1) or 0
-            local box_w   = 2 + LOGO_W + PAD_X * 2 + bw + sep_blk + tok_w
-            local box_h   = bh + PAD_Y * 2
-            local px      = screen.x - 8 - box_w
-            local py      = 8
+            local sep_blk = has_tok and (SEP_GAP * 2 + 2) or 0
+            local box_w   = 3 + LOGO_W + PAD_X * 2 + bw + sep_blk + tok_w
+            local box_h   = bh + PAD_Y * 2 + 2
+            local px      = screen.x - 10 - box_w
+            local py      = 10
 
-            -- flat dark bg, NO radius
-            renderer.rectangle(px, py, box_w, box_h, 9, 9, 12, math.floor(210 * a))
-            -- left accent strip, full height
-            renderer.rectangle(px, py, 2, box_h, r, g, b, ia)
+            -- Animated glow effect
+            glow_t = glow_t + globals.frametime() * 2
+            local glow_pulse = 0.7 + 0.3 * math.sin(glow_t)
+            
+            -- Outer glow (accent color, subtle)
+            for i = 3, 1, -1 do
+                local glow_a = math.floor(15 * glow_pulse * a * (4 - i) / 3)
+                renderer.rectangle(px - i, py - i, box_w + i*2, box_h + i*2, r, g, b, glow_a)
+            end
+            
+            -- Main background with gradient effect (darker at edges)
+            renderer.rectangle(px, py, box_w, box_h, 12, 12, 16, math.floor(235 * a))
+            renderer.rectangle(px, py, box_w, 1, 20, 20, 26, math.floor(180 * a))
+            
+            -- Left accent strip with gradient
+            renderer.rectangle(px, py, 3, box_h, r, g, b, ia)
+            renderer.rectangle(px, py, 1, box_h, 
+                math.min(255, r + 60), math.min(255, g + 60), math.min(255, b + 60), 
+                math.floor(180 * a))
+            
+            -- Bottom accent line
+            renderer.rectangle(px + 3, py + box_h - 1, box_w - 3, 1, r, g, b, math.floor(80 * a))
 
             if texture ~= nil then
-                renderer.texture(texture, px + 2 + PAD_X, py + (box_h - 20) * 0.5,
-                    20, 20, 255, 255, 255, math.floor(195 * a), "f")
+                renderer.texture(texture, px + 3 + PAD_X, py + (box_h - 22) * 0.5,
+                    22, 22, 255, 255, 255, math.floor(220 * a), "f")
             end
 
-            local tx = px + 2 + LOGO_W + PAD_X
+            local tx = px + 3 + LOGO_W + PAD_X
             local ty = py + (box_h - bh) * 0.5
+            
+            -- Brand name with accent color and slight shadow
+            renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(60 * a), flags, 0, brand)
             renderer.text(tx, ty, r, g, b, ia, flags, 0, brand)
             tx = tx + bw
 
             if has_tok then
-                renderer.rectangle(tx + SEP_GAP, py + 3, 1, box_h - 6,
-                    40, 40, 46, math.floor(180 * a))
+                -- Vertical separator with glow
+                local sep_x = tx + SEP_GAP
+                renderer.rectangle(sep_x, py + 4, 2, box_h - 8, r, g, b, math.floor(40 * a))
+                renderer.rectangle(sep_x, py + 4, 1, box_h - 8, 50, 50, 58, math.floor(200 * a))
                 tx = tx + sep_blk
+                
                 for i, t in ipairs(tokens) do
-                    local cr = t.accent and 200 or 104
-                    local cg = t.accent and 200 or 104
-                    local cb = t.accent and 206 or 110
-                    local ca = math.floor((t.accent and 230 or 190) * a)
+                    local cr = t.accent and r or 180
+                    local cg = t.accent and g or 180
+                    local cb = t.accent and b or 186
+                    local ca = math.floor((t.accent and 255 or 220) * a)
                     local tw2 = renderer.measure_text(flags, t.label)
+                    
+                    -- Token with subtle glow for accent items
+                    if t.accent then
+                        renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(40 * a), flags, 0, t.label)
+                    end
                     renderer.text(tx, ty, cr, cg, cb, ca, flags, 0, t.label)
                     tx = tx + tw2
+                    
                     if i < #tokens then
-                        renderer.text(tx, ty, 38, 38, 44, math.floor(140 * a), flags, 0, dot_str)
+                        renderer.text(tx, ty, 45, 45, 52, math.floor(160 * a), flags, 0, dot_str)
                         tx = tx + dw
                     end
                 end
@@ -4577,27 +4640,48 @@ LPH_NO_VIRTUALIZE(function ()
             if alpha <= 0 then return end
 
             local r, g, b = widgets.color_picker:get()
-            local PAD_X = 9
-            local ROW_H = 16
+            local PAD_X = 10
+            local ROW_H = 18
 
-            local hw, hh = renderer.measure_text(flags, "keybinds")
+            -- Fancy header with icon
+            local header_text = "[ KEYBINDS ]"
+            local hw, hh = renderer.measure_text(flags, header_text)
             local min_w  = PAD_X * 4 + hw
-            local row_w  = name_width + 10 + badge_width + PAD_X * 2
-            width = motion.interp(width, math.max(min_w, row_w, 115), 0.045)
+            local row_w  = name_width + 14 + badge_width + PAD_X * 2
+            width = motion.interp(width, math.max(min_w, row_w, 130), 0.045)
 
             local box_w = math.floor(width + 0.85)
-            local hdr_h = hh + 6
+            local hdr_h = hh + 8
             local ha    = math.floor(255 * alpha * holding)
             local pos   = window.pos
 
-            -- THEME C header: flat, sharp, full-height strip, very dim label
-            renderer.rectangle(pos.x, pos.y, box_w, hdr_h, 9, 9, 12,
-                math.floor(210 * alpha * holding))
-            renderer.rectangle(pos.x, pos.y, 2, hdr_h, r, g, b, ha)
+            -- FANCY header with glow and gradient
+            -- Outer glow
+            for i = 2, 1, -1 do
+                local glow_a = math.floor(10 * alpha * holding * (3 - i) / 2)
+                renderer.rectangle(pos.x - i, pos.y - i, box_w + i*2, hdr_h + i*2, r, g, b, glow_a)
+            end
+            
+            -- Header background with subtle gradient
+            renderer.rectangle(pos.x, pos.y, box_w, hdr_h, 14, 14, 18, math.floor(240 * alpha * holding))
+            renderer.rectangle(pos.x, pos.y, box_w, 1, 22, 22, 28, math.floor(160 * alpha * holding))
+            
+            -- Left accent strip with gradient effect
+            renderer.rectangle(pos.x, pos.y, 3, hdr_h, r, g, b, ha)
+            renderer.rectangle(pos.x, pos.y, 1, hdr_h, 
+                math.min(255, r + 50), math.min(255, g + 50), math.min(255, b + 50), 
+                math.floor(160 * alpha * holding))
+            
+            -- Header text with subtle shadow
+            renderer.text(
+                pos.x + (box_w - hw) * 0.5 + 1,
+                pos.y + (hdr_h - hh) * 0.5 + 1,
+                0, 0, 0, math.floor(40 * alpha * holding), flags, 0, header_text
+            )
             renderer.text(
                 pos.x + (box_w - hw) * 0.5,
                 pos.y + (hdr_h - hh) * 0.5,
-                80, 80, 86, ha, flags, 0, "keybinds"
+                r, g, b, math.floor(200 * alpha * holding), flags, 0, header_text
             )
 
             local row_y = pos.y + hdr_h + 1
@@ -4610,19 +4694,27 @@ LPH_NO_VIRTUALIZE(function ()
                 local rh = utils.round(ROW_H * fade_a)
                 if rh < 2 then goto skip end
 
-                -- flat row, no radius
-                renderer.rectangle(pos.x, row_y, box_w, rh, 9, 9, 11,
-                    math.floor(190 * fade_a * holding))
-                -- half-bright strip
-                renderer.rectangle(pos.x, row_y, 2, rh,
-                    r, g, b, math.floor(130 * fade_a * holding))
+                -- Row background with subtle gradient
+                renderer.rectangle(pos.x, row_y, box_w, rh, 12, 12, 15, math.floor(220 * fade_a * holding))
+                
+                -- Left accent strip
+                renderer.rectangle(pos.x, row_y, 3, rh, r, g, b, math.floor(180 * fade_a * holding))
+                
+                -- Bottom separator line
+                renderer.rectangle(pos.x + 3, row_y + rh - 1, box_w - 3, 1, 25, 25, 30, math.floor(100 * fade_a * holding))
 
                 local ty2 = row_y + (rh - v.height) * 0.5
-                renderer.text(pos.x + PAD_X, ty2,
-                    200, 200, 208, row_a, flags, 0, v.name)
-                -- mode: plain accent text, no badge bg
-                renderer.text(pos.x + box_w - PAD_X - v.mode_width, ty2,
-                    r, g, b, math.floor(row_a * 0.85), flags, 0, v.mode)
+                
+                -- Feature icon bullet
+                renderer.text(pos.x + 6, ty2, r, g, b, math.floor(row_a * 0.6), flags, 0, ">")
+                
+                -- Feature name
+                renderer.text(pos.x + PAD_X + 6, ty2, 210, 210, 218, row_a, flags, 0, v.name)
+                
+                -- Mode badge with background
+                local badge_x = pos.x + box_w - PAD_X - v.mode_width - 6
+                renderer.rectangle(badge_x - 3, ty2 - 1, v.mode_width + 6, v.height + 2, r, g, b, math.floor(35 * fade_a * holding))
+                renderer.text(badge_x, ty2, r, g, b, math.floor(row_a * 0.95), flags, 0, v.mode)
 
                 row_y = row_y + rh + 1
                 ::skip::
@@ -4748,30 +4840,71 @@ LPH_NO_VIRTUALIZE(function ()
 
             if alpha <= 0 then return end
 
-            -- -- crosshair block --------------------------------------
+            -- -- FANCY crosshair indicator --------------------------------------
             local cx = center.x + utils.round(10 * align)
             local cy = center.y + 22
+            
+            -- State icons mapping
+            local state_icons = {
+                EDGE = "[E]",
+                SAFE = "[S]",
+                AIR = "[^]",
+                CROUCH = "[C]",
+                WALK = "[~]",
+                RUN = "[>]",
+                STAND = "[=]"
+            }
+            
+            -- Feature icons
+            local feat_icons = {
+                DT = ">>",
+                OS = "<>",
+                FD = "[]",
+                DMG = "##"
+            }
 
-            -- THEME C: state badge, sharp corners, full-height left strip
+            -- FANCY state badge with glow and modern styling
             do
                 local state  = get_statement()
+                local icon   = state_icons[state] or "[?]"
+                local display_text = icon .. " " .. state
                 local dflags = "d"
-                local tw, th = renderer.measure_text(dflags, state)
+                local tw, th = renderer.measure_text(dflags, display_text)
                 tw = tw + 1
-                local BPAD = 6
-                local bw   = tw + BPAD * 2 + 2
-                local bh   = th + 6
+                local BPAD = 8
+                local bw   = tw + BPAD * 2 + 3
+                local bh   = th + 8
                 local bx   = cx - utils.round((bw * 0.5) * (1 - align * 0.5) + (tw * 0.5) * align)
                 local by   = cy
 
-                renderer.rectangle(bx, by, bw, bh, 9, 9, 12, math.floor(210 * alpha))
-                renderer.rectangle(bx, by, 2, bh, r, g, b, math.floor(225 * alpha))
-                renderer.text(bx + BPAD + 2, by + (bh - th) * 0.5,
-                    208, 208, 216, math.floor(240 * alpha), dflags, 0, state)
-                cy = cy + bh + 2
+                -- Outer glow effect
+                for i = 2, 1, -1 do
+                    local glow_a = math.floor(12 * alpha * (3 - i) / 2)
+                    renderer.rectangle(bx - i, by - i, bw + i*2, bh + i*2, r, g, b, glow_a)
+                end
+                
+                -- Main background
+                renderer.rectangle(bx, by, bw, bh, 14, 14, 18, math.floor(240 * alpha))
+                renderer.rectangle(bx, by, bw, 1, 22, 22, 28, math.floor(140 * alpha))
+                
+                -- Left accent strip with gradient
+                renderer.rectangle(bx, by, 3, bh, r, g, b, math.floor(255 * alpha))
+                renderer.rectangle(bx, by, 1, bh, 
+                    math.min(255, r + 50), math.min(255, g + 50), math.min(255, b + 50), 
+                    math.floor(180 * alpha))
+                
+                -- Bottom accent line
+                renderer.rectangle(bx + 3, by + bh - 1, bw - 3, 1, r, g, b, math.floor(100 * alpha))
+                
+                -- Text with shadow
+                renderer.text(bx + BPAD + 3 + 1, by + (bh - th) * 0.5 + 1,
+                    0, 0, 0, math.floor(50 * alpha), dflags, 0, display_text)
+                renderer.text(bx + BPAD + 3, by + (bh - th) * 0.5,
+                    r, g, b, math.floor(255 * alpha), dflags, 0, display_text)
+                cy = cy + bh + 3
             end
 
-            -- THEME C: feature tags, faint bg + bottom accent line
+            -- FANCY feature tags with icons and glow
             for i = 1, #features do
                 local feat = features[i]
                 feat.alpha  = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
@@ -4781,21 +4914,39 @@ LPH_NO_VIRTUALIZE(function ()
                 do
                     local fa     = feat.alpha * alpha
                     local dflags = "d"
-                    local tw, th = renderer.measure_text(dflags, feat.text)
+                    local icon   = feat_icons[feat.text] or ">"
+                    local display_text = icon .. " " .. feat.text
+                    local tw, th = renderer.measure_text(dflags, display_text)
                     tw = tw + 1
-                    local BPAD = 5
+                    local BPAD = 6
                     local bw   = tw + BPAD * 2
-                    local bh   = th + 4
+                    local bh   = th + 6
                     local ox   = (bw * 0.5) * (1 - align)
                     local bx   = cx - utils.round(ox)
                     local by   = cy
 
-                    renderer.rectangle(bx, by, bw, bh, 9, 9, 11, math.floor(140 * fa))
-                    renderer.rectangle(bx, by + bh - 1, bw, 1, r, g, b, math.floor(200 * fa))
+                    -- Subtle glow for active features
+                    for j = 2, 1, -1 do
+                        local glow_a = math.floor(8 * fa * (3 - j) / 2)
+                        renderer.rectangle(bx - j, by - j, bw + j*2, bh + j*2, r, g, b, glow_a)
+                    end
+                    
+                    -- Background
+                    renderer.rectangle(bx, by, bw, bh, 12, 12, 15, math.floor(200 * fa))
+                    
+                    -- Left mini-accent
+                    renderer.rectangle(bx, by, 2, bh, r, g, b, math.floor(220 * fa))
+                    
+                    -- Bottom accent line
+                    renderer.rectangle(bx + 2, by + bh - 1, bw - 2, 1, r, g, b, math.floor(180 * fa))
+                    
+                    -- Text with shadow
+                    renderer.text(bx + BPAD + 1, by + (bh - th) * 0.5 + 1,
+                        0, 0, 0, math.floor(40 * fa), dflags, 0, display_text)
                     renderer.text(bx + BPAD, by + (bh - th) * 0.5,
-                        r, g, b, math.floor(250 * fa), dflags, 0, feat.text)
+                        r, g, b, math.floor(255 * fa), dflags, 0, display_text)
 
-                    cy = cy + utils.round((bh + 2) * feat.alpha)
+                    cy = cy + utils.round((bh + 3) * feat.alpha)
                 end
                 ::cont::
             end
@@ -6002,7 +6153,7 @@ client.set_event_callback("shutdown", antiaim.shutdown)
 
 
 -- ======================================================================
---  BRAND HEADER -- animated Zenith � Elegance in Execution.
+--  BRAND HEADER -- animated Zenith � Elegance in Execution.
 -- ======================================================================
 do
     local _bh_alpha = 0.0
@@ -6047,7 +6198,7 @@ do
                 255, 255, 255, shimmer_a)
         end
 
-        -- "�" separator between brand and tagline (accent colour)
+        -- "�" separator between brand and tagline (accent colour)
         renderer.text(px + bw, py, r, g, b,
             math.floor(180 * _bh_alpha), flags, 0, "  \xc2\xb7")
         local dot_w = renderer.measure_text(flags, "  \xc2\xb7")
