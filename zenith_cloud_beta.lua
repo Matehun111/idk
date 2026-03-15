@@ -2621,7 +2621,6 @@ do
     end
 
     -- ── Extra controls (from old Zenith hd) ───────────────────────────
-    local ui_edge_yaw    = menu.new_item(ui.new_hotkey, G,GR, merge{"Edge yaw","\n","hd::edge_yaw"}):record("aa","hd::edge_yaw"):save()
     local ui_freestand   = menu.new_item(ui.new_hotkey, G,GR, merge{"Freestanding","\n","hd::freestand"}):record("aa","hd::freestand"):save()
     local ui_inverter    = menu.new_item(ui.new_hotkey, G,GR, merge{"Inverter","\n","hd::inverter"}):record("aa","hd::inverter"):save()
     local ui_man_en      = menu.new_item(ui.new_checkbox, G,GR, "Manual Yaw"):record("aa","hd::man_en"):save()
@@ -2934,7 +2933,7 @@ do
             ctx.yaw_jitter = "Off"
             ctx.body_yaw   = "Static"
             ctx.body_yaw_offset = -180
-            if ui_edge_yaw:rawget() then ctx.edge_yaw = true end
+            if yaw_direction.edge_yaw and yaw_direction.edge_yaw:rawget() then ctx.edge_yaw = true end
             if ui_freestand:rawget() then ctx.freestanding = true end
             return
         end
@@ -3033,7 +3032,16 @@ do
                 ctx.body_yaw = "Static"
                 ctx.body_yaw_offset = fl and 60 or -60
             else
-                ctx.yaw = "Off"
+                -- defensive yaw "Off" = fall through to normal yaw below
+                ctx.yaw = nil  -- will be set by normal yaw block
+            end
+            -- body yaw from current state (if not set by Zenith Bypass)
+            if not ctx.body_yaw then
+                local bm = pd.bodyYaw:get()
+                if bm ~= "Off" then
+                    ctx.body_yaw = bm
+                    if bm ~= "Opposite" then ctx.body_yaw_offset = pd.bodyYawStatic:get() end
+                end
             end
         else
             -- ── Normal pitch ──────────────────────────────────────────
@@ -3104,7 +3112,7 @@ do
         end
 
         -- edge yaw / freestanding
-        if ui_edge_yaw:rawget()  then ctx.edge_yaw    = true end
+        if yaw_direction.edge_yaw and yaw_direction.edge_yaw:rawget() then ctx.edge_yaw = true end
         if ui_freestand:rawget() then ctx.freestanding = true end
 
         -- export current state
