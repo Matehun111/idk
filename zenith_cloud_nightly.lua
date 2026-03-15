@@ -2905,11 +2905,14 @@ do
 
         if raw ~= last_state_raw then last_state_raw = raw end
         pState = raw
+        -- keep original state index for defensive check even when falling back to Global
+        local pState_orig = pState
         if ab[pState] and not ab[pState].enableState:get() and pState ~= 1 then
             pState = 1
         end
 
-        local p = ab[pState]
+        local p      = ab[pState]
+        local p_orig = ab[pState_orig] or p  -- for defensive: use original state
         if not p then return end
 
         pcall(apply_fakelag)
@@ -2940,10 +2943,10 @@ do
         -- update tickbase tracker
         update_def_tracker(lp)
 
-        -- check defensive activation
+        -- check defensive activation (use original state, not Global fallback)
         local is_def = false
-        if p.defensiveAA:get() then
-            local trigs = p.defensiveTriggers:get() or {}
+        if p_orig.defensiveAA:get() then
+            local trigs = p_orig.defensiveTriggers:get() or {}
             -- auto: tickbase shift (DT/hideshot active)
             if def_tracker.is_def then is_def = true end
             -- DT or OS active
@@ -2952,23 +2955,25 @@ do
             -- manual triggers
             if has(trigs,"Always") then is_def = true end
             if has(trigs,"Tick") then
-                local tm = p.defensiveTickTrigger:get()
+                local tm = p_orig.defensiveTickTrigger:get()
                 if globals.tickcount() % 16 < tm then is_def = true end
             end
             if has(trigs,"Weapon switch") then
                 if globals.curtime() - def_persistent.last_weapon_switch < 1.0 then is_def = true end
             end
         end
+        -- when defensive fires, use original state settings
+        local pd = is_def and p_orig or p
 
         -- yaw base
         ctx.yaw_base = p.yawBase:get()
 
         if is_def then
             -- ── Defensive pitch ───────────────────────────────────────
-            local dpm   = p.defensivePitch:get()
-            local dmin  = p.defensivePitchMin:get()
-            local dmax  = p.defensivePitchMax:get()
-            local dspd  = p.defensivePitchSpeed:get()
+            local dpm   = pd.defensivePitch:get()
+            local dmin  = pd.defensivePitchMin:get()
+            local dmax  = pd.defensivePitchMax:get()
+            local dspd  = pd.defensivePitchSpeed:get()
             local rmin  = math.min(dmin,dmax); local rmax = math.max(dmin,dmax)
             ctx.pitch = "Custom"
             if dpm == "Static" then
@@ -2992,27 +2997,27 @@ do
             end
 
             -- ── Defensive yaw ─────────────────────────────────────────
-            local dym  = p.defensiveYaw:get()
-            local dys  = p.defensiveYawStatic:get()
+            local dym  = pd.defensiveYaw:get()
+            local dys  = pd.defensiveYawStatic:get()
             ctx.yaw = "180"
             if dym == "Static" then
                 ctx.yaw_offset = dys
             elseif dym == "Random" then
                 ctx.yaw_offset = math.random(-180,180)
             elseif dym == "Spin" then
-                local sl = p.defensiveYawSpinLeft:get()
-                local sr = p.defensiveYawSpinRight:get()
-                local ss = p.defensiveYawSpinSpeed:get()
+                local sl = pd.defensiveYawSpinLeft:get()
+                local sr = pd.defensiveYawSpinRight:get()
+                local ss = pd.defensiveYawSpinSpeed:get()
                 def_persistent.yaw_spin = def_persistent.yaw_spin + ss
                 if def_persistent.yaw_spin > sr then def_persistent.yaw_spin = sl end
                 ctx.yaw_offset = def_persistent.yaw_spin
             elseif dym == "Jitter" then
-                local range = p.defensiveYawJitterRange:get()
-                local delay = p.defensiveYawJitterDelay:get()
+                local range = pd.defensiveYawJitterRange:get()
+                local delay = pd.defensiveYawJitterDelay:get()
                 ctx.yaw_offset = globals.tickcount() % (delay*2) < delay and range or -range
             elseif dym == "Logic Shift" then
-                local range = p.defensiveYawJitterRange:get()
-                local delay = p.defensiveYawJitterDelay:get()
+                local range = pd.defensiveYawJitterRange:get()
+                local delay = pd.defensiveYawJitterDelay:get()
                 local shift = (globals.tickcount()%32 < 16) and 0 or (globals.tickcount()%64 < 32 and 90 or -90)
                 local jitter = globals.tickcount() % (delay*2) < delay and range or -range
                 ctx.yaw_offset = norm_yaw(shift + jitter)
