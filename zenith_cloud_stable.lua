@@ -1334,8 +1334,6 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
     local pages = {"Home", "Setup", "Builder", "Visual", "Configs"}
-    if _HAS_AIMBOT   then table.insert(pages, 4, "Aimbot")   end
-    if _HAS_RESOLVER then table.insert(pages, #pages, "Resolver") end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -1359,18 +1357,6 @@ function gui.frame()
 end
 
 -- Disable aimbot-related UI on stable build
-if not _HAS_AIMBOT then
-    -- Hide exploit/dt buttons on stable; they'll still exist but be inert
-    client.delay_call(0.5, function()
-        local function safe_hide(ref)
-            pcall(ui.set_visible, ref, false)
-        end
-        safe_hide(software.rage.aimbot.double_tap[1])
-        safe_hide(software.rage.aimbot.force_body_aim)
-        safe_hide(software.rage.aimbot.force_safe_point)
-    end)
-end
-
 --- region motion
 do
     local function linear(t, b, c, d)
@@ -5602,7 +5588,6 @@ do
     shared.attach = function (condition)
         local enabled = shared.enabled:get() and not condition
 
-        local _ZENITH_ICON = "data:image/png;base64,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"
 
         for i = 1, globals.maxplayers() do
             if entity.get_classname(i) ~= 'CCSPlayer' then
@@ -6335,7 +6320,376 @@ cvar.developer:set_raw_int(0)
 
 
 
-local resolver_show_tab  -- defined after resolver is created
+--- region valk_features
+-- Viewmodel / Third Person / Aspect Ratio / Netgraph / Logs / Autobuy / Ladder / Legs
+do
+    local G  = "AA"
+    local GR = "Anti-aimbot angles"
+    local M  = "Misc"
+    local MO = "Movement"
+
+    -- UI items: Viewmodel
+    local vm_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::vm_en"}, "Viewmodel"):record("visuals","vf::vm_en"):save()
+    local vm_fov      = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_fov"}, 54, 90, 68, true, "fov", 1):record("visuals","vf::vm_fov"):save()
+    local vm_ox       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_ox"},  0, 50, 25, true, "x", 1):record("visuals","vf::vm_ox"):save()
+    local vm_oy       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_oy"},  0, 40, 20, true, "y", 1):record("visuals","vf::vm_oy"):save()
+    local vm_oz       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_oz"},  0, 40, 20, true, "z", 1):record("visuals","vf::vm_oz"):save()
+    local vm_rh       = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::vm_rh"}, "Right Hand"):record("visuals","vf::vm_rh"):save()
+
+    -- Third Person
+    local tp_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::tp_en"},   "Third Person"):record("visuals","vf::tp_en"):save()
+    local tp_dist     = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::tp_dist"}, 10, 300, 80, true, "u", 1):record("visuals","vf::tp_dist"):save()
+
+    -- Aspect Ratio
+    local ar_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::ar_en"},    "Aspect Ratio"):record("visuals","vf::ar_en"):save()
+    local ar_ratio    = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ar_ratio"}, 50, 200, 100, true, "%", 1):record("visuals","vf::ar_ratio"):save()
+
+    -- Netgraph
+    local ng_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::ng_en"},  "Netgraph"):record("visuals","vf::ng_en"):save()
+    local ng_x        = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ng_x"}, 0, 3840, 300, true, "px", 1):record("visuals","vf::ng_x"):save()
+    local ng_y        = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ng_y"}, 0, 2160, 800, true, "px", 1):record("visuals","vf::ng_y"):save()
+
+    -- Hit/Miss Logs
+    local logs_en     = menu.new_item(ui.new_checkbox,      G,GR, merge{"\n","vf::logs_en"}, "Hit/Miss Logs"):record("visuals","vf::logs_en"):save()
+    local logs_x      = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_x"}, 0, 3840, 970, true, "px", 1):record("visuals","vf::logs_x"):save()
+    local logs_y_pos  = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_y"}, 0, 2160, 832, true, "px", 1):record("visuals","vf::logs_y"):save()
+    local logs_dur    = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_dur"}, 1, 10, 5, true, "s", 1):record("visuals","vf::logs_dur"):save()
+    local logs_hit_c  = menu.new_item(ui.new_color_picker,  G,GR, merge{"\n","vf::logs_hc"}, 100, 220, 100, 255):record("visuals","vf::logs_hc"):save()
+    local logs_miss_c = menu.new_item(ui.new_color_picker,  G,GR, merge{"\n","vf::logs_mc"}, 220, 80, 80, 255):record("visuals","vf::logs_mc"):save()
+
+    -- Misc items
+    local fix_hs   = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::fix_hs"},   "Fix Hideshots"):record("aa","vf::fix_hs"):save()
+    local dt_disc  = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::dt_disc"},  "Auto DT Discharge"):record("aa","vf::dt_disc"):save()
+    local fl_en    = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::fl_en"},    "Fast Ladder"):record("aa","vf::fl_en"):save()
+    local fl_modes = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::fl_modes"}, "Ascending", "Descending"):record("aa","vf::fl_modes"):save()
+    local ab_en    = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::ab_en"},    "Autobuy"):record("aa","vf::ab_en"):save()
+    local ab_mode  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_mode"},  "Default", "Intelligent"):record("aa","vf::ab_mode"):save()
+    local ab_wpn   = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_wpn"},   "AK-47 / M4A4", "AK-47 / M4A1-S", "Galil / SG553", "FAMAS / AUG", "AWP", "Scout"):record("aa","vf::ab_wpn"):save()
+    local ab_pis   = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_pis"},   "P250", "Five-SeveN / Tec-9", "CZ75", "Desert Eagle"):record("aa","vf::ab_pis"):save()
+    local ab_oth   = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::ab_oth"},   "Smoke", "Flash", "HE Grenade", "Molotov", "Zeus", "Half Armor", "Full Armor"):record("aa","vf::ab_oth"):save()
+
+    -- Leg animations
+    local legs_air  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::legs_air"},  "Off", "Static", "Moonwalk", "Kangaroo"):record("aa","vf::legs_air"):save()
+    local legs_airw = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_airw"}, 0, 100, 100, true, "%", 1):record("aa","vf::legs_airw"):save()
+    local legs_gnd  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::legs_gnd"},  "Off", "Static", "Jitter", "Moonwalk", "Kangaroo", "Pacan4ik"):record("aa","vf::legs_gnd"):save()
+    local legs_o1   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_o1"},   0, 100, 100, true, "%", 1):record("aa","vf::legs_o1"):save()
+    local legs_o2   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_o2"},   0, 100, 100, true, "%", 1):record("aa","vf::legs_o2"):save()
+    local legs_jt   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_jt"},   1, 8, 2, true, "t", 1):record("aa","vf::legs_jt"):save()
+    local legs_opts = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::legs_opts"}, "Move lean", "Pitch zero on land"):record("aa","vf::legs_opts"):save()
+    local legs_lean = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_lean"}, 0, 100, 50, true, "%", 1):record("aa","vf::legs_lean"):save()
+
+    -- Page show helpers (called from Visual/Misc page renders)
+    _G._vf_show_visual = function()
+        _safe_display(vm_enabled)
+        if vm_enabled:get() then
+            _safe_display(vm_fov); _safe_display(vm_ox)
+            _safe_display(vm_oy);  _safe_display(vm_oz); _safe_display(vm_rh)
+        end
+        _safe_display(tp_enabled)
+        if tp_enabled:get() then _safe_display(tp_dist) end
+        _safe_display(ar_enabled)
+        if ar_enabled:get() then _safe_display(ar_ratio) end
+        _safe_display(ng_enabled)
+        if ng_enabled:get() then _safe_display(ng_x); _safe_display(ng_y) end
+        _safe_display(logs_en)
+        if logs_en:get() then
+            _safe_display(logs_x); _safe_display(logs_y_pos)
+            _safe_display(logs_dur); _safe_display(logs_hit_c); _safe_display(logs_miss_c)
+        end
+    end
+
+    _G._vf_show_misc = function()
+        _safe_display(fix_hs); _safe_display(dt_disc)
+        _safe_display(fl_en)
+        if fl_en:get() then _safe_display(fl_modes) end
+        _safe_display(ab_en)
+        if ab_en:get() then
+            _safe_display(ab_mode); _safe_display(ab_wpn)
+            _safe_display(ab_pis);  _safe_display(ab_oth)
+        end
+        _safe_display(legs_air)
+        if legs_air:get() ~= "Off" then _safe_display(legs_airw) end
+        _safe_display(legs_gnd)
+        if legs_gnd:get() ~= "Off" then
+            _safe_display(legs_o1); _safe_display(legs_o2); _safe_display(legs_jt)
+        end
+        _safe_display(legs_opts)
+        if legs_opts:have_key("Move lean") then _safe_display(legs_lean) end
+    end
+
+    -- Hit/miss log data
+    local vf_logs = { entries = {} }
+    local function vf_add_log(text, is_hit, extra)
+        local r, g, b = logs_hit_c:rawget()
+        if not is_hit then r, g, b = logs_miss_c:rawget() end
+        table.insert(vf_logs.entries, 1, {
+            text=text, is_hit=is_hit, r=r, g=g, b=b,
+            time=globals.curtime(), frac=0, extra=extra or ""
+        })
+        while #vf_logs.entries > 8 do table.remove(vf_logs.entries) end
+    end
+
+    local function vf_lerp(a, b, t) return a + (b - a) * t end
+
+    local function vf_draw_logs()
+        if not logs_en:get() then return end
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local dur = logs_dur:get()
+        local bx  = logs_x:get()
+        local by  = logs_y_pos:get()
+        local PAD = 7; local AW = 3; local LH = 13
+        local to_rm = {}
+        local cy = by
+        for i, log in ipairs(vf_logs.entries) do
+            local age = globals.curtime() - log.time
+            if age < dur then
+                log.frac = vf_lerp(log.frac, 1.0, 0.15)
+            else
+                log.frac = vf_lerp(log.frac, 0.0, 0.08)
+                if log.frac < 0.01 then table.insert(to_rm, i) end
+            end
+            local fr = log.frac
+            if fr < 0.02 then goto vf_skip end
+            do
+                local a   = math.floor(255 * fr)
+                local slx = math.floor(28 * (1 - fr))
+                local x   = bx + slx
+                local has_extra = log.extra ~= ""
+                local ch  = has_extra and (PAD*2 + LH*2 + 2) or (PAD*2 + LH)
+                renderer.rectangle(x, cy, 220, ch, 14, 14, 18, math.floor(210 * fr))
+                renderer.rectangle(x, cy, AW, ch, log.r, log.g, log.b, a)
+                local icon = log.is_hit and "+" or "-"
+                renderer.text(x+AW+PAD, cy+PAD, log.r, log.g, log.b, a, "d", 0, icon.." "..(log.text or ""))
+                if has_extra then
+                    renderer.rectangle(x+AW+PAD, cy+PAD+LH+1, 220-AW-PAD*2, 1, 255,255,255, math.floor(20*fr))
+                    renderer.text(x+AW+PAD, cy+PAD+LH+3, 200,200,200, math.floor(a*0.85), "d", 0, log.extra)
+                end
+                cy = cy + (ch + 4) * fr
+            end
+            ::vf_skip::
+        end
+        for i = #to_rm, 1, -1 do table.remove(vf_logs.entries, to_rm[i]) end
+    end
+
+    -- aim callbacks for logs
+    client.set_event_callback("aim_hit", function(e)
+        if not logs_en:get() then return end
+        local hg_names = {[0]="body",[1]="head",[2]="chest",[3]="stomach",[4]="l.arm",[5]="r.arm",[6]="l.leg",[7]="r.leg"}
+        local name = entity.get_player_name(e.target) or "?"
+        local hg   = hg_names[e.hitgroup] or "body"
+        local dmg  = e.damage or 0
+        vf_add_log(name.." ("..hg..")", true, dmg.."dmg")
+    end)
+    client.set_event_callback("aim_miss", function(e)
+        if not logs_en:get() then return end
+        local name   = entity.get_player_name(e.target) or "?"
+        local reason = e.reason or "?"
+        if reason == "?" then reason = "resolver" end
+        vf_add_log(name, false, reason)
+    end)
+
+    -- Netgraph
+    local ng_fps, ng_ping, ng_last = 0, 0, 0
+    local function vf_draw_ng()
+        if not ng_enabled:get() then return end
+        local now = globals.curtime()
+        if now - ng_last > 0.1 then
+            ng_fps  = math.floor(1 / math.max(globals.frametime(), 0.001) + 0.5)
+            ng_ping = math.floor((client.real_latency() or 0) * 1000 + 0.5)
+            ng_last = now
+        end
+        local x = ng_x:get(); local y = ng_y:get()
+        renderer.text(x, y,    200,200,200,200, "d", 0, string.format("fps: %d   ping: %dms", ng_fps, ng_ping))
+        renderer.text(x, y+12, 200,200,200,200, "d", 0, "loss: 0%  choke: 0%")
+    end
+
+    client.set_event_callback("paint", function()
+        vf_draw_logs()
+        vf_draw_ng()
+    end)
+
+    -- Viewmodel/TP/AR
+    local function vf_apply_vm()
+        if not vm_enabled:get() then return end
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+        client.set_cvar("viewmodel_fov",      vm_fov:get())
+        client.set_cvar("viewmodel_offset_x", (vm_ox:get()-25)/10)
+        client.set_cvar("viewmodel_offset_y", (vm_oy:get()-20)/10)
+        client.set_cvar("viewmodel_offset_z", (vm_oz:get()-20)/10)
+        client.set_cvar("cl_righthand",       vm_rh:get() and 1 or 0)
+    end
+    local _tp_ok, _tp_ref1, _tp_ref2 = pcall(function()
+        return ui.reference("Visuals","Effects","Force third person (alive)")
+    end)
+    local function vf_apply_tp()
+        if tp_enabled:get() then
+            local d = tp_dist:get()
+            if _tp_ref1 then pcall(ui.set,_tp_ref1,true) end
+            if _tp_ref2 then pcall(ui.set,_tp_ref2,true) end
+            client.set_cvar("c_mindistance",d); client.set_cvar("c_maxdistance",d)
+        else
+            client.set_cvar("c_mindistance",30); client.set_cvar("c_maxdistance",30)
+        end
+    end
+    local function vf_apply_ar()
+        if not ar_enabled:get() then client.set_cvar("r_aspectratio",0); return end
+        local sw,sh = client.screen_size()
+        client.set_cvar("r_aspectratio", (sw*(ar_ratio:get()/100))/sh)
+    end
+    ui.set_callback(vm_enabled.ref, vf_apply_vm); ui.set_callback(vm_fov.ref, vf_apply_vm)
+    ui.set_callback(vm_ox.ref, vf_apply_vm);      ui.set_callback(vm_oy.ref, vf_apply_vm)
+    ui.set_callback(vm_oz.ref, vf_apply_vm);      ui.set_callback(vm_rh.ref, vf_apply_vm)
+    ui.set_callback(tp_enabled.ref, vf_apply_tp); ui.set_callback(tp_dist.ref, vf_apply_tp)
+    ui.set_callback(ar_enabled.ref, vf_apply_ar); ui.set_callback(ar_ratio.ref, vf_apply_ar)
+
+    -- Fast ladder / fix hideshots / DT discharge
+    local _vf_hs_saved, _vf_hs_val = false, 14
+    local _fl_limit_ref; pcall(function() _fl_limit_ref = ui.reference("AA","Fake lag","Limit") end)
+    local _dt_ref;        pcall(function() _dt_ref = ui.reference("Rage","Aimbot","Double tap") end)
+
+    client.set_event_callback("setup_command", function(cmd)
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+
+        if fl_en:get() and entity.get_prop(lp,"m_MoveType") == 9 then
+            local pitch = select(1, client.camera_angles())
+            cmd.yaw = math.floor(cmd.yaw+0.5); cmd.roll = 0
+            if fl_modes:have_key("Ascending") and cmd.forwardmove>0 and pitch<45 then
+                cmd.pitch=89; cmd.in_moveright=1; cmd.in_moveleft=0; cmd.in_forward=0; cmd.in_back=1
+                if cmd.sidemove==0 then cmd.yaw=cmd.yaw+90
+                elseif cmd.sidemove<0 then cmd.yaw=cmd.yaw+150
+                else cmd.yaw=cmd.yaw+30 end
+            end
+            if fl_modes:have_key("Descending") and cmd.forwardmove<0 then
+                cmd.pitch=89; cmd.in_moveleft=1; cmd.in_moveright=0; cmd.in_forward=1; cmd.in_back=0
+                if cmd.sidemove==0 then cmd.yaw=cmd.yaw+90
+                elseif cmd.sidemove>0 then cmd.yaw=cmd.yaw+150
+                else cmd.yaw=cmd.yaw+30 end
+            end
+        end
+
+        if fix_hs:get() and _fl_limit_ref then
+            local isOs = software.is_on_shot_antiaim()
+            local isDt = software.is_double_tap()
+            local isFd = software.is_duck_peek_assist()
+            if isOs and not isDt and not isFd then
+                if not _vf_hs_saved then _vf_hs_val=ui.get(_fl_limit_ref); _vf_hs_saved=true end
+                ui.set(_fl_limit_ref, 1)
+            elseif _vf_hs_saved then
+                ui.set(_fl_limit_ref, _vf_hs_val); _vf_hs_saved=false
+            end
+        end
+
+        if dt_disc:get() and _dt_ref then
+            local enemies = entity.get_players(true)
+            local vis = false
+            for _,ent in ipairs(enemies) do
+                local bx,by,bz = entity.hitbox_position(ent,1)
+                if bx and client.visible(bx,by,bz+20) then vis=true; break end
+            end
+            if vis then
+                ui.set(_dt_ref,false)
+                client.delay_call(0.01,function() ui.set(_dt_ref,true) end)
+            end
+        end
+
+        vf_apply_vm()
+    end)
+
+    -- Autobuy
+    local ab_pt = {["AK-47 / M4A4"]="ak47",["AK-47 / M4A1-S"]="ak47",["Galil / SG553"]="sg556",["FAMAS / AUG"]="sg556",["AWP"]="awp",["Scout"]="ssg08"}
+    local ab_pc = {["AK-47 / M4A4"]="m4a1",["AK-47 / M4A1-S"]="m4a1_silencer",["Galil / SG553"]="galilar",["FAMAS / AUG"]="aug",["AWP"]="awp",["Scout"]="ssg08"}
+    local ab_pcs= {["P250"]="p250",["Five-SeveN / Tec-9"]="fiveseven",["CZ75"]="cz75a",["Desert Eagle"]="deagle"}
+    local ab_streak = 0
+    client.set_event_callback("round_start", function()
+        if not ab_en:get() then return end
+        local lp=entity.get_local_player(); if not lp then return end
+        local money=entity.get_prop(lp,"m_iAccount") or 0
+        local is_ct=(entity.get_prop(lp,"m_iTeamNum") or 2)==3
+        local mode=ab_mode:get(); local sel_w=ab_wpn:get(); local sel_p=ab_pis:get()
+        local oth=ab_oth:get() or {}
+        local function has(v) for _,x in ipairs(oth) do if x==v then return true end end return false end
+        local pri=is_ct and (ab_pc[sel_w] or "m4a1") or (ab_pt[sel_w] or "ak47")
+        local pis=ab_pcs[sel_p] or "p250"
+        local arm=has("Full Armor") and "vesthelm" or has("Half Armor") and "vest" or nil
+        local mol=is_ct and "incgrenade" or "molotov"
+        local q={}; local function bq(c) q[#q+1]=c end
+        if mode=="Default" then
+            if money>=800 then
+                if money>=2700 then bq("buy "..pri) end
+                bq("buy "..pis)
+                if arm then bq("buy "..arm) end
+                if has("Smoke") then bq("buy smokegrenade") end; if has("Flash") then bq("buy flashbang") end
+                if has("HE Grenade") then bq("buy hegrenade") end; if has("Molotov") then bq("buy "..mol) end
+                if has("Zeus") then bq("buy taser") end
+            end
+        else
+            local full=is_ct and 4000 or 3700; local eco=is_ct and 1200 or 1000; local force=is_ct and 2000 or 1800
+            if ab_streak>=3 then full=full+1000 end
+            if money>=full then bq("buy "..pri); bq("buy "..pis); if arm then bq("buy "..arm) end
+                if has("Smoke") then bq("buy smokegrenade") end; if has("HE Grenade") then bq("buy hegrenade") end
+            elseif money>=force then bq("buy "..pri); bq("buy "..pis); if arm then bq("buy "..arm) end
+            elseif money>=eco then bq("buy "..pis) end
+        end
+        if #q>0 then client.exec(table.concat(q,";")) end
+    end)
+    client.set_event_callback("round_end", function(e)
+        local lp=entity.get_local_player(); if not lp then return end
+        local mt=entity.get_prop(lp,"m_iTeamNum") or 2
+        if e and e.winner==mt then ab_streak=0 else ab_streak=ab_streak+1 end
+    end)
+
+    -- Leg animations
+    local _leg_mv_ref; pcall(function() _leg_mv_ref=ui.reference("AA","Other","Leg movement") end)
+    local function set_lm(v) if _leg_mv_ref then pcall(ui.set,_leg_mv_ref,v) end end
+
+    client.set_event_callback("pre_render", function()
+        local lp=entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+        local flags=entity.get_prop(lp,"m_fFlags") or 0
+        local on_ground=bit.band(flags,1)==1
+        local tc=globals.tickcount()
+        if on_ground then
+            local v=legs_gnd:get(); local o1=legs_o1:get(); local o2=legs_o2:get(); local spd=legs_jt:get()
+            if v=="Static" then entity.set_prop(lp,"m_flPoseParameter",1.0,0); set_lm("Always slide")
+            elseif v=="Jitter" then
+                local mul=1.0/(tc%(spd*4)>=(spd*2) and 200 or 400)
+                entity.set_prop(lp,"m_flPoseParameter",(tc%(spd*2)>=spd and o1 or o2)*mul,0); set_lm("Always slide")
+            elseif v=="Moonwalk" then entity.set_prop(lp,"m_flPoseParameter",0.0,7); set_lm("Never slide")
+            elseif v=="Kangaroo" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),3)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),7)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),6); set_lm("Off")
+            elseif v=="Pacan4ik" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(o1*0.01,o2*0.01),0)
+                set_lm(client.random_int(0,1)==0 and "Off" or "Always slide")
+            else set_lm("Off") end
+        else
+            local v=legs_air:get()
+            if v=="Static" then entity.set_prop(lp,"m_flPoseParameter",legs_airw:get()*0.01,6)
+            elseif v=="Moonwalk" then entity.set_prop(lp,"m_flPoseParameter",(globals.curtime()*0.55)%1,6)
+            elseif v=="Kangaroo" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),3)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),7)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),6)
+            end
+        end
+        local opts=legs_opts:get() or {}
+        local has_lean=false; for _,v in ipairs(opts) do if v=="Move lean" then has_lean=true; break end end
+        if has_lean then
+            local vx=entity.get_prop(lp,"m_vecVelocity[0]") or 0; local vy=entity.get_prop(lp,"m_vecVelocity[1]") or 0
+            if math.sqrt(vx*vx+vy*vy)>1 then end -- layer access requires ent lib, skip for now
+        end
+        local has_land=false; for _,v in ipairs(opts) do if v=="Pitch zero on land" then has_land=true; break end end
+        if has_land and on_ground then
+            entity.set_prop(lp,"m_flPoseParameter",0.5,12)
+        end
+    end)
+    client.set_event_callback("shutdown", function() set_lm("Off") end)
+
+end -- end region valk_features
 
 menu.set_callback(function()
 
@@ -6405,56 +6759,13 @@ menu.set_callback(function()
             _safe_display(manual_direction.disabled_manual)
         end
 
-
-
-
+        -- Valkyrie misc features
+        if _G._vf_show_misc then _G._vf_show_misc() end
 
     end
 
     -- ── AIMBOT ──────────────────────────────────────────────────────
     -- Predict, Resolver, Unsafe Charge, Auto OS, Air Teleport, Jump Scout, Dormant
-    if page == "Aimbot" then
-        local p = _G.__predict
-        if p then
-            _safe_display(p.enabled)
-            if p.enabled:get() then _safe_display(p.mode) end
-        end
-
-        _safe_display(shared.enabled)
-
-        local uc = _G.__unsafe_charge
-        if uc then _safe_display(uc.enabled) end
-
-        local aos = _G.__auto_os
-        if aos then
-            _safe_display(aos.enabled)
-            if aos.enabled:get() then
-                _safe_display(aos.states)
-                _safe_display(aos.avoid_weapons)
-            end
-        end
-
-        local at = _G.__air_tel
-        if at then
-            _safe_display(at.enabled)
-            if at.enabled:get() then
-                _safe_display(at.weapons)
-                _safe_display(at.allow_cross)
-            end
-        end
-
-        local js = _G.__jump_scout
-        if js then
-            _safe_display(js.enabled)
-            if js.enabled:get() then _safe_display(js.key) end
-        end
-
-        local da = _G.__dormant_ab
-        if da then
-            _safe_display(da.enabled)
-            if da.enabled:get() then _safe_display(da.damage) end
-        end
-    end
 
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- Custom AA angles builder (offset, modifier, desync, limitation)
@@ -6538,9 +6849,6 @@ menu.set_callback(function()
         end
     end
 
-    if page == "Resolver" then
-        if resolver_show_tab then resolver_show_tab() end
-    end
 
     -- ── VISUAL ───────────────────────────────────────────────────────
     -- Widgets, Custom scope, Buy bot, Clientside nickname
@@ -6574,6 +6882,8 @@ menu.set_callback(function()
             _safe_display(buy_bot.secondary)
             _safe_display(buy_bot.utility)
         end
+
+        if _G._vf_show_visual then _G._vf_show_visual() end
 
         _safe_display(clientside_nickname.enabled)
         if clientside_nickname.enabled:get() then
@@ -7231,490 +7541,3 @@ local bit = require('bit')
 -- ======================================================================
 --  ZENITH RESOLVER  (nightly only)
 -- ======================================================================
-if _HAS_RESOLVER and _auth_alive then
--- region resolver (Zenith port)
-local _zres_ui_enabled, _zres_ui_mode, _zres_ui_verbose
-do
-    local G  = "AA"
-    local GR = "Anti-aimbot angles"
-    _zres_ui_enabled = menu.new_item(ui.new_checkbox, G, GR,
-        merge{"\n","zres::enabled"}, "Resolver")
-        :record("aa","zres::enabled"):save()
-    _zres_ui_mode = menu.new_item(ui.new_combobox, G, GR,
-        merge{"\n","zres::mode"}, "Pattern Core", "Hybrid Engine", "Bruteforce Only")
-        :record("aa","zres::mode"):save()
-    _zres_ui_verbose = menu.new_item(ui.new_checkbox, G, GR,
-        merge{"\n","zres::verbose"}, "Verbose Log")
-        :record("aa","zres::verbose"):save()
-end
-
-resolver_show_tab = function()
-    if _zres_ui_enabled then _safe_display(_zres_ui_enabled) end
-    local ok, en = pcall(ui.get, _zres_ui_enabled.ref)
-    if ok and en then
-        if _zres_ui_mode    then _safe_display(_zres_ui_mode)    end
-        if _zres_ui_verbose then _safe_display(_zres_ui_verbose) end
-    end
-end
-
-local menu_enable      = _zres_ui_enabled
-local menu_mode        = _zres_ui_mode
-local menu_log_verbose = _zres_ui_verbose
-
-local bit = bit
-local band = bit.band
-local floor = math.floor
-local sqrt = math.sqrt
-local min = math.min
-local max = math.max
-local abs = math.abs
-local exp = math.exp
-local cos = math.cos
-local sin = math.sin
-local rad = math.rad
-local menu_enable = _zres_ui_enabled
-local menu_mode = _zres_ui_mode
-local menu_log_verbose = _zres_ui_verbose
-local ind_sep1 = ui.new_label("Players", "Adjustments", "--- Zenith Resolver ---")
-local ind_mode = ui.new_label("Players", "Adjustments", "Mode: ")
-local ind_class = ui.new_label("Players", "Adjustments", "AA Class: ")
-local ind_desync = ui.new_label("Players", "Adjustments", "Desync Data: ")
-local ind_conf = ui.new_label("Players", "Adjustments", "AI Confidence: ")
-local ind_lby = ui.new_label("Players", "Adjustments", "LBY Status: ")
-local ind_fails = ui.new_label("Players", "Adjustments", "Resolver Fails: ")
-local ind_sep2 = ui.new_label("Players", "Adjustments", "-------------------")
-local Vector3 = {}
-Vector3.__index = Vector3
-function Vector3.new(x, y, z)
-    return setmetatable({x = x or 0, y = y or 0, z = z or 0}, Vector3)
-end
-function Vector3.__add(a, b) return Vector3.new(a.x + b.x, a.y + b.y, a.z + b.z) end
-function Vector3.__sub(a, b) return Vector3.new(a.x - b.x, a.y - b.y, a.z - b.z) end
-function Vector3.__mul(a, b)
-    if type(b) == "number" then return Vector3.new(a.x * b, a.y * b, a.z * b) end
-    return Vector3.new(a.x * b.x, a.y * b.y, a.z * b.z)
-end
-function Vector3:length() return sqrt(self.x * self.x + self.y * self.y + self.z * self.z) end
-function Vector3:length2d() return sqrt(self.x * self.x + self.y * self.y) end
-function Vector3:dist(other) return (self - other):length() end
-local function clamp(val, min_val, max_val)
-    if val > max_val then return max_val end
-    if val < min_val then return min_val end
-    return val
-end
-local function normalize_yaw(yaw)
-    while yaw > 180 do yaw = yaw - 360 end
-    while yaw < -180 do yaw = yaw + 360 end
-    return yaw
-end
-local function math_delta(angle1, angle2)
-    return normalize_yaw(angle1 - angle2)
-end
-local function get_velocity(ent)
-    local vx = entity.get_prop(ent, "m_vecVelocity[0]") or 0
-    local vy = entity.get_prop(ent, "m_vecVelocity[1]") or 0
-    local vz = entity.get_prop(ent, "m_vecVelocity[2]") or 0
-    return Vector3.new(vx, vy, vz)
-end
-ffi.cdef[[
-    struct c_animstate {
-        char pad[3]; char m_bForceWeaponUpdate; char pad1[91];
-        void* m_pBaseEntity; void* m_pActiveWeapon; void* m_pLastActiveWeapon;
-        float m_flLastClientSideAnimationUpdateTime; int m_iLastClientSideAnimationUpdateFramecount;
-        float m_flAnimUpdateDelta; float m_flEyeYaw; float m_flPitch; float m_flSpeedNormalized;
-        float m_flGoalFeetYaw; float m_flAffectedFraction; float m_flDuckAmount;
-        float m_flCurrentFeetYaw; float m_flCurrentTorsoYaw; float m_flUnknownVelocityLean;
-        float m_flLeanAomunt; char pad2[4]; float m_flFeetCycle; float m_flFeetYawRate;
-        char pad3[4]; float m_fDuckAmount; float m_fLandingDuckAdditiveSomething;
-        char pad4[4]; float m_vOriginX; float m_vOriginY; float m_vOriginZ;
-        float m_vLastOriginX; float m_vLastOriginY; float m_vLastOriginZ;
-        float m_vVelocityX; float m_vVelocityY; char pad5[4]; float m_flUnknownFloat1;
-        char pad6[8]; float m_flUnknownFloat2; float m_flUnknownFloat3; float m_flUnknown;
-        float m_flSpeed2D; float m_flUpVelocity; float m_flSpeedNormalized;
-        float m_flFeetSpeedForwardsOrSideWays; float m_flFeetSpeedUnknownForwardOrSideways;
-        float m_flTimeSinceStartedMoving; float m_flTimeSinceStoppedMoving;
-        bool m_bOnGround; bool m_bInHitGroundAnimation; float m_flTimeSinceInAir;
-        float m_flLastOriginZ; float m_flHeadHeightOrOffsetFromHittingGroundAnimation;
-        float m_flStopToFullRunningFraction; char pad7[4]; float m_flMagicFraction;
-        char pad8[60]; float m_flWorldForce; char pad9[462]; float m_flPlaybackRate; float m_flMaxYaw;
-    };
-    typedef struct {
-        float m_anim_time; float m_fade_out_time; int m_flags; int m_activity;
-        int m_priority; int m_order; int m_sequence; float m_prev_cycle;
-        float m_weight; float m_weight_delta_rate; float m_playback_rate;
-        float m_cycle; void* m_owner; int m_bits;
-    } C_AnimationLayer;
-    typedef void* (__thiscall* get_client_entity_t)(void*, int);
-]]
-local entity_list_interface = ffi.cast("void***", client.create_interface("client_panorama.dll", "VClientEntityList003"))
-local get_entity_fn = ffi.cast("get_client_entity_t", entity_list_interface[0][3])
-local function get_entity_address(entity_index) return get_entity_fn(entity_list_interface, entity_index) end
-local function get_animstate(entity_index)
-    local address = get_entity_address(entity_index)
-    if not address then return nil end
-    local entity_ptr = ffi.cast("char*", address)
-    return ffi.cast("struct c_animstate**", entity_ptr + 39264)[0]
-end
-local function get_animation_layers(entity_index)
-    local address = get_entity_address(entity_index)
-    if not address then return nil end
-    local entity_ptr = ffi.cast("char*", address)
-    local layers_ptr = ffi.cast("C_AnimationLayer**", entity_ptr + 39264)
-    if not layers_ptr or not layers_ptr[0] then return nil end
-    local layers = {}
-    for i = 0, 12 do
-        local layer = layers_ptr[0] + i
-        if layer then
-            layers[i + 1] = {
-                weight = layer.m_weight, cycle = layer.m_cycle,
-                playback_rate = layer.m_playback_rate, weight_delta_rate = layer.m_weight_delta_rate,
-                sequence = layer.m_sequence
-            }
-        end
-    end
-    return layers
-end
-local DB = {
-    players = {},
-    O = { STAND = 1, MOVE = 2, CROUCH = 3, AIR = 4, SLOWWALK = 5 }
-}
-local function get_player_data(ent)
-    if not DB.players[ent] then
-        DB.players[ent] = {
-            last_sim_time = 0,
-            history = {},
-            deltas = {},
-            hit_count = 0,
-            miss_count = 0,
-            fail_streak = 0,
-            bruteforce_stage = 0,
-            last_input = nil,
-            predicted_side = 1,
-            predicted_desync = 0,
-            aa_style = "Unknown",
-            lby_time = 0,
-            is_lby_updating = false
-        }
-    end
-    return DB.players[ent]
-end
-local function get_enhanced_state(ent)
-    local animstate = get_animstate(ent)
-    if not animstate then return DB.O.STAND end
-    local vx = entity.get_prop(ent, "m_vecVelocity[0]") or 0
-    local vy = entity.get_prop(ent, "m_vecVelocity[1]") or 0
-    local pStill = math.sqrt(vx * vx + vy * vy) < 5
-    local isSlow = animstate.m_flSpeedNormalized > 0.1 and animstate.m_flSpeedNormalized < 0.35
-    local duck_amount = entity.get_prop(ent, "m_flDuckAmount") or animstate.m_flDuckAmount or 0
-    local flags = entity.get_prop(ent, "m_fFlags") or 0
-    local onground = bit.band(flags, 1) ~= 0
-    
-    local raw_state = DB.O.STAND
-    if pStill then raw_state = DB.O.STAND end
-    if not pStill then raw_state = DB.O.MOVE end
-    if isSlow then raw_state = DB.O.SLOWWALK end
-    if duck_amount > 0.1 then 
-        if pStill then raw_state = DB.O.CROUCH else raw_state = DB.O.SNAKING end
-    end
-    if not onground then raw_state = DB.O.AIR end
-    if not onground and duck_amount > 0.1 then raw_state = DB.O.AIR_CROUCH end
-    
-    return raw_state
-end
-local NN = {
-    config = { input_size = 14, hidden_size = 24, output_size = 3, lr = 0.05, momentum = 0.9 },
-    weights = { hidden = {}, output = {} },
-    velocities = { hidden = {}, output = {} }, 
-    memory = {}
-}
-local function leaky_relu(x) return x > 0 and x or 0.01 * x end
-local function sigmoid(x) return 1 / (1 + exp(-x)) end
-for i = 1, NN.config.input_size do
-    NN.weights.hidden[i] = {}
-    NN.velocities.hidden[i] = {}
-    for j = 1, NN.config.hidden_size do
-        NN.weights.hidden[i][j] = (math.random() * 2 - 1) * sqrt(6 / (NN.config.input_size + NN.config.hidden_size))
-        NN.velocities.hidden[i][j] = 0
-    end
-end
-for i = 1, NN.config.hidden_size do
-    NN.weights.output[i] = {}
-    NN.velocities.output[i] = {}
-    for j = 1, NN.config.output_size do
-        NN.weights.output[i][j] = (math.random() * 2 - 1) * sqrt(6 / (NN.config.hidden_size + NN.config.output_size))
-        NN.velocities.output[i][j] = 0
-    end
-end
-local function neural_forward(input)
-    local hidden_act = {}
-    for i = 1, NN.config.hidden_size do
-        local sum = 0
-        for j = 1, NN.config.input_size do sum = sum + (input[j] or 0) * NN.weights.hidden[j][i] end
-        hidden_act[i] = leaky_relu(sum)
-    end
-    local output = {}
-    for i = 1, NN.config.output_size do
-        local sum = 0
-        for j = 1, NN.config.hidden_size do sum = sum + hidden_act[j] * NN.weights.output[j][i] end
-        output[i] = sigmoid(sum)
-    end
-    return output, hidden_act
-end
-local function add_training_sample(input, c_side, c_desync, target_conf, sample_weight)
-    local target_side = c_side == 2 and 1.0 or 0.0
-    local target_desync = clamp(c_desync / 58.0, 0, 1)
-    table.insert(NN.memory, { 
-        input = input, 
-        target = {target_side, target_desync, target_conf},
-        weight = sample_weight 
-    })
-    if #NN.memory > 1000 then table.remove(NN.memory, 1) end
-end
-local function train_neural_network()
-    if #NN.memory < 16 then return end
-    for _ = 1, 8 do
-        local sample = NN.memory[math.random(1, #NN.memory)]
-        local output, hidden_act = neural_forward(sample.input)
-        local s_weight = sample.weight or 1.0 
-        for i = 1, NN.config.output_size do
-            local err = (sample.target[i] - output[i]) * output[i] * (1 - output[i]) * s_weight
-            for j = 1, NN.config.hidden_size do
-                local grad = NN.config.lr * err * hidden_act[j]
-                NN.velocities.output[j][i] = (NN.config.momentum * NN.velocities.output[j][i]) + grad
-                NN.weights.output[j][i] = NN.weights.output[j][i] + NN.velocities.output[j][i]
-            end
-        end
-    end
-end
-local function process_lby_timers(ent, data, animstate)
-    local vel = get_velocity(ent):length2d()
-    local curtime = globals.curtime()
-    if vel > 0.1 then
-        data.lby_time = curtime + 0.22 
-        data.is_lby_updating = true
-    else
-        if curtime >= data.lby_time then
-            data.is_lby_updating = true
-            data.lby_time = curtime + 1.1 
-        else
-            data.is_lby_updating = false
-        end
-    end
-end
-local function track_real_desync(ent, data)
-    local animstate = get_animstate(ent)
-    if not animstate then return end
-    local delta = math_delta(animstate.m_flEyeYaw, animstate.m_flCurrentFeetYaw)
-    table.insert(data.deltas, delta)
-    if #data.deltas > 64 then table.remove(data.deltas, 1) end
-    process_lby_timers(ent, data, animstate)
-end
-local function classify_aa_style(data)
-    if #data.deltas < 16 then return "Gathering", 0 end
-    local flips = 0
-    local largest_swing = 0
-    local static_count = 0
-    for i = 2, #data.deltas do
-        local c, p = data.deltas[i], data.deltas[i-1]
-        local diff = abs(math_delta(c, p))
-        if diff > largest_swing then largest_swing = diff end
-        if (c > 15 and p < -15) or (c < -15 and p > 15) then flips = flips + 1 end
-        if diff < 5 then static_count = static_count + 1 end
-    end
-    local flip_ratio = flips / #data.deltas
-    local static_ratio = static_count / #data.deltas
-    if flip_ratio > 0.35 then
-        data.aa_style = "Jitter"
-        return "Jitter", largest_swing
-    elseif largest_swing > 90 and flip_ratio < 0.1 then
-        data.aa_style = "Swing"
-        return "Swing", largest_swing
-    elseif static_ratio > 0.7 then
-        data.aa_style = "Static"
-        return "Static", largest_swing
-    elseif largest_swing > 30 and largest_swing < 90 then
-        data.aa_style = "Sway"
-        return "Sway", largest_swing
-    end
-    data.aa_style = "Chaotic"
-    return "Chaotic", largest_swing
-end
-local function analyze_layers(ent)
-    local layers = get_animation_layers(ent)
-    local res = { weight = 0, cycle_delta = 0, moving = false, jump = false }
-    if not layers then return res end
-    local move, aim, wpn, jump = layers[7], layers[2], layers[3], layers[6]
-    if move then res.moving = (move.weight or 0) > 0.1 end
-    if jump then res.jump = (jump.weight or 0) > 0.5 end
-    if aim and wpn then
-        res.weight = abs((aim.weight or 0) - (wpn.weight or 0))
-        res.cycle_delta = abs((aim.cycle or 0) - (wpn.cycle or 0))
-    end
-    return res
-end
-local function resolve_pattern(ent, data, state)
-    local layers = analyze_layers(ent)
-    local style, swing = classify_aa_style(data)
-    local side, desync, conf = 1, 25, 0.5
-    local body_yaw = entity.get_prop(ent, "m_flPoseParameter", 11) or 0.5
-    if layers.weight > 0.9 then
-        side = layers.weight > 0.5 and 2 or 1
-    else
-        side = body_yaw > 0.5 and 2 or 1
-    end
-    desync = min(58, max(25, swing * 0.5))
-    if style == "Jitter" then
-        desync = desync * 0.8
-        conf = 0.85
-    elseif style == "Static" then
-        desync = 58
-        conf = 0.9
-    elseif style == "Swing" then
-        side = data.deltas[#data.deltas] > 0 and 1 or 2
-        desync = 45
-        conf = 0.7
-    end
-    if data.is_lby_updating then
-        desync = 0 
-        conf = 1.0
-    end
-    if state == DB.O.AIR or layers.jump then desync = desync * 0.6 end
-    return side, floor(desync), conf
-end
-local function resolve_bruteforce(data)
-    local stages = {[0] = 58, [1] = -58, [2] = 48, [3] = -48, [4] = 38, [5] = -38, [6] = 28, [7] = -28, [8] = 18, [9] = -18, [10] = 0}
-    local val = stages[data.bruteforce_stage % 11]
-    local side = val > 0 and 2 or 1
-    return side, abs(val), 1.0 
-end
-local function build_neural_input(ent, data, state, layers)
-    local inp = {}
-    local v = get_velocity(ent):length2d()
-    local ast = get_animstate(ent)
-    inp[1] = state == DB.O.STAND and 1 or 0
-    inp[2] = state == DB.O.MOVE and 1 or 0
-    inp[3] = state == DB.O.AIR and 1 or 0
-    inp[4] = state == DB.O.CROUCH and 1 or 0
-    inp[5] = min(v / 260, 1)
-    inp[6] = ast and ast.m_flDuckAmount or 0
-    inp[7] = (data.deltas[#data.deltas] or 0) / 180.0
-    inp[8] = layers.weight
-    inp[9] = layers.cycle_delta
-    inp[10] = data.is_lby_updating and 1 or 0
-    inp[11] = data.fail_streak / 10.0
-    inp[12] = state == DB.O.SLOWWALK and 1 or 0
-    inp[13] = state == DB.O.AIR_CROUCH and 1 or 0
-    inp[14] = state == DB.O.SNAKING and 1 or 0 
-    return inp
-end
-local function resolve_hybrid(ent, data, state)
-    local p_side, p_desync, p_conf = resolve_pattern(ent, data, state)
-    local layers = analyze_layers(ent)
-    local n_inp = build_neural_input(ent, data, state, layers)
-    local n_out = neural_forward(n_inp)
-    local n_side = n_out[1] > 0.5 and 2 or 1
-    local n_desync = floor(n_out[2] * 58)
-    local n_conf = n_out[3]
-    data.last_input = n_inp 
-    if data.is_lby_updating or p_conf > 0.9 then
-        return p_side, p_desync, p_conf 
-    elseif data.aa_style == "Jitter" or data.aa_style == "Chaotic" then
-        return n_side, n_desync, n_conf 
-    else
-        local b_desync = floor((p_desync * p_conf + n_desync * n_conf) / (p_conf + n_conf))
-        return p_side, b_desync, max(p_conf, n_conf)
-    end
-end
-local function update_menu_indicators()
-    local plist = ui.reference("Players", "Players", "Player list")
-    local ent = plist and ui.get(plist) or nil
-    if not ent then return end
-    local data = get_player_data(ent)
-    local mode = ui.get(menu_mode)
-    ui.set(ind_mode, "Mode: " .. mode)
-    ui.set(ind_class, "AA Class: " .. data.aa_style)
-    ui.set(ind_desync, string.format("Desync Data: %d° (%s)", data.predicted_desync, data.predicted_side == 1 and "L" or "R"))
-    ui.set(ind_lby, "LBY Updating: " .. tostring(data.is_lby_updating))
-    ui.set(ind_fails, "Resolver Fails: " .. data.fail_streak)
-end
-client.set_event_callback("paint", function()
-    if not ui.get(menu_enable) then return end
-    local mode = ui.get(menu_mode)
-    local players = entity.get_players(true)
-    for i = 1, #players do
-        local ent = players[i]
-        local data = get_player_data(ent)
-        local sim_time = entity.get_prop(ent, "m_flSimulationTime") or 0
-        if data.last_sim_time == sim_time then 
-            goto continue 
-        end
-        data.last_sim_time = sim_time
-        local state = get_enhanced_state(ent)
-        track_real_desync(ent, data)
-        local side, desync, conf
-        if data.fail_streak >= 3 or mode == "Bruteforce Only" then
-            side, desync, conf = resolve_bruteforce(data)
-        elseif mode == "Hybrid Engine" then
-            side, desync, conf = resolve_hybrid(ent, data, state)
-        else
-            side, desync, conf = resolve_pattern(ent, data, state)
-        end
-        data.predicted_side = side
-        data.predicted_desync = desync
-        ::continue::
-    end
-    if mode == "Hybrid Engine" then train_neural_network() end
-    if globals.tickcount() % 16 == 0 then update_menu_indicators() end
-end)
-local function LogVerbose(msg)
-    if ui.get(menu_log_verbose) then client.color_log(255, 150, 255, "[Zenith] " .. msg .. "\n\0") end
-end
-client.set_event_callback("aim_hit", function(e)
-    if not ui.get(menu_enable) then return end
-    local ent = e.target
-    local data = get_player_data(ent)
-    data.hit_count = data.hit_count + 1
-    data.fail_streak = 0 
-    data.bruteforce_stage = 0
-    if ui.get(menu_mode) == "Hybrid Engine" and data.last_input then
-        local is_headshot = (e.hitgroup == 1)
-        local learning_weight = is_headshot and 2.0 or 1.0 
-        add_training_sample(data.last_input, data.predicted_side, data.predicted_desync, 1.0, learning_weight)
-        local log_str = string.format("AI hit saving angle on %s", entity.get_player_name(ent) or "unknown")
-        if is_headshot then log_str = log_str .. " (HEADSHOT saving angle)" end
-        LogVerbose(log_str)
-    end
-end)
-client.set_event_callback("aim_miss", function(e)
-    if not ui.get(menu_enable) then return end
-    local ent = e.target
-    local data = get_player_data(ent)
-    if e.reason == "spread" then 
-        LogVerbose("Missed due to spread. Ignoring.")
-        return 
-    end
-    if e.reason == "resolver" or e.reason == "?" then
-        data.miss_count = data.miss_count + 1
-        data.fail_streak = data.fail_streak + 1
-        data.bruteforce_stage = data.bruteforce_stage + 1
-        LogVerbose(string.format("Resolver fail on %s! Streak: %d", entity.get_player_name(ent) or "unknown", data.fail_streak))
-        if ui.get(menu_mode) == "Hybrid Engine" and data.last_input then
-            local op_side = data.predicted_side == 1 and 2 or 1
-            local target_desync = 58 - data.predicted_desync
-            add_training_sample(data.last_input, op_side, target_desync, 0.0, 1.0)
-        end
-    end
-end)
-client.set_event_callback("round_start", function()
-    for k, v in pairs(DB.players) do
-        v.fail_streak = 0
-        v.bruteforce_stage = 0
-    end
-end)
-client.delay_call(0.2, function()
-    client.color_log(150, 200, 255, "[Zenith] Resolver ready.")
-end)
--- ZenithResolver_GetData exported below
-_G.ZenithResolver_GetData = get_player_data
-
-end -- _HAS_RESOLVER

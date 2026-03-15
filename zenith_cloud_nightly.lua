@@ -6334,6 +6334,378 @@ cvar.developer:set_raw_int(0)
 
 
 
+
+--- region valk_features
+-- Viewmodel / Third Person / Aspect Ratio / Netgraph / Logs / Autobuy / Ladder / Legs
+do
+    local G  = "AA"
+    local GR = "Anti-aimbot angles"
+    local M  = "Misc"
+    local MO = "Movement"
+
+    -- UI items: Viewmodel
+    local vm_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::vm_en"}, "Viewmodel"):record("visuals","vf::vm_en"):save()
+    local vm_fov      = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_fov"}, 54, 90, 68, true, "fov", 1):record("visuals","vf::vm_fov"):save()
+    local vm_ox       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_ox"},  0, 50, 25, true, "x", 1):record("visuals","vf::vm_ox"):save()
+    local vm_oy       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_oy"},  0, 40, 20, true, "y", 1):record("visuals","vf::vm_oy"):save()
+    local vm_oz       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_oz"},  0, 40, 20, true, "z", 1):record("visuals","vf::vm_oz"):save()
+    local vm_rh       = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::vm_rh"}, "Right Hand"):record("visuals","vf::vm_rh"):save()
+
+    -- Third Person
+    local tp_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::tp_en"},   "Third Person"):record("visuals","vf::tp_en"):save()
+    local tp_dist     = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::tp_dist"}, 10, 300, 80, true, "u", 1):record("visuals","vf::tp_dist"):save()
+
+    -- Aspect Ratio
+    local ar_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::ar_en"},    "Aspect Ratio"):record("visuals","vf::ar_en"):save()
+    local ar_ratio    = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ar_ratio"}, 50, 200, 100, true, "%", 1):record("visuals","vf::ar_ratio"):save()
+
+    -- Netgraph
+    local ng_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::ng_en"},  "Netgraph"):record("visuals","vf::ng_en"):save()
+    local ng_x        = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ng_x"}, 0, 3840, 300, true, "px", 1):record("visuals","vf::ng_x"):save()
+    local ng_y        = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ng_y"}, 0, 2160, 800, true, "px", 1):record("visuals","vf::ng_y"):save()
+
+    -- Hit/Miss Logs
+    local logs_en     = menu.new_item(ui.new_checkbox,      G,GR, merge{"\n","vf::logs_en"}, "Hit/Miss Logs"):record("visuals","vf::logs_en"):save()
+    local logs_x      = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_x"}, 0, 3840, 970, true, "px", 1):record("visuals","vf::logs_x"):save()
+    local logs_y_pos  = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_y"}, 0, 2160, 832, true, "px", 1):record("visuals","vf::logs_y"):save()
+    local logs_dur    = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_dur"}, 1, 10, 5, true, "s", 1):record("visuals","vf::logs_dur"):save()
+    local logs_hit_c  = menu.new_item(ui.new_color_picker,  G,GR, merge{"\n","vf::logs_hc"}, 100, 220, 100, 255):record("visuals","vf::logs_hc"):save()
+    local logs_miss_c = menu.new_item(ui.new_color_picker,  G,GR, merge{"\n","vf::logs_mc"}, 220, 80, 80, 255):record("visuals","vf::logs_mc"):save()
+
+    -- Misc items
+    local fix_hs   = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::fix_hs"},   "Fix Hideshots"):record("aa","vf::fix_hs"):save()
+    local dt_disc  = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::dt_disc"},  "Auto DT Discharge"):record("aa","vf::dt_disc"):save()
+    local fl_en    = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::fl_en"},    "Fast Ladder"):record("aa","vf::fl_en"):save()
+    local fl_modes = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::fl_modes"}, "Ascending", "Descending"):record("aa","vf::fl_modes"):save()
+    local ab_en    = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::ab_en"},    "Autobuy"):record("aa","vf::ab_en"):save()
+    local ab_mode  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_mode"},  "Default", "Intelligent"):record("aa","vf::ab_mode"):save()
+    local ab_wpn   = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_wpn"},   "AK-47 / M4A4", "AK-47 / M4A1-S", "Galil / SG553", "FAMAS / AUG", "AWP", "Scout"):record("aa","vf::ab_wpn"):save()
+    local ab_pis   = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_pis"},   "P250", "Five-SeveN / Tec-9", "CZ75", "Desert Eagle"):record("aa","vf::ab_pis"):save()
+    local ab_oth   = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::ab_oth"},   "Smoke", "Flash", "HE Grenade", "Molotov", "Zeus", "Half Armor", "Full Armor"):record("aa","vf::ab_oth"):save()
+
+    -- Leg animations
+    local legs_air  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::legs_air"},  "Off", "Static", "Moonwalk", "Kangaroo"):record("aa","vf::legs_air"):save()
+    local legs_airw = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_airw"}, 0, 100, 100, true, "%", 1):record("aa","vf::legs_airw"):save()
+    local legs_gnd  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::legs_gnd"},  "Off", "Static", "Jitter", "Moonwalk", "Kangaroo", "Pacan4ik"):record("aa","vf::legs_gnd"):save()
+    local legs_o1   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_o1"},   0, 100, 100, true, "%", 1):record("aa","vf::legs_o1"):save()
+    local legs_o2   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_o2"},   0, 100, 100, true, "%", 1):record("aa","vf::legs_o2"):save()
+    local legs_jt   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_jt"},   1, 8, 2, true, "t", 1):record("aa","vf::legs_jt"):save()
+    local legs_opts = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::legs_opts"}, "Move lean", "Pitch zero on land"):record("aa","vf::legs_opts"):save()
+    local legs_lean = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_lean"}, 0, 100, 50, true, "%", 1):record("aa","vf::legs_lean"):save()
+
+    -- Page show helpers (called from Visual/Misc page renders)
+    _G._vf_show_visual = function()
+        _safe_display(vm_enabled)
+        if vm_enabled:get() then
+            _safe_display(vm_fov); _safe_display(vm_ox)
+            _safe_display(vm_oy);  _safe_display(vm_oz); _safe_display(vm_rh)
+        end
+        _safe_display(tp_enabled)
+        if tp_enabled:get() then _safe_display(tp_dist) end
+        _safe_display(ar_enabled)
+        if ar_enabled:get() then _safe_display(ar_ratio) end
+        _safe_display(ng_enabled)
+        if ng_enabled:get() then _safe_display(ng_x); _safe_display(ng_y) end
+        _safe_display(logs_en)
+        if logs_en:get() then
+            _safe_display(logs_x); _safe_display(logs_y_pos)
+            _safe_display(logs_dur); _safe_display(logs_hit_c); _safe_display(logs_miss_c)
+        end
+    end
+
+    _G._vf_show_misc = function()
+        _safe_display(fix_hs); _safe_display(dt_disc)
+        _safe_display(fl_en)
+        if fl_en:get() then _safe_display(fl_modes) end
+        _safe_display(ab_en)
+        if ab_en:get() then
+            _safe_display(ab_mode); _safe_display(ab_wpn)
+            _safe_display(ab_pis);  _safe_display(ab_oth)
+        end
+        _safe_display(legs_air)
+        if legs_air:get() ~= "Off" then _safe_display(legs_airw) end
+        _safe_display(legs_gnd)
+        if legs_gnd:get() ~= "Off" then
+            _safe_display(legs_o1); _safe_display(legs_o2); _safe_display(legs_jt)
+        end
+        _safe_display(legs_opts)
+        if legs_opts:have_key("Move lean") then _safe_display(legs_lean) end
+    end
+
+    -- Hit/miss log data
+    local vf_logs = { entries = {} }
+    local function vf_add_log(text, is_hit, extra)
+        local r, g, b = logs_hit_c:rawget()
+        if not is_hit then r, g, b = logs_miss_c:rawget() end
+        table.insert(vf_logs.entries, 1, {
+            text=text, is_hit=is_hit, r=r, g=g, b=b,
+            time=globals.curtime(), frac=0, extra=extra or ""
+        })
+        while #vf_logs.entries > 8 do table.remove(vf_logs.entries) end
+    end
+
+    local function vf_lerp(a, b, t) return a + (b - a) * t end
+
+    local function vf_draw_logs()
+        if not logs_en:get() then return end
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local dur = logs_dur:get()
+        local bx  = logs_x:get()
+        local by  = logs_y_pos:get()
+        local PAD = 7; local AW = 3; local LH = 13
+        local to_rm = {}
+        local cy = by
+        for i, log in ipairs(vf_logs.entries) do
+            local age = globals.curtime() - log.time
+            if age < dur then
+                log.frac = vf_lerp(log.frac, 1.0, 0.15)
+            else
+                log.frac = vf_lerp(log.frac, 0.0, 0.08)
+                if log.frac < 0.01 then table.insert(to_rm, i) end
+            end
+            local fr = log.frac
+            if fr < 0.02 then goto vf_skip end
+            do
+                local a   = math.floor(255 * fr)
+                local slx = math.floor(28 * (1 - fr))
+                local x   = bx + slx
+                local has_extra = log.extra ~= ""
+                local ch  = has_extra and (PAD*2 + LH*2 + 2) or (PAD*2 + LH)
+                renderer.rectangle(x, cy, 220, ch, 14, 14, 18, math.floor(210 * fr))
+                renderer.rectangle(x, cy, AW, ch, log.r, log.g, log.b, a)
+                local icon = log.is_hit and "+" or "-"
+                renderer.text(x+AW+PAD, cy+PAD, log.r, log.g, log.b, a, "d", 0, icon.." "..(log.text or ""))
+                if has_extra then
+                    renderer.rectangle(x+AW+PAD, cy+PAD+LH+1, 220-AW-PAD*2, 1, 255,255,255, math.floor(20*fr))
+                    renderer.text(x+AW+PAD, cy+PAD+LH+3, 200,200,200, math.floor(a*0.85), "d", 0, log.extra)
+                end
+                cy = cy + (ch + 4) * fr
+            end
+            ::vf_skip::
+        end
+        for i = #to_rm, 1, -1 do table.remove(vf_logs.entries, to_rm[i]) end
+    end
+
+    -- aim callbacks for logs
+    client.set_event_callback("aim_hit", function(e)
+        if not logs_en:get() then return end
+        local hg_names = {[0]="body",[1]="head",[2]="chest",[3]="stomach",[4]="l.arm",[5]="r.arm",[6]="l.leg",[7]="r.leg"}
+        local name = entity.get_player_name(e.target) or "?"
+        local hg   = hg_names[e.hitgroup] or "body"
+        local dmg  = e.damage or 0
+        vf_add_log(name.." ("..hg..")", true, dmg.."dmg")
+    end)
+    client.set_event_callback("aim_miss", function(e)
+        if not logs_en:get() then return end
+        local name   = entity.get_player_name(e.target) or "?"
+        local reason = e.reason or "?"
+        if reason == "?" then reason = "resolver" end
+        vf_add_log(name, false, reason)
+    end)
+
+    -- Netgraph
+    local ng_fps, ng_ping, ng_last = 0, 0, 0
+    local function vf_draw_ng()
+        if not ng_enabled:get() then return end
+        local now = globals.curtime()
+        if now - ng_last > 0.1 then
+            ng_fps  = math.floor(1 / math.max(globals.frametime(), 0.001) + 0.5)
+            ng_ping = math.floor((client.real_latency() or 0) * 1000 + 0.5)
+            ng_last = now
+        end
+        local x = ng_x:get(); local y = ng_y:get()
+        renderer.text(x, y,    200,200,200,200, "d", 0, string.format("fps: %d   ping: %dms", ng_fps, ng_ping))
+        renderer.text(x, y+12, 200,200,200,200, "d", 0, "loss: 0%  choke: 0%")
+    end
+
+    client.set_event_callback("paint", function()
+        vf_draw_logs()
+        vf_draw_ng()
+    end)
+
+    -- Viewmodel/TP/AR
+    local function vf_apply_vm()
+        if not vm_enabled:get() then return end
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+        client.set_cvar("viewmodel_fov",      vm_fov:get())
+        client.set_cvar("viewmodel_offset_x", (vm_ox:get()-25)/10)
+        client.set_cvar("viewmodel_offset_y", (vm_oy:get()-20)/10)
+        client.set_cvar("viewmodel_offset_z", (vm_oz:get()-20)/10)
+        client.set_cvar("cl_righthand",       vm_rh:get() and 1 or 0)
+    end
+    local _tp_ok, _tp_ref1, _tp_ref2 = pcall(function()
+        return ui.reference("Visuals","Effects","Force third person (alive)")
+    end)
+    local function vf_apply_tp()
+        if tp_enabled:get() then
+            local d = tp_dist:get()
+            if _tp_ref1 then pcall(ui.set,_tp_ref1,true) end
+            if _tp_ref2 then pcall(ui.set,_tp_ref2,true) end
+            client.set_cvar("c_mindistance",d); client.set_cvar("c_maxdistance",d)
+        else
+            client.set_cvar("c_mindistance",30); client.set_cvar("c_maxdistance",30)
+        end
+    end
+    local function vf_apply_ar()
+        if not ar_enabled:get() then client.set_cvar("r_aspectratio",0); return end
+        local sw,sh = client.screen_size()
+        client.set_cvar("r_aspectratio", (sw*(ar_ratio:get()/100))/sh)
+    end
+    ui.set_callback(vm_enabled.ref, vf_apply_vm); ui.set_callback(vm_fov.ref, vf_apply_vm)
+    ui.set_callback(vm_ox.ref, vf_apply_vm);      ui.set_callback(vm_oy.ref, vf_apply_vm)
+    ui.set_callback(vm_oz.ref, vf_apply_vm);      ui.set_callback(vm_rh.ref, vf_apply_vm)
+    ui.set_callback(tp_enabled.ref, vf_apply_tp); ui.set_callback(tp_dist.ref, vf_apply_tp)
+    ui.set_callback(ar_enabled.ref, vf_apply_ar); ui.set_callback(ar_ratio.ref, vf_apply_ar)
+
+    -- Fast ladder / fix hideshots / DT discharge
+    local _vf_hs_saved, _vf_hs_val = false, 14
+    local _fl_limit_ref; pcall(function() _fl_limit_ref = ui.reference("AA","Fake lag","Limit") end)
+    local _dt_ref;        pcall(function() _dt_ref = ui.reference("Rage","Aimbot","Double tap") end)
+
+    client.set_event_callback("setup_command", function(cmd)
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+
+        if fl_en:get() and entity.get_prop(lp,"m_MoveType") == 9 then
+            local pitch = select(1, client.camera_angles())
+            cmd.yaw = math.floor(cmd.yaw+0.5); cmd.roll = 0
+            if fl_modes:have_key("Ascending") and cmd.forwardmove>0 and pitch<45 then
+                cmd.pitch=89; cmd.in_moveright=1; cmd.in_moveleft=0; cmd.in_forward=0; cmd.in_back=1
+                if cmd.sidemove==0 then cmd.yaw=cmd.yaw+90
+                elseif cmd.sidemove<0 then cmd.yaw=cmd.yaw+150
+                else cmd.yaw=cmd.yaw+30 end
+            end
+            if fl_modes:have_key("Descending") and cmd.forwardmove<0 then
+                cmd.pitch=89; cmd.in_moveleft=1; cmd.in_moveright=0; cmd.in_forward=1; cmd.in_back=0
+                if cmd.sidemove==0 then cmd.yaw=cmd.yaw+90
+                elseif cmd.sidemove>0 then cmd.yaw=cmd.yaw+150
+                else cmd.yaw=cmd.yaw+30 end
+            end
+        end
+
+        if fix_hs:get() and _fl_limit_ref then
+            local isOs = software.is_on_shot_antiaim()
+            local isDt = software.is_double_tap()
+            local isFd = software.is_duck_peek_assist()
+            if isOs and not isDt and not isFd then
+                if not _vf_hs_saved then _vf_hs_val=ui.get(_fl_limit_ref); _vf_hs_saved=true end
+                ui.set(_fl_limit_ref, 1)
+            elseif _vf_hs_saved then
+                ui.set(_fl_limit_ref, _vf_hs_val); _vf_hs_saved=false
+            end
+        end
+
+        if dt_disc:get() and _dt_ref then
+            local enemies = entity.get_players(true)
+            local vis = false
+            for _,ent in ipairs(enemies) do
+                local bx,by,bz = entity.hitbox_position(ent,1)
+                if bx and client.visible(bx,by,bz+20) then vis=true; break end
+            end
+            if vis then
+                ui.set(_dt_ref,false)
+                client.delay_call(0.01,function() ui.set(_dt_ref,true) end)
+            end
+        end
+
+        vf_apply_vm()
+    end)
+
+    -- Autobuy
+    local ab_pt = {["AK-47 / M4A4"]="ak47",["AK-47 / M4A1-S"]="ak47",["Galil / SG553"]="sg556",["FAMAS / AUG"]="sg556",["AWP"]="awp",["Scout"]="ssg08"}
+    local ab_pc = {["AK-47 / M4A4"]="m4a1",["AK-47 / M4A1-S"]="m4a1_silencer",["Galil / SG553"]="galilar",["FAMAS / AUG"]="aug",["AWP"]="awp",["Scout"]="ssg08"}
+    local ab_pcs= {["P250"]="p250",["Five-SeveN / Tec-9"]="fiveseven",["CZ75"]="cz75a",["Desert Eagle"]="deagle"}
+    local ab_streak = 0
+    client.set_event_callback("round_start", function()
+        if not ab_en:get() then return end
+        local lp=entity.get_local_player(); if not lp then return end
+        local money=entity.get_prop(lp,"m_iAccount") or 0
+        local is_ct=(entity.get_prop(lp,"m_iTeamNum") or 2)==3
+        local mode=ab_mode:get(); local sel_w=ab_wpn:get(); local sel_p=ab_pis:get()
+        local oth=ab_oth:get() or {}
+        local function has(v) for _,x in ipairs(oth) do if x==v then return true end end return false end
+        local pri=is_ct and (ab_pc[sel_w] or "m4a1") or (ab_pt[sel_w] or "ak47")
+        local pis=ab_pcs[sel_p] or "p250"
+        local arm=has("Full Armor") and "vesthelm" or has("Half Armor") and "vest" or nil
+        local mol=is_ct and "incgrenade" or "molotov"
+        local q={}; local function bq(c) q[#q+1]=c end
+        if mode=="Default" then
+            if money>=800 then
+                if money>=2700 then bq("buy "..pri) end
+                bq("buy "..pis)
+                if arm then bq("buy "..arm) end
+                if has("Smoke") then bq("buy smokegrenade") end; if has("Flash") then bq("buy flashbang") end
+                if has("HE Grenade") then bq("buy hegrenade") end; if has("Molotov") then bq("buy "..mol) end
+                if has("Zeus") then bq("buy taser") end
+            end
+        else
+            local full=is_ct and 4000 or 3700; local eco=is_ct and 1200 or 1000; local force=is_ct and 2000 or 1800
+            if ab_streak>=3 then full=full+1000 end
+            if money>=full then bq("buy "..pri); bq("buy "..pis); if arm then bq("buy "..arm) end
+                if has("Smoke") then bq("buy smokegrenade") end; if has("HE Grenade") then bq("buy hegrenade") end
+            elseif money>=force then bq("buy "..pri); bq("buy "..pis); if arm then bq("buy "..arm) end
+            elseif money>=eco then bq("buy "..pis) end
+        end
+        if #q>0 then client.exec(table.concat(q,";")) end
+    end)
+    client.set_event_callback("round_end", function(e)
+        local lp=entity.get_local_player(); if not lp then return end
+        local mt=entity.get_prop(lp,"m_iTeamNum") or 2
+        if e and e.winner==mt then ab_streak=0 else ab_streak=ab_streak+1 end
+    end)
+
+    -- Leg animations
+    local _leg_mv_ref; pcall(function() _leg_mv_ref=ui.reference("AA","Other","Leg movement") end)
+    local function set_lm(v) if _leg_mv_ref then pcall(ui.set,_leg_mv_ref,v) end end
+
+    client.set_event_callback("pre_render", function()
+        local lp=entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+        local flags=entity.get_prop(lp,"m_fFlags") or 0
+        local on_ground=bit.band(flags,1)==1
+        local tc=globals.tickcount()
+        if on_ground then
+            local v=legs_gnd:get(); local o1=legs_o1:get(); local o2=legs_o2:get(); local spd=legs_jt:get()
+            if v=="Static" then entity.set_prop(lp,"m_flPoseParameter",1.0,0); set_lm("Always slide")
+            elseif v=="Jitter" then
+                local mul=1.0/(tc%(spd*4)>=(spd*2) and 200 or 400)
+                entity.set_prop(lp,"m_flPoseParameter",(tc%(spd*2)>=spd and o1 or o2)*mul,0); set_lm("Always slide")
+            elseif v=="Moonwalk" then entity.set_prop(lp,"m_flPoseParameter",0.0,7); set_lm("Never slide")
+            elseif v=="Kangaroo" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),3)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),7)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),6); set_lm("Off")
+            elseif v=="Pacan4ik" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(o1*0.01,o2*0.01),0)
+                set_lm(client.random_int(0,1)==0 and "Off" or "Always slide")
+            else set_lm("Off") end
+        else
+            local v=legs_air:get()
+            if v=="Static" then entity.set_prop(lp,"m_flPoseParameter",legs_airw:get()*0.01,6)
+            elseif v=="Moonwalk" then entity.set_prop(lp,"m_flPoseParameter",(globals.curtime()*0.55)%1,6)
+            elseif v=="Kangaroo" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),3)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),7)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),6)
+            end
+        end
+        local opts=legs_opts:get() or {}
+        local has_lean=false; for _,v in ipairs(opts) do if v=="Move lean" then has_lean=true; break end end
+        if has_lean then
+            local vx=entity.get_prop(lp,"m_vecVelocity[0]") or 0; local vy=entity.get_prop(lp,"m_vecVelocity[1]") or 0
+            if math.sqrt(vx*vx+vy*vy)>1 then end -- layer access requires ent lib, skip for now
+        end
+        local has_land=false; for _,v in ipairs(opts) do if v=="Pitch zero on land" then has_land=true; break end end
+        if has_land and on_ground then
+            entity.set_prop(lp,"m_flPoseParameter",0.5,12)
+        end
+    end)
+    client.set_event_callback("shutdown", function() set_lm("Off") end)
+
+end -- end region valk_features
+
 local resolver_show_tab  -- defined after resolver is created
 
 menu.set_callback(function()
@@ -6404,9 +6776,8 @@ menu.set_callback(function()
             _safe_display(manual_direction.disabled_manual)
         end
 
-
-
-
+        -- Valkyrie misc features
+        if _G._vf_show_misc then _G._vf_show_misc() end
 
     end
 
@@ -6573,6 +6944,9 @@ menu.set_callback(function()
             _safe_display(buy_bot.secondary)
             _safe_display(buy_bot.utility)
         end
+
+        -- Valkyrie features: viewmodel, third person, ar, netgraph, logs
+        if _G._vf_show_visual then _G._vf_show_visual() end
 
         _safe_display(clientside_nickname.enabled)
         if clientside_nickname.enabled:get() then
@@ -7236,14 +7610,12 @@ local _zres_ui_enabled, _zres_ui_mode, _zres_ui_verbose
 do
     local G  = "AA"
     local GR = "Anti-aimbot angles"
-    _zres_ui_enabled = menu.new_item(ui.new_checkbox, G, GR,
-        merge{"\n","zres::enabled"}, "Resolver")
+    _zres_ui_enabled = menu.new_item(ui.new_checkbox, G, GR, "Enable Resolver")
         :record("aa","zres::enabled"):save()
-    _zres_ui_mode = menu.new_item(ui.new_combobox, G, GR,
+    _zres_ui_mode    = menu.new_item(ui.new_combobox, G, GR,
         merge{"\n","zres::mode"}, "Pattern Core", "Hybrid Engine", "Bruteforce Only")
         :record("aa","zres::mode"):save()
-    _zres_ui_verbose = menu.new_item(ui.new_checkbox, G, GR,
-        merge{"\n","zres::verbose"}, "Verbose Log")
+    _zres_ui_verbose = menu.new_item(ui.new_checkbox, G, GR, "Verbose Logging")
         :record("aa","zres::verbose"):save()
 end
 
