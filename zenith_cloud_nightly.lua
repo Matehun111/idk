@@ -2718,13 +2718,16 @@ do
     end
 
     -- ── LC breaker ────────────────────────────────────────────────────
-    local function apply_vulnlc(cmd)
+    local function apply_vulnlc(cmd, ctx)
         local modes = ui_vulnlc:get()
         if not modes or #modes == 0 then return end
-        local charge = exploit.get and exploit.get().charge or 0
-        if has(modes,"Charged")   and charge >= 1.0 then cmd.force_send = true end
-        if has(modes,"Shifting")  and charge > 0 and charge < 1.0 then cmd.force_send = true end
-        if has(modes,"Uncharged") and charge == 0 then cmd.force_send = true end
+        local exp_data = exploit.get and pcall(exploit.get) and exploit.get() or nil
+        local charge = exp_data and exp_data.charge or 0
+        local should_break = false
+        if has(modes,"Charged")   and charge >= 1.0 then should_break = true end
+        if has(modes,"Shifting")  and charge > 0 and charge < 1.0 then should_break = true end
+        if has(modes,"Uncharged") and charge == 0 then should_break = true end
+        if should_break and ctx then ctx.defensive_ticks = 1 end
     end
 
     -- ── Builder page show function ────────────────────────────────────
@@ -2859,7 +2862,7 @@ do
         if not p then return end
 
         pcall(apply_fakelag)
-        apply_vulnlc(cmd)
+        pcall(apply_vulnlc, cmd, ctx)
 
         -- manual yaw
         if ui_man_en:get() then
@@ -6523,82 +6526,6 @@ menu.set_callback(function()
     -- ── DEFENSIVE ────────────────────────────────────────────────────
         if page == "Builder" then
         if _G._valk_show then _G._valk_show() end
-        local hd = _G._hd_state
-        if hd then
-            _safe_display(hd.ui_enable)
-            if hd.ui_enable:get() then
-
-                _safe_display(hd.ui_state)
-
-                -- Pitch
-                if hd.lbl_pitch then _safe_display(hd.lbl_pitch) end
-                _safe_display(hd.ui_pitch)
-                if hd.ui_pitch:get() == "Custom" then
-                    _safe_display(hd.ui_pitch_custom)
-                end
-
-                -- Yaw
-                if hd.lbl_yaw then _safe_display(hd.lbl_yaw) end
-                _safe_display(hd.ui_yaw_left)
-                _safe_display(hd.ui_yaw_right)
-                _safe_display(hd.ui_yaw_rnd_mode)
-                if hd.ui_yaw_rnd_mode:get() ~= "Off" then
-                    _safe_display(hd.ui_yaw_rnd_left)
-                    _safe_display(hd.ui_yaw_rnd_right)
-                end
-                _safe_display(hd.ui_yaw_jitter)
-                if hd.ui_yaw_jitter:get() ~= "Off" then
-                    _safe_display(hd.ui_yaw_jitter_deg)
-                end
-                _safe_display(hd.ui_randomization)
-                _safe_display(hd.ui_switch_chance)
-
-                -- Body Yaw
-                if hd.lbl_body then _safe_display(hd.lbl_body) end
-                _safe_display(hd.ui_body_yaw)
-                if hd.ui_body_yaw:get() ~= "Off" then
-                    _safe_display(hd.ui_body_yaw_deg)
-                end
-
-                -- Delay
-                if hd.lbl_delay then _safe_display(hd.lbl_delay) end
-                _safe_display(hd.ui_delay_from)
-                _safe_display(hd.ui_delay_to)
-                _safe_display(hd.ui_delay_count)
-                _safe_display(hd.ui_delay_tick1)
-                _safe_display(hd.ui_delay_rnd)
-
-                -- Fake Lag
-                if hd.lbl_fl then _safe_display(hd.lbl_fl) end
-                _safe_display(hd.ui_fl_settings)
-                _safe_display(hd.ui_fl_on)
-                if hd.ui_fl_on:get() then
-                    _safe_display(hd.ui_fl_mode)
-                    _safe_display(hd.ui_fl_variance)
-                    _safe_display(hd.ui_fl_limit)
-                end
-                _safe_display(hd.ui_vulnlc)
-
-                -- Controls
-                if hd.lbl_ctrl then _safe_display(hd.lbl_ctrl) end
-                _safe_display(hd.ui_inverter)
-                _safe_display(hd.ui_edge_yaw)
-                _safe_display(hd.ui_freestanding)
-                _safe_display(hd.ui_manual)
-                if hd.ui_manual:get() then
-                    _safe_display(hd.ui_man_left)
-                    _safe_display(hd.ui_man_right)
-                    _safe_display(hd.ui_man_reset)
-                end
-                _safe_display(hd.ui_avoid_bs)
-                _safe_display(hd.ui_safehead)
-                _safe_display(hd.ui_force_def)
-                if hd.ui_force_def:get() then
-                    _safe_display(hd.ui_def_on)
-                    _safe_display(hd.ui_def_mode)
-                end
-            end
-        end
     end
 
     if page == "Resolver" then
