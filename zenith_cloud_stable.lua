@@ -2683,18 +2683,24 @@ do
 
     -- ── Fake lag ──────────────────────────────────────────────────────
     local function apply_fakelag()
+        local fl = software.aa and software.aa.fakelag
+        if not fl then return end
         if not ui_fl_on:get() then
-            software.fakelag.set_amount(0); return
+            pcall(ui.set, fl.enabled[1], false)
+            return
         end
         local mode = ui_fl_mode:get()
         local lim  = ui_fl_limit:get()
         local var  = ui_fl_variance:get() / 100
+        pcall(ui.set, fl.enabled[1], true)
+        pcall(ui.set, fl.limit,    lim)
+        pcall(ui.set, fl.variance, math.floor(var * 100))
         if mode == "Dynamic" then
-            software.fakelag.set_amount(math.random(1, math.max(1, lim)))
+            pcall(ui.set, fl.amount, math.random(1, math.max(1, lim)))
         elseif mode == "Maximum" then
-            software.fakelag.set_amount(lim)
+            pcall(ui.set, fl.amount, lim)
         elseif mode == "Fluctuate" then
-            software.fakelag.set_amount(math.random(1, math.max(1, math.floor(lim * (1 - var * 0.5)))))
+            pcall(ui.set, fl.amount, math.random(1, math.max(1, math.floor(lim*(1-var*0.5)))))
         end
     end
 
@@ -2813,16 +2819,12 @@ do
         -- state detection
         local flags    = entity.get_prop(lp, "m_fFlags") or 0
         local onground = bit.band(flags,1) ~= 0
-        local vel      = entity.get_prop(lp, "m_vecVelocity") -- table {x,y,z} or 3 values
-        local vx, vy   = 0, 0
-        if type(vel) == "table" then vx=vel[1] or 0; vy=vel[2] or 0
-        else vx = entity.get_prop(lp,"m_vecVelocity[0]") or 0
-             vy = entity.get_prop(lp,"m_vecVelocity[1]") or 0
-        end
+        local vx = entity.get_prop(lp, "m_vecVelocity[0]") or 0
+        local vy = entity.get_prop(lp, "m_vecVelocity[1]") or 0
         local spd2    = math.sqrt(vx*vx + vy*vy)
         local pStill  = spd2 < 5
         local duck    = entity.get_prop(lp,"m_flDuckAmount") or 0
-        local isSlow  = software.is_slow_motion and software.is_slow_motion() or false
+        local isSlow  = (function() local ok,v=pcall(software.is_slow_motion); return ok and v or false end)()
 
         local raw = 1
         if pStill         then raw = 2 end
