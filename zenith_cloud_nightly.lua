@@ -2858,7 +2858,7 @@ do
         local p = ab[pState]
         if not p then return end
 
-        apply_fakelag()
+        pcall(apply_fakelag)
         apply_vulnlc(cmd)
 
         -- manual yaw
