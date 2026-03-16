@@ -2991,6 +2991,10 @@ do
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
+        -- Reset edge yaw and freestanding each frame (unless button is pressed later)
+        ctx.edge_yaw = false
+        ctx.freestanding = false
+
         -- inverter tick
         if cmd.chokedcommands == 0 then
             aa_inverter = not aa_inverter
@@ -6701,7 +6705,7 @@ menu.set_callback(function()
 
     end
 
-    -- ── AIMBOT ──────────────────────────────────────────────────────
+    -- ── AIMBOT ─────────────────────────────────────��────────────────
     -- Predict, Resolver, Unsafe Charge, Auto OS, Air Teleport, Jump Scout, Dormant
     if page == "Aimbot" then
         local p = _G.__predict
