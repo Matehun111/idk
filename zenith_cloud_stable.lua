@@ -2426,6 +2426,11 @@ do
         modify_jitter()
 
         setup()
+        
+        -- DEBUG: print ctx values once per second
+        if globals.tickcount() % 64 == 0 then
+            print("[ZENITH DEBUG] ctx.yaw=" .. tostring(ctx.yaw) .. " ctx.yaw_offset=" .. tostring(ctx.yaw_offset) .. " ctx.yaw_jitter=" .. tostring(ctx.yaw_jitter) .. " ctx.body_yaw=" .. tostring(ctx.body_yaw))
+        end
     end
 end
 
@@ -2920,7 +2925,10 @@ do
 
         local p      = ab[pState]
         local p_orig = ab[pState_orig] or p  -- for defensive: use original state
-        if not p then return end
+        if not p then 
+            print("[ZENITH DEBUG] No preset for pState: " .. tostring(pState))
+            return 
+        end
 
         pcall(apply_fakelag)
         pcall(apply_vulnlc, cmd, ctx)
@@ -3087,50 +3095,48 @@ do
             -- "Off" = don't override pitch
 
             -- ── Normal yaw ────────────────────────────────────────────
-            -- Skip if safe_head/defensive already set yaw values
-            if not ctx.yaw then
-                local ym     = p.yaw:rawget()
-                local yd     = p.yawDelay:rawget()
-                local ysw    = globals.tickcount() % (yd*2) < yd
-                if ym ~= "Off" then
-                    ctx.yaw = "180"
-                    if ym == "Slow Yaw" or ym == "L&R" then
-                        ctx.yaw_offset = ysw and p.yawLeft:rawget() or p.yawRight:rawget()
-                    else
-                        ctx.yaw_offset = p.yawStatic:rawget()
-                    end
+            local ym     = p.yaw:rawget()
+            local yd     = p.yawDelay:rawget()
+            local ysw    = globals.tickcount() % (yd*2) < yd
+            -- DEBUG: print yaw mode once per second
+            if globals.tickcount() % 64 == 0 then
+                print("[ZENITH DEBUG] Yaw mode: " .. tostring(ym) .. " | State: " .. tostring(pState))
+            end
+            if ym ~= "Off" then
+                ctx.yaw = "180"
+                if ym == "Slow Yaw" or ym == "L&R" then
+                    ctx.yaw_offset = ysw and p.yawLeft:rawget() or p.yawRight:rawget()
+                else
+                    ctx.yaw_offset = p.yawStatic:rawget()
                 end
             end
             -- "Off" = don't override yaw, let GS native handle it
 
             -- ── Jitter ────────────────────────────────────────────────
-            -- Skip if safe_head/defensive already set jitter values
-            if not ctx.yaw_jitter then
-                local jm = p.yawJitter:rawget()
-                local yd = p.yawDelay:rawget()
-                if jm == "L&R" then
-                    local jsw = globals.tickcount() % (yd*2) < yd
-                    ctx.yaw_jitter  = "Center"
-                    ctx.jitter_offset = jsw and p.yawJitterLeft:rawget() or p.yawJitterRight:rawget()
-                elseif jm == "3-Way" then
-                    ctx.yaw_jitter  = "Center"
-                    local ways = {p.wayFirst:rawget(), p.waySecond:rawget(), p.wayThird:rawget()}
-                    ctx.jitter_offset = ways[(globals.tickcount()%3)+1]
-                elseif jm ~= "Off" then
-                    ctx.yaw_jitter  = jm
-                    ctx.jitter_offset = p.yawJitterStatic:rawget()
-                end
+            local jm = p.yawJitter:rawget()
+            -- DEBUG: print jitter mode once per second
+            if globals.tickcount() % 64 == 0 then
+                print("[ZENITH DEBUG] Jitter mode: " .. tostring(jm) .. " | Body yaw: " .. tostring(p.bodyYaw:rawget()))
+            end
+            if jm == "L&R" then
+                local jsw = globals.tickcount() % (yd*2) < yd
+                ctx.yaw_jitter  = "Center"
+                ctx.jitter_offset = jsw and p.yawJitterLeft:rawget() or p.yawJitterRight:rawget()
+            elseif jm == "3-Way" then
+                ctx.yaw_jitter  = "Center"
+                local ways = {p.wayFirst:rawget(), p.waySecond:rawget(), p.wayThird:rawget()}
+                ctx.jitter_offset = ways[(globals.tickcount()%3)+1]
+            elseif jm ~= "Off" then
+                ctx.yaw_jitter  = jm
+                ctx.jitter_offset = p.yawJitterStatic:rawget()
             end
 
             -- ── Body yaw ──────────────────────────────────────────────
-            -- Skip if safe_head/defensive already set body yaw
-            if not ctx.body_yaw then
-                local bm = p.bodyYaw:rawget()
-                if bm ~= "Off" then
-                    ctx.body_yaw = bm
-                    if bm ~= "Opposite" then
-                        ctx.body_yaw_offset = p.bodyYawStatic:rawget()
-                    end
+            local bm = p.bodyYaw:rawget()
+            if bm ~= "Off" then
+                ctx.body_yaw = bm
+                if bm ~= "Opposite" then
+                    ctx.body_yaw_offset = p.bodyYawStatic:rawget()
                 end
             end
         end
