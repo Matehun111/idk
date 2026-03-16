@@ -2426,6 +2426,11 @@ do
         modify_jitter()
 
         setup()
+        
+        -- DEBUG: print ctx values once per second
+        if globals.tickcount() % 64 == 0 then
+            print("[ZENITH DEBUG] ctx.yaw=" .. tostring(ctx.yaw) .. " ctx.yaw_offset=" .. tostring(ctx.yaw_offset) .. " ctx.yaw_jitter=" .. tostring(ctx.yaw_jitter) .. " ctx.body_yaw=" .. tostring(ctx.body_yaw))
+        end
     end
 end
 
@@ -2877,10 +2882,6 @@ do
         local lp = entity.get_local_player()
         if not lp or not entity.is_alive(lp) then return end
 
-        -- Reset edge yaw and freestanding each frame (unless button is pressed later)
-        ctx.edge_yaw = false
-        ctx.freestanding = false
-
         -- inverter tick
         if cmd.chokedcommands == 0 then
             aa_inverter = not aa_inverter
@@ -2924,7 +2925,10 @@ do
 
         local p      = ab[pState]
         local p_orig = ab[pState_orig] or p  -- for defensive: use original state
-        if not p then return end
+        if not p then 
+            print("[ZENITH DEBUG] No preset for pState: " .. tostring(pState))
+            return 
+        end
 
         pcall(apply_fakelag)
         pcall(apply_vulnlc, cmd, ctx)
@@ -3094,6 +3098,10 @@ do
             local ym     = p.yaw:rawget()
             local yd     = p.yawDelay:rawget()
             local ysw    = globals.tickcount() % (yd*2) < yd
+            -- DEBUG: print yaw mode once per second
+            if globals.tickcount() % 64 == 0 then
+                print("[ZENITH DEBUG] Yaw mode: " .. tostring(ym) .. " | State: " .. tostring(pState))
+            end
             if ym ~= "Off" then
                 ctx.yaw = "180"
                 if ym == "Slow Yaw" or ym == "L&R" then
@@ -3106,6 +3114,10 @@ do
 
             -- ── Jitter ────────────────────────────────────────────────
             local jm = p.yawJitter:rawget()
+            -- DEBUG: print jitter mode once per second
+            if globals.tickcount() % 64 == 0 then
+                print("[ZENITH DEBUG] Jitter mode: " .. tostring(jm) .. " | Body yaw: " .. tostring(p.bodyYaw:rawget()))
+            end
             if jm == "L&R" then
                 local jsw = globals.tickcount() % (yd*2) < yd
                 ctx.yaw_jitter  = "Center"
