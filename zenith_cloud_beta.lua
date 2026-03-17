@@ -6549,6 +6549,64 @@ do
 end
 
 -- ======================================================================
+--  FAKE DUCK IN AIR (air exploit — crouch tickbase shift while airborne)
+-- ======================================================================
+do
+    local fd_air = {}
+
+    fd_air.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Fake Duck In Air")
+        :record("aa", "fd_air::enabled"):save()
+
+    fd_air.key = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles",
+        merge { "FD Air Key", "\n", "fd_air::key" })
+        :record("aa", "fd_air::key"):save()
+
+    fd_air.mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
+        merge { "Mode", "\n", "fd_air::mode" },
+        { "Always", "On Hotkey" })
+        :record("aa", "fd_air::mode"):save()
+
+    -- ── how it works ──────────────────────────────────────────────────
+    -- While airborne and DT is active, inject in_duck on every CHOKED
+    -- tick. This shifts the tickbase forward faster while in air, giving
+    -- you a fully charged DT shot the moment you land (or shoot mid-air).
+    -- We remove in_duck on the SEND tick so the sent packet is clean and
+    -- the server doesn't see an interrupted duck sequence.
+    --
+    -- Only runs when DT is enabled — safe to leave on permanently.
+    -- ──────────────────────────────────────────────────────────────────
+
+    client.set_event_callback("setup_command", function(cmd)
+        if not fd_air.enabled:get() then return end
+
+        -- hotkey gate
+        if fd_air.mode:get() == "On Hotkey" and not fd_air.key:get() then return end
+
+        local me = entity.get_local_player()
+        if not me or not entity.is_alive(me) then return end
+
+        -- only while DT is active
+        if not software.is_double_tap() then return end
+
+        -- only while airborne
+        local flags = entity.get_prop(me, "m_fFlags") or 0
+        if bit.band(flags, 1) ~= 0 then return end  -- on ground, skip
+
+        local choked = globals.chokedcommands()
+
+        if choked > 0 then
+            -- choked tick: inject the duck to shift tickbase
+            cmd.in_duck = 1
+        else
+            -- send tick: make sure duck is cleared so packet is clean
+            cmd.in_duck = 0
+        end
+    end)
+
+    _G.__fd_air = fd_air
+end
+
+-- ======================================================================
 --  AUTO OS (auto switch DT -> HideShot in bad conditions)
 -- ======================================================================
 do
@@ -7107,6 +7165,17 @@ menu.set_callback(function()
 
         local uc = _G.__unsafe_charge
         if uc then _safe_display(uc.enabled) end
+
+        local fda = _G.__fd_air
+        if fda then
+            _safe_display(fda.enabled)
+            if fda.enabled:get() then
+                _safe_display(fda.mode)
+                if fda.mode:get() == "On Hotkey" then
+                    _safe_display(fda.key)
+                end
+            end
+        end
 
         local aos = _G.__auto_os
         if aos then
