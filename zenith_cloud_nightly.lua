@@ -3294,6 +3294,26 @@ do
     rawset(_G, "_valk_ab",     ab)
     rawset(_G, "_valk_states", AA_STATES)
     rawset(_G, "_valk_show",   function() defensive.show_builder() end)
+    -- ── Preserve original jitter settings when DT/OS is active ──
+    local orig = p  -- Save the original AA configuration
+    
+    -- After defensive values are set, restore jitter settings
+    if orig then
+        ctx.yaw_jitter = orig.yawJitter:rawget()
+        
+        if ctx.yaw_jitter ~= "Off" then
+            if ctx.yaw_jitter == "Offset" then
+                ctx.jitter_offset = orig.yawJitterStatic:rawget()
+            elseif ctx.yaw_jitter == "L&R" then
+                ctx.yawJitterLeft = orig.yawJitterLeft:rawget()
+                ctx.yawJitterRight = orig.yawJitterRight:rawget()
+            elseif ctx.yaw_jitter == "3-Way" then
+                ctx.wayFirst = orig.wayFirst:rawget()
+                ctx.waySecond = orig.waySecond:rawget()
+                ctx.wayThird = orig.wayThird:rawget()
+            end
+        end
+    end
 
 end
 

@@ -2687,7 +2687,7 @@ do
     local ui_copy = menu.new_item(ui.new_button, G, GR,
         merge{"Copy to other team", "\n", "hd::copy"}, function() end)
 
-    -- ���─ UI: state selector ────────────────────────────────────────────
+    --    ─ UI: state selector ────────────────────────────────────────────
     local ui_state = menu.new_item(ui.new_combobox, G, GR,
         merge{"State", "\n", "hd::state"}, table.unpack(AA_STATES))
         :record("aa","hd::state"):save()
@@ -6851,7 +6851,7 @@ do
     local cur_sel  = 1
     local MAX_ROWS = 8
 
-    local m_header  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles','Cloud Configs ─────���───────────')
+    local m_header  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles','Cloud Configs ─────   ───────────')
     local m_rows    = {}
     for i=1,MAX_ROWS do
         m_rows[i] = menu.new_item(ui.new_label, 'AA','Anti-aimbot angles',' ')
