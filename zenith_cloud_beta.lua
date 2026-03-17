@@ -8135,13 +8135,11 @@ end
 
 --  CLANTAG SYSTEM (zenith.gs)
 -- ======================================================================
---  CLANTAG SYSTEM (zenith.gs)
--- ======================================================================
 do
     local mp = {}
-    _G.__misc_page = mp   -- keep reference so Visual page show_clantag() still works
+    _G.__misc_page = mp
 
-    -- Tags
+    -- ── animated frame tables ─────────────────────────────────────────
     local _write_tag = {
         '','','',
         'z','ze','zen','zeni','zenit','zenith',
@@ -8164,85 +8162,97 @@ do
     }
     local _flicker_tags = {'zenith.gs','ZENITH.GS','Zenith.Gs','zEnItH.gS'}
 
-    -- Menu items
-    mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff⚡ Clantag')
-    mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag'):record('misc','misc::ct_en'):save()
+    -- ── menu items ────────────────────────────────────────────────────
+    mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\xa1 Clantag')
+    mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag')
+        :record('misc','misc::ct_en'):save()
     mp.ct_mode  = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles', 'Animation',
-                    {'Static','Write','Scroll','Bounce','Flicker'}):record('misc','misc::ct_mode'):save()
-    mp.ct_text  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Custom Text'):record('misc','misc::ct_text'):save()
-    mp.ct_speed = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Speed', 1, 20, 5):record('misc','misc::ct_speed'):save()
+        {'Static','Write','Scroll','Bounce','Flicker'})
+        :record('misc','misc::ct_mode'):save()
+    mp.ct_text  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Custom Text')
+        :record('misc','misc::ct_text'):save()
+    mp.ct_speed = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Speed', 1, 20, 5)
+        :record('misc','misc::ct_speed'):save()
 
-    -- Defaults
+    -- ── defaults on load ─────────────────────────────────────────────
     client.delay_call(0.1, function()
         if not mp.ct_en:get() then mp.ct_en:set(true) end
-        local ok,v = pcall(ui.get, mp.ct_text.ref)
-        if not ok or not v or v=='' then pcall(ui.set, mp.ct_text.ref, 'zenith.gs') end
+        local txt = mp.ct_text:get()
+        if not txt or txt == '' then mp.ct_text:set('zenith.gs') end
     end)
 
-    -- Show on Visual page
+    -- ── helpers ───────────────────────────────────────────────────────
+    local function _get_text()
+        local txt = mp.ct_text:get()
+        return (txt and txt ~= '') and txt or 'zenith.gs'
+    end
+
+    local function _play(frames, spd, count)
+        -- use realtime so animation runs smoothly even outside a game
+        local idx = math.floor(globals.realtime() * spd % count) + 1
+        client.set_clan_tag(frames[idx] or '')
+    end
+
+    local function _apply()
+        if not mp.ct_en:get() then
+            client.set_clan_tag('')
+            return
+        end
+        local mode = mp.ct_mode:get()
+        local spd  = mp.ct_speed:get()
+        if mode == 'Static' then
+            client.set_clan_tag(_get_text())
+        elseif mode == 'Write' then
+            _play(_write_tag,  spd * 0.5, #_write_tag)
+        elseif mode == 'Scroll' then
+            _play(_scroll_tag, spd * 0.3, #_scroll_tag)
+        elseif mode == 'Bounce' then
+            _play(_bounce_tag, spd * 0.5, #_bounce_tag)
+        elseif mode == 'Flicker' then
+            _play(_flicker_tags, spd * 0.8, #_flicker_tags)
+        end
+    end
+
+    -- ── show in Misc page ─────────────────────────────────────────────
     function mp.show_clantag()
         _safe_display(mp.lbl_ct)
         _safe_display(mp.ct_en)
         if mp.ct_en:get() then
             _safe_display(mp.ct_mode)
-            local mode = mp.ct_mode:get()
-            if mode == 'Static' then
+            if mp.ct_mode:get() == 'Static' then
                 _safe_display(mp.ct_text)
-            elseif mode == 'Write' or mode == 'Scroll' or mode == 'Bounce' or mode == 'Flicker' then
+            else
                 _safe_display(mp.ct_speed)
             end
         end
     end
-
-    -- No misc tab needed - show() is empty
     function mp.show() end
 
-    -- Engine
-    local _old_tick = 0
-    local _win_panel = false
-
-    client.set_event_callback('cs_win_panel_match', function()
-        _win_panel = true
-        client.set_clan_tag('zenith.gs')
+    -- ── round events: force-apply immediately so scoreboard is correct
+    client.set_event_callback('round_start', function()
+        client.delay_call(0, _apply)
     end)
     client.set_event_callback('round_poststart', function()
-        _win_panel = false
+        client.delay_call(0, _apply)
+    end)
+    client.set_event_callback('cs_win_panel_match', function()
+        client.set_clan_tag(_get_text())
     end)
 
-    local function play_tag(frames, speed, count)
-        local idx = math.floor(globals.curtime() * speed % count) + 1
-        client.set_clan_tag(frames[idx])
-    end
+    -- ── net_update_end: run every 3 ticks ────────────────────────────
+    local _last_rt = 0
+    local _INTERVAL = 0.065  -- ~4 ticks at 64tick, feels responsive
 
     client.set_event_callback('net_update_end', function()
-        if _win_panel then return end
-        -- check gamesense native clantag spammer
+        -- don't fight native clantag spammer if it's on
         local ok, gs_ct = pcall(ui.get, ui.reference('Misc','Miscellaneous','Clan tag spammer'))
         if ok and gs_ct then return end
 
-        if not mp.ct_en or not mp.ct_en:get() then
-            client.set_clan_tag('')
-            return
-        end
+        local now = globals.realtime()
+        if now - _last_rt < _INTERVAL then return end
+        _last_rt = now
 
-        if globals.tickcount() - _old_tick < 4 then return end
-        _old_tick = globals.tickcount()
-
-        local mode = mp.ct_mode:get()
-        local spd  = mp.ct_speed:get()
-
-        if mode == 'Static' then
-            local ok2, txt = pcall(ui.get, mp.ct_text.ref)
-            client.set_clan_tag(ok2 and txt or 'zenith.gs')
-        elseif mode == 'Write' then
-            play_tag(_write_tag, spd * 0.5, #_write_tag)
-        elseif mode == 'Scroll' then
-            play_tag(_scroll_tag, spd * 0.3, #_scroll_tag)
-        elseif mode == 'Bounce' then
-            play_tag(_bounce_tag, spd * 0.5, #_bounce_tag)
-        elseif mode == 'Flicker' then
-            play_tag(_flicker_tags, spd * 0.8, #_flicker_tags)
-        end
+        _apply()
     end)
 end
 
