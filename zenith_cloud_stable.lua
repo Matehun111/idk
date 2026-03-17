@@ -6067,6 +6067,92 @@ do
 end
 
 
+--- region killsay
+do
+    local _ks_default = {
+        'ez', 'L', 'ratio', 'skill issue', 'get recked',
+        'not even close', 'uninstall', 'LOL', 'ggez', 'trash',
+        'outplayed', 'cry about it', 'too easy', 'go next',
+        'rekt', 'kys', 'mad?', 'sit', 'done', 'bye',
+        'no shot', 'clean', 'diff', 'pack it up',
+    }
+    local _ks_headshot = {
+        'headshot :)', 'one tap', 'clean hs', 'aim diff',
+        'right in the head', 'nailed it', 'boom headshot',
+    }
+    local _ks_knife = {
+        'knifed lol', 'put the gun away', 'knife diff',
+        'too close for bullets', 'get baited',
+    }
+    local ks_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Killsay')
+        :record('misc', 'killsay::enabled'):save()
+    local ks_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles',
+        merge { 'Killsay Mode', '\n', 'killsay::mode' },
+        { 'Default', 'Headshot Aware', 'Knife Aware', 'All Aware' })
+        :record('misc', 'killsay::mode'):save()
+    local ks_custom_en = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Custom Lines')
+        :record('misc', 'killsay::custom_en'):save()
+    local ks_custom = menu.new_item(ui.new_textbox, 'AA', 'Anti-aimbot angles', 'Custom Line')
+        :record('misc', 'killsay::custom'):save()
+    local ks_cooldown = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge { 'Cooldown', '\n', 'killsay::cooldown' }, 1, 30, 4, true, 's')
+        :record('misc', 'killsay::cooldown'):save()
+    local ks_chance = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge { 'Send Chance', '\n', 'killsay::chance' }, 1, 100, 75, true, '%')
+        :record('misc', 'killsay::chance'):save()
+    local _ks_last_time  = 0
+    local _ks_kill_queue = {}
+    local function _ks_pick(is_headshot, is_knife, mode)
+        local custom_en = ks_custom_en and ks_custom_en:get()
+        if custom_en then
+            local ok, txt = pcall(ui.get, ks_custom.ref)
+            if ok and txt and txt ~= '' then return txt end
+        end
+        local pool = _ks_default
+        if mode == 'Headshot Aware' and is_headshot then pool = _ks_headshot
+        elseif mode == 'Knife Aware' and is_knife then pool = _ks_knife
+        elseif mode == 'All Aware' then
+            if is_headshot then pool = _ks_headshot
+            elseif is_knife then pool = _ks_knife
+            end
+        end
+        return pool[math.random(#pool)]
+    end
+    client.set_event_callback('player_death', function(e)
+        if not ks_enabled:get() then return end
+        local me = entity.get_local_player()
+        if not me then return end
+        if client.userid_to_entindex(e.attacker) ~= me then return end
+        local victim = client.userid_to_entindex(e.userid)
+        if victim and not entity.is_enemy(victim) then return end
+        local wpn = entity.get_player_weapon(me)
+        local cls = wpn and entity.get_classname(wpn) or ''
+        table.insert(_ks_kill_queue, {
+            is_headshot = e.headshot == true,
+            is_knife    = cls:find('knife') ~= nil,
+        })
+    end)
+    client.set_event_callback('paint_ui', function()
+        if not ks_enabled:get() then _ks_kill_queue = {}; return end
+        if #_ks_kill_queue == 0 then return end
+        local now = globals.realtime()
+        if now - _ks_last_time < ks_cooldown:get() then return end
+        if math.random(100) > ks_chance:get() then
+            table.remove(_ks_kill_queue, 1); return
+        end
+        local kill = table.remove(_ks_kill_queue, 1)
+        local line = _ks_pick(kill.is_headshot, kill.is_knife, ks_mode:get())
+        if line and line ~= '' then
+            client.exec('say ' .. line)
+            _ks_last_time = now
+        end
+    end)
+    _G.__killsay = {
+        enabled=ks_enabled, mode=ks_mode, custom_en=ks_custom_en,
+        custom=ks_custom, cooldown=ks_cooldown, chance=ks_chance,
+    }
+end
+
 --- region shared
 do
     shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
@@ -6803,6 +6889,21 @@ menu.set_callback(function()
         -- Clantag
         if _G.__misc_page and _G.__misc_page.show_clantag then
             _G.__misc_page.show_clantag()
+        end
+
+        -- Killsay
+        local ks = _G.__killsay
+        if ks then
+            _safe_display(ks.enabled)
+            if ks.enabled:get() then
+                _safe_display(ks.mode)
+                _safe_display(ks.chance)
+                _safe_display(ks.cooldown)
+                _safe_display(ks.custom_en)
+                if ks.custom_en:get() then
+                    _safe_display(ks.custom)
+                end
+            end
         end
 
         -- Drop Nades / Chat Reveal
