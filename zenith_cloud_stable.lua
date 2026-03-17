@@ -5735,87 +5735,191 @@ end
 --     end
 -- end
 
---- hit marker zenith
+--- hit marker zenith [fancy]
 do
-    local MARKER_LIFETIME   = 3     -- seconds a damage number stays on screen
-    local MARKER_FLOAT_SPEED = 22   -- pixels per second floating upward
+    -- ── tunables ────────────────────────────────────────────────────────────
+    local MARKER_LIFETIME    = 3.2   -- seconds on screen
+    local FLOAT_TOTAL        = 68    -- total px drifted upward over lifetime
+    local SLIDE_AMOUNT       = 9     -- px of horizontal slide-in on spawn
+    local POP_DURATION       = 0.28  -- seconds of scale-pop on spawn
+    local POP_SCALE          = 2.0   -- peak scale multiplier at spawn
+    local GLOW_PASSES        = 4     -- concentric glow layers
+    local GLOW_MAX_SPREAD    = 4     -- px radius of outermost glow layer
+    local OUTLINE_OFFSETS    = { {1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,-1},{1,-1},{-1,1} }
 
-    local ctx = {
-        target = 0,
-        pos = vector()
-    }
+    -- ── helpers ─────────────────────────────────────────────────────────────
+    local function ease_out_cubic(t)
+        local u = 1 - t
+        return 1 - u * u * u
+    end
 
-    local pending_markers = { }
+    -- damage → colour tier
+    local function damage_color(dmg, is_head, accent_r, accent_g, accent_b)
+        if is_head then
+            return accent_r, accent_g, accent_b   -- accent colour for headshots
+        elseif dmg >= 90 then
+            return 255, 60,  60    -- near-lethal: vivid red
+        elseif dmg >= 60 then
+            return 255, 140, 40    -- high: orange
+        elseif dmg >= 30 then
+            return 255, 220, 80    -- medium: yellow
+        else
+            return 220, 220, 220   -- low: grey-white
+        end
+    end
 
+    -- hitgroup prefix icon
+    local function hitgroup_prefix(hg)
+        if hg == 1 then return "â¦ " end   -- ✦ head
+        if hg == 8 then return "â¢ " end   -- • neck
+        return "â¸ "                       -- ▸ body
+    end
+
+    -- ── state ───────────────────────────────────────────────────────────────
+    local ctx = { target = 0, pos = vector(), hitgroup = 0 }
+    local pending_markers = {}
+
+    -- marker table layout:
+    --  [1] = world pos (vector)
+    --  [2] = display string
+    --  [3] = expiry time
+    --  [4] = r, g, b (colour)
+    --  [5] = spawn_x offset (for slide-in)
+    --  [6] = spawn_time
+
+    -- ── frame ───────────────────────────────────────────────────────────────
     function hit_marker.frame()
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Damage Marker') then
-            return
-        end
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Damage Marker') then return end
 
         local realtime = globals.realtime()
+        local ar, ag, ab = widgets.color_picker:rawget()
+
         local i = 1
         while i <= #pending_markers do
-            local data = pending_markers[i]
-            local diff = data[3] - realtime
+            local m    = pending_markers[i]
+            local diff = m[3] - realtime
 
-            if data[3] < realtime then
+            if diff <= 0 then
                 table.remove(pending_markers, i)
             else
-                local age   = MARKER_LIFETIME - diff   -- elapsed seconds since creation
-                local alpha = diff < 1 and math.max(0, diff) or 1
-                local y_off = age * MARKER_FLOAT_SPEED  -- float upward
+                local age      = MARKER_LIFETIME - diff          -- seconds since spawn
+                local t        = age / MARKER_LIFETIME           -- 0→1 normalised
+                local ease_t   = ease_out_cubic(t)
 
-                local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
-                y = y - y_off
+                -- ── position ──────────────────────────────────────────────
+                local wx, wy = renderer.world_to_screen(m[1].x, m[1].y, m[1].z)
+                if wx then
+                    local y_off   = ease_t * FLOAT_TOTAL
+                    local x_slide = m[5] * (1 - ease_out_cubic(math.min(age / 0.12, 1)))
+                    local px      = wx + x_slide
+                    local py      = wy - y_off
 
-                local r, g, b = unpack(data[4])
-                -- Shadow for readability
-                renderer.text(x + 1, y + 1, 0, 0, 0, math.floor(180 * alpha), "c", nil, data[2])
-                -- Main text
-                renderer.text(x, y, r, g, b, math.floor(255 * alpha), "c", nil, data[2])
+                    -- ── alpha ─────────────────────────────────────────────
+                    local fade_start = 0.72   -- fade begins at 72% of lifetime
+                    local alpha
+                    if t < fade_start then
+                        alpha = 1.0
+                    else
+                        alpha = 1.0 - (t - fade_start) / (1.0 - fade_start)
+                        alpha = math.max(0, alpha)
+                    end
+
+                    -- ── scale pop ─────────────────────────────────────────
+                    -- simulated by choosing font flag "d" (larger) vs "" (normal)
+                    -- and adjusting the y slightly so it feels like it shrinks in
+                    local pop_t    = math.min(age / POP_DURATION, 1)
+                    local pop_ease = ease_out_cubic(pop_t)
+                    local scale_v  = POP_SCALE - (POP_SCALE - 1) * pop_ease   -- POP_SCALE→1
+                    -- offset upward so it appears to shrink toward centre
+                    local pop_y_nudge = -(scale_v - 1) * 6
+                    py = py + pop_y_nudge
+
+                    local ia   = math.floor(255 * alpha)
+                    local r, g, b = m[4][1], m[4][2], m[4][3]
+                    local txt  = m[2]
+
+                    -- ── glow passes ───────────────────────────────────────
+                    for pass = GLOW_PASSES, 1, -1 do
+                        local spread   = math.floor(GLOW_MAX_SPREAD * (pass / GLOW_PASSES))
+                        local glow_a   = math.floor(ia * 0.18 * (1 - (pass - 1) / GLOW_PASSES))
+                        if spread > 0 and glow_a > 0 then
+                            for _, off in ipairs(OUTLINE_OFFSETS) do
+                                renderer.text(
+                                    px + off[1] * spread,
+                                    py + off[2] * spread,
+                                    r, g, b, glow_a, "c", nil, txt
+                                )
+                            end
+                        end
+                    end
+
+                    -- ── hard outline (1px, 8-direction) ──────────────────
+                    local outline_a = math.floor(ia * 0.75)
+                    for _, off in ipairs(OUTLINE_OFFSETS) do
+                        renderer.text(px + off[1], py + off[2], 0, 0, 0, outline_a, "c", nil, txt)
+                    end
+
+                    -- ── main text ─────────────────────────────────────────
+                    renderer.text(px, py, r, g, b, ia, "c", nil, txt)
+
+                    -- ── accent dot under the number (headshots only) ──────
+                    if m[4][4] then   -- flag: is headshot
+                        local dot_a = math.floor(ia * 0.9 * (1 - t))
+                        renderer.text(px, py + 10, ar, ag, ab, dot_a, "c", nil,
+                            "â¢")   -- •
+                    end
+                end
+
                 i = i + 1
             end
         end
     end
 
+    -- ── aim_fire ────────────────────────────────────────────────────────────
     function hit_marker.aim_fire(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Damage Marker') then
-            return
-        end
-
-        ctx.target = e.target
-        ctx.pos = vector(e.x, e.y, e.z)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Damage Marker') then return end
+        ctx.target   = e.target
+        ctx.pos      = vector(e.x, e.y, e.z)
+        ctx.hitgroup = e.hitgroup or 0
     end
 
+    -- ── aim_hit ─────────────────────────────────────────────────────────────
     function hit_marker.aim_hit(e)
-        if not settings.tweaks_enable:get() then
-            return
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Damage Marker') then return end
+
+        if ctx.target ~= e.target then return end
+
+        local dmg     = e.damage or 0
+        local hg      = e.hitgroup or ctx.hitgroup or 0
+        local is_head = (hg == 1)
+        local ar, ag, ab = widgets.color_picker:rawget()
+        local r, g, b = damage_color(dmg, is_head, ar, ag, ab)
+
+        local prefix = hitgroup_prefix(hg)
+        local label  = prefix .. tostring(dmg)
+
+        -- small random horizontal slide direction so stacked markers separate
+        local slide_dir = (math.random(0, 1) == 0) and -SLIDE_AMOUNT or SLIDE_AMOUNT
+
+        local MAX_MARKERS = 12
+        if #pending_markers >= MAX_MARKERS then
+            table.remove(pending_markers, 1)
         end
 
-        if not settings.tweaks:have_key('Damage Marker') then
-            return
-        end
-
-        if ctx.target == e.target then
-            table.insert(
-                pending_markers,
-                {
-                    ctx.pos, tostring(e.damage),
-                    globals.realtime() + MARKER_LIFETIME,
-                    e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
-                }
-            )
-        end
+        table.insert(pending_markers, {
+            ctx.pos,
+            label,
+            globals.realtime() + MARKER_LIFETIME,
+            { r, g, b, is_head },   -- [4] colour + headshot flag
+            slide_dir,              -- [5] slide offset
+            globals.realtime(),     -- [6] spawn time
+        })
     end
 
+    -- ── round reset ─────────────────────────────────────────────────────────
     function hit_marker.round_prestart()
         table.clear(pending_markers)
     end
