@@ -2590,11 +2590,11 @@ do
     : record("aa", "defensive::state")
     : save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random" })
+    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch" })
     : record("aa", "defensive::pitch")
     : save()
 
-    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "Random" })
+    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random" })
     : record("aa", "defensive::pitch")
     : save()
 
@@ -2611,6 +2611,8 @@ do
 
     local defensive_3_way = { 90, 180, -90, 180, 90 }
     local defensive_5_way = { 90, 135, 180, 225, 270 }
+    local defensive_7_way = { 0, 51, 102, 154, 205, 257, 308 }
+    local _chaos_seed      = 0
 
     function defensive.handle(cmd, ctx)
         if not defensive.enabled:get() then
@@ -2697,6 +2699,11 @@ do
                 pitch_value, pitch_mode = client.random_float(45, 60), 'Custom'
             elseif val == 'Random' then
                 pitch_value, pitch_mode = client.random_float(-89, 89), 'Custom'
+            elseif val == 'Jitter Pitch' then
+                -- alternates sharply every shot tick for a stuttering pitch
+                local tick = globals.tickcount()
+                pitch_value = (tick % 2 == 0) and client.random_float(-75, -55) or client.random_float(55, 75)
+                pitch_mode  = 'Custom'
             end
 
             if manual_yaw ~= nil and should_flick then
@@ -2717,6 +2724,12 @@ do
                 yaw_value = defensive_3_way[localplayer.packets % 5 + 1] + client.random_float(-15, 15)
             elseif val == '5-Way' then
                 yaw_value = defensive_5_way[localplayer.packets % 5 + 1] + client.random_float(-15, 15)
+            elseif val == '7-Way' then
+                yaw_value = defensive_7_way[localplayer.packets % 7 + 1] + client.random_float(-20, 20)
+            elseif val == 'Chaos' then
+                -- pseudo-random using tick + packet count so it changes every choked packet
+                _chaos_seed = (_chaos_seed + globals.tickcount() * 1337 + localplayer.packets * 73) % 360
+                yaw_value   = utils.normalize(_chaos_seed - 180, -180, 180)
             elseif val == 'Random' then
                 yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
             end
@@ -5376,87 +5389,113 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 10
-            ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_offset = 35
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.yaw_offset = 12
+            ctx.yaw_jitter = 'Zenith'
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 45
+            ctx.jitter_randomization = 28
+            ctx.zenith_cycle = 22
+            ctx.zenith_delay = 14
+            ctx.zenith_safe = true
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -50
+            ctx.freestanding_body_yaw = true
         end,
 
         ['Moving'] = function (ctx)
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 10
-            ctx.yaw_jitter = 'Center'
-            ctx.jitter_offset = 60
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.yaw = '180 LR'
+            ctx.yaw_180lr_mode = 'Switch delay'
+            ctx.yaw_offset = 8
+            ctx.yaw_jitter = 'Zenith'
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 55
+            ctx.jitter_randomization = 22
+            ctx.zenith_cycle = 18
+            ctx.zenith_delay = 12
+            ctx.zenith_safe = true
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -45
         end,
 
         ['Slow Walk'] = function (ctx)
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 10
+            ctx.yaw_offset = 5
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 60
-            ctx.jitter_randomization = 15
-            ctx.zenith_cycle = 32
-            ctx.zenith_delay = 18
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 70
+            ctx.jitter_randomization = 35
+            ctx.zenith_cycle = 14
+            ctx.zenith_delay = 10
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -55
+            ctx.freestanding_body_yaw = true
         end,
 
         ['Crouched'] = function (ctx)
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 10
-            ctx.yaw_jitter = 'Center'
-            ctx.jitter_offset = 70
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.yaw_offset = 8
+            ctx.yaw_jitter = 'Zenith'
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 65
+            ctx.jitter_randomization = 30
+            ctx.zenith_cycle = 20
+            ctx.zenith_delay = 16
+            ctx.zenith_safe = true
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -50
+            ctx.freestanding_body_yaw = true
         end,
 
         ['Move Crouched'] = function (ctx)
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 10
-            ctx.yaw_jitter = 'Center'
-            ctx.jitter_offset = 60
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.yaw_offset = 6
+            ctx.yaw_jitter = 'Zenith'
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 58
+            ctx.jitter_randomization = 24
+            ctx.zenith_cycle = 16
+            ctx.zenith_delay = 12
+            ctx.zenith_safe = true
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -45
         end,
 
         ['Air'] = function (ctx)
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 2
-            ctx.yaw_jitter = 'Offset'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 28
-            ctx.jitter_randomization = 12
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -35
+            ctx.yaw = '180 LR'
+            ctx.yaw_180lr_mode = 'Switch delay'
+            ctx.yaw_offset = 4
+            ctx.yaw_jitter = 'Skitter'
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 38
+            ctx.jitter_randomization = 20
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -40
             ctx.freestanding_body_yaw = true
         end,
 
         ['Air Crouched'] = function (ctx)
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 3
-            ctx.yaw_jitter = 'Offset'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 28
-            ctx.jitter_randomization = 12
-            ctx.body_yaw = 'Jitter'
-            ctx.body_yaw_offset = -35
+            ctx.yaw = '180 LR'
+            ctx.yaw_180lr_mode = 'Switch delay'
+            ctx.yaw_offset = 4
+            ctx.yaw_jitter = 'Skitter'
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 38
+            ctx.jitter_randomization = 20
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -40
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5465,8 +5504,13 @@ do
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
             ctx.yaw_offset = 0
-            ctx.yaw_jitter = 'Off'
-            ctx.jitter_offset = 0
+            ctx.yaw_jitter = 'Zenith'
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 30
+            ctx.jitter_randomization = 18
+            ctx.zenith_cycle = 10
+            ctx.zenith_delay = 8
+            ctx.zenith_safe = false
             ctx.body_yaw = 'Opposite'
             ctx.body_yaw_offset = 0
             ctx.freestanding_body_yaw = true
@@ -5706,6 +5750,9 @@ end
 
 --- hit marker zenith
 do
+    local MARKER_LIFETIME   = 3     -- seconds a damage number stays on screen
+    local MARKER_FLOAT_SPEED = 22   -- pixels per second floating upward
+
     local ctx = {
         target = 0,
         pos = vector()
@@ -5723,18 +5770,27 @@ do
         end
 
         local realtime = globals.realtime()
-        for i, data in ipairs(pending_markers) do
+        local i = 1
+        while i <= #pending_markers do
+            local data = pending_markers[i]
             local diff = data[3] - realtime
-
-            local alpha = math.min(1, diff)--diff < 1 and math.max(0, diff) or 1
-
-            local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
-
-            local r, g, b = unpack(data[4])
-            renderer.text(x, y, r, g, b, 255 * alpha, "c", nil, data[2])
 
             if data[3] < realtime then
                 table.remove(pending_markers, i)
+            else
+                local age   = MARKER_LIFETIME - diff   -- elapsed seconds since creation
+                local alpha = diff < 1 and math.max(0, diff) or 1
+                local y_off = age * MARKER_FLOAT_SPEED  -- float upward
+
+                local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
+                y = y - y_off
+
+                local r, g, b = unpack(data[4])
+                -- Shadow for readability
+                renderer.text(x + 1, y + 1, 0, 0, 0, math.floor(180 * alpha), "c", nil, data[2])
+                -- Main text
+                renderer.text(x, y, r, g, b, math.floor(255 * alpha), "c", nil, data[2])
+                i = i + 1
             end
         end
     end
@@ -5766,7 +5822,7 @@ do
                 pending_markers,
                 {
                     ctx.pos, tostring(e.damage),
-                    globals.realtime() + 3,
+                    globals.realtime() + MARKER_LIFETIME,
                     e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
                 }
             )
