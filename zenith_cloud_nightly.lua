@@ -3314,9 +3314,9 @@ do
     local inferno = { }
     local regular = { }
 
-    local function draw_event_log(r, g, b, a, msg, kind)
+    local function draw_event_log(r, g, b, a, msg, kind, stable_key)
         if not settings.tweaks_enable:get() then return end
-        eventlogs.add(r, g, b, a, msg, kind or 'hit')
+        eventlogs.add_stable(r, g, b, a, msg, kind or 'hit', stable_key)
     end
 
     local function push_event_log(data)
@@ -3445,7 +3445,7 @@ do
             local name = entity.get_player_name(data.entity)
             local damage = data.damage
 
-            draw_event_log(r, g, b, 255 * data.alpha, f("Burned ${%s} for ${%d} damage", name, damage), 'burned')
+            draw_event_log(r, g, b, 255 * data.alpha, f("Burned ${%s} for ${%d} damage", name, damage), 'burned', tostring(data))
         end
     end
 
@@ -3474,7 +3474,7 @@ do
                 col_r, col_g, col_b = get_miss_color(data.reason)
             end
 
-            draw_event_log(col_r, col_g, col_b, 255 * data.alpha, data.msg, data.kind or 'hit')
+            draw_event_log(col_r, col_g, col_b, 255 * data.alpha, data.msg, data.kind or 'hit', tostring(data))
         end
     end
 
@@ -3616,38 +3616,89 @@ do
         return string.gsub(s, "${(.-)}", repl)
     end
 
-    -- ── state ────────────────────────────────────────────────────────────────
-    local queue        = {}
-    local live_entries = {}   -- { r,g,b, msg, kind, spawn_t, alpha_t }
-    local preview_alpha = 0.0
+    -- ── persistent entry list ───────────────────────────────────────────────
+    -- Each entry lives here across frames and drives its own alpha.
+    -- { r,g,b, msg, kind, spawn_t, alpha_t, target_alpha, key }
+    local live_entries  = {}
+    local preview_shown = false   -- tracks whether preview is currently visible
+
+    -- ── helpers ──────────────────────────────────────────────────────────────
+    local function find_entry_by_key(key)
+        for i = 1, #live_entries do
+            if live_entries[i].key == key then return live_entries[i], i end
+        end
+    end
+
+    local function push_entry(r, g, b, msg, kind, key, target_a)
+        local now = globals.realtime()
+        local e = find_entry_by_key(key)
+        if e then
+            -- refresh in place — don't reset spawn_t so slide stays settled
+            e.r, e.g, e.b   = r, g, b
+            e.msg            = msg
+            e.kind           = kind
+            e.target_alpha   = target_a
+            return e
+        end
+        if #live_entries >= MAX_ENTRIES then
+            table.remove(live_entries, 1)
+        end
+        local entry = {
+            r = r, g = g, b = b,
+            msg          = msg,
+            kind         = kind,
+            spawn_t      = now,
+            alpha_t      = 0.0,
+            target_alpha = target_a,
+            key          = key,
+        }
+        table.insert(live_entries, entry)
+        return entry
+    end
 
     -- ── preview ──────────────────────────────────────────────────────────────
-    local function update_preview()
-        local can_show = widgets.enabled:get() and ui.is_menu_open() and #live_entries == 0
-        preview_alpha  = motion.interp(preview_alpha, can_show and 1 or 0, 0.045)
+    local preview_target = 0.0
 
-        if preview_alpha > 0.0 then
-            local a = 255 * preview_alpha
-            local ar, ag, ab = widgets.color_picker:rawget()
-            eventlogs.add(ar, ag, ab, a, "Hit ${vladislav} for ${10} damage",         'hit')
-            eventlogs.add(ar, ag, ab, a, "Hit ${monster} in the ${head} for ${103} damage", 'hit')
-            do
-                local r,g,b = eventlogs.miss_color_picker:rawget()
-                eventlogs.add(r,g,b,a, "Missed shot due to ${correction}",        'miss')
-                eventlogs.add(r,g,b,a, "Missed shot due to ${prediction error}",  'miss')
-                eventlogs.add(r,g,b,a, "Missed shot due to ${lagcomp failure}",   'miss')
-            end
-            do
-                local r,g,b = eventlogs.spread_color_picker:rawget()
-                eventlogs.add(r,g,b,a, "Missed shot due to ${spread}",            'spread')
-            end
-            do
-                local r,g,b = eventlogs.unregistered_color_picker:rawget()
-                eventlogs.add(r,g,b,a, "Missed shot due to ${unregistered shot}", 'net')
-                eventlogs.add(r,g,b,a, "Missed shot due to ${player death}",      'net')
-                eventlogs.add(r,g,b,a, "Missed shot due to ${death}",             'net')
-            end
+    local function update_preview()
+        local real_count = 0
+        for _, e in ipairs(live_entries) do
+            if not e.is_preview then real_count = real_count + 1 end
         end
+        local can_show = widgets.enabled:get() and ui.is_menu_open() and real_count == 0
+        preview_target = motion.interp(preview_target, can_show and 1 or 0, 0.045)
+
+        local pv = preview_target
+        if pv <= 0.01 then
+            -- fade out all preview entries
+            for _, e in ipairs(live_entries) do
+                if e.is_preview then e.target_alpha = 0 end
+            end
+            return
+        end
+
+        local a = pv  -- 0-1, used directly as target_alpha
+
+        local function add_prev(r, g, b, msg, kind, key)
+            local e = push_entry(r, g, b, msg, kind, 'prev_'..key, a)
+            e.is_preview = true
+        end
+
+        local ar, ag, ab = widgets.color_picker:rawget()
+        add_prev(ar,ag,ab, "Hit ${vladislav} for ${10} damage",          'hit',  'h1')
+        add_prev(ar,ag,ab, "Hit ${monster} in the ${head} for ${103} damage", 'hit', 'h2')
+
+        local mr, mg, mb = eventlogs.miss_color_picker:rawget()
+        add_prev(mr,mg,mb, "Missed shot due to ${correction}",       'miss',   'm1')
+        add_prev(mr,mg,mb, "Missed shot due to ${prediction error}", 'miss',   'm2')
+        add_prev(mr,mg,mb, "Missed shot due to ${lagcomp failure}",  'miss',   'm3')
+
+        local sr, sg, sb = eventlogs.spread_color_picker:rawget()
+        add_prev(sr,sg,sb, "Missed shot due to ${spread}",           'spread', 's1')
+
+        local nr, ng, nb = eventlogs.unregistered_color_picker:rawget()
+        add_prev(nr,ng,nb, "Missed shot due to ${unregistered shot}", 'net',   'n1')
+        add_prev(nr,ng,nb, "Missed shot due to ${player death}",      'net',   'n2')
+        add_prev(nr,ng,nb, "Missed shot due to ${death}",             'net',   'n3')
     end
 
     -- ── widget / window ──────────────────────────────────────────────────────
@@ -3656,6 +3707,8 @@ do
     local hovered_alpha = 0
 
     -- ── draw ─────────────────────────────────────────────────────────────────
+    local SLIDE_AMOUNT = 22
+
     local function draw_eventlogs()
         if not widgets.enabled:get() or not widgets.items:have_key("On-Screen Logs") then
             return
@@ -3668,9 +3721,9 @@ do
         local window  = widget
         window.pos.x  = screen.x * 0.5 - 165
 
-        local pos     = window.pos:clone()
-        local size    = window.size:clone()
-        local cx      = pos.x + size.x * 0.5   -- horizontal centre of widget
+        local pos  = window.pos:clone()
+        local size = window.size:clone()
+        local cx   = pos.x + size.x * 0.5
 
         hovered_alpha = motion.interp(hovered_alpha,
             ui.is_menu_open() and window:is_hovering() and 1 or 0, 0.095)
@@ -3682,60 +3735,35 @@ do
                 255, 255, 255, math.floor(80 * hovered_alpha))
         end
 
-        -- build from live queue (flush happens in pre_frame via eventlogs.add)
-        for idx = 1, #queue do
-            local log = queue[idx]
-
-            -- find or create live entry
-            local entry = live_entries[idx]
-            if entry == nil then
-                entry = {
-                    r = log.r, g = log.g, b = log.b,
-                    msg     = log.msg,
-                    kind    = log.kind or 'hit',
-                    spawn_t = now,
-                    alpha_t = 0.0,
-                }
-                live_entries[idx] = entry
+        -- tick alpha, prune dead entries
+        local i = 1
+        while i <= #live_entries do
+            local e = live_entries[i]
+            e.alpha_t = motion.interp(e.alpha_t, e.target_alpha, 0.07)
+            if e.alpha_t < 0.005 and e.target_alpha <= 0 then
+                table.remove(live_entries, i)
+            else
+                i = i + 1
             end
-            -- always refresh colour + message so previews animate
-            entry.r, entry.g, entry.b = log.r, log.g, log.b
-            entry.msg  = log.msg
-            entry.kind = log.kind or entry.kind
-        end
-        -- remove stale entries
-        while #live_entries > #queue do
-            table.remove(live_entries)
         end
 
         local draw_y = pos.y
 
         for idx = 1, #live_entries do
-            local e   = live_entries[idx]
-            local age = now - e.spawn_t
-
-            -- alpha: fade in over FADE_IN_TICKS, driven by outer log.a
-            local log_alpha = queue[idx] and (queue[idx].a * ALPHA_UNIT) or 0
-            e.alpha_t = motion.interp(e.alpha_t, log_alpha, 0.08)
+            local e     = live_entries[idx]
             local alpha = e.alpha_t
-            if alpha < 0.01 then goto continue_log end
+            if alpha < 0.005 then goto continue_log end
 
-            -- slide-in: starts SLIDE_AMOUNT px to the right, snaps to centre
-            local slide_p = math.min(age / SLIDE_TICKS, 1.0)
-            local slide_ease = ease_out_quart(slide_p)
-            local SLIDE_AMOUNT = 22
-            local slide_x = SLIDE_AMOUNT * (1.0 - slide_ease)
+            local age      = now - e.spawn_t
+            local slide_p  = math.min(age / SLIDE_TICKS, 1.0)
+            local slide_x  = SLIDE_AMOUNT * (1.0 - ease_out_quart(slide_p))
 
-            -- format text with colour escapes
-            local r, g, b = e.r, e.g, e.b
+            local r, g, b  = e.r, e.g, e.b
             local raw_text = replacement(e.msg, {r, g, b, 255}, {255, 255, 255, 255})
-
-            -- prepend icon
             local icon     = TYPE_ICONS[e.kind] or ""
             local full_txt = icon .. raw_text
 
-            -- measure
-            local tw, th = renderer.measure_text(flags, full_txt)
+            local tw, th  = renderer.measure_text(flags, full_txt)
             local pill_w  = tw + PILL_PAD_X * 2 + ACCENT_BAR_W
             local pill_h  = th + PILL_PAD_Y * 2
 
@@ -3746,37 +3774,29 @@ do
             local ia_bar  = math.floor(255 * alpha)
             local ia_txt  = math.floor(255 * alpha)
 
-            -- ── pill background ──────────────────────────────────────────
+            -- pill background
             draw_pill(pill_x, pill_y, pill_w, pill_h, 0, 0, 0, ia_pill, PILL_RADIUS)
 
-            -- ── right-edge fade out of pill ──────────────────────────────
+            -- right-edge fade
             renderer.gradient(
-                pill_x + pill_w - 24, pill_y,
-                24, pill_h,
-                0,0,0, 0,
-                0,0,0, ia_pill,
-                false
-            )
+                pill_x + pill_w - 24, pill_y, 24, pill_h,
+                0,0,0,0,  0,0,0, ia_pill,  false)
 
-            -- ── left accent bar + glow ───────────────────────────────────
+            -- left accent bar + glow
             draw_accent_bar(pill_x, pill_y, pill_h, r, g, b, ia_bar, PILL_RADIUS)
 
-            -- ── top highlight line ───────────────────────────────────────
+            -- top highlight
             renderer.gradient(
                 pill_x + PILL_RADIUS, pill_y,
                 pill_w - PILL_RADIUS * 2, 1,
                 255,255,255, math.floor(28 * alpha),
-                255,255,255, 0,
-                false
-            )
+                255,255,255, 0,  false)
 
-            -- ── text ─────────────────────────────────────────────────────
+            -- text
             local tx = pill_x + ACCENT_BAR_W + PILL_PAD_X
             local ty = pill_y + PILL_PAD_Y
-            -- subtle drop shadow
-            renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(120 * alpha), flags, nil, full_txt)
-            -- main
-            graphics.text(tx, ty, 255, 255, 255, ia_txt, flags, 0, full_txt)
+            renderer.text(tx+1, ty+1, 0,0,0, math.floor(120*alpha), flags, nil, full_txt)
+            graphics.text(tx, ty, 255,255,255, ia_txt, flags, 0, full_txt)
 
             draw_y = draw_y + pill_h + PILL_GAP
 
@@ -3790,21 +3810,40 @@ do
     local function get_color(self) return self.r, self.g, self.b end
 
     local wr, wg, wb = widgets.color_picker:rawget()
-    eventlogs.hit_color_picker = { r=wr, g=wg, b=wb, rawget=get_color }
-    eventlogs.spread_color_picker = { r=255, g=225, b=115, rawget=get_color }
-    eventlogs.miss_color_picker   = { r=255, g=98,  b=98,  rawget=get_color }
+    eventlogs.hit_color_picker          = { r=wr,  g=wg,  b=wb,  rawget=get_color }
+    eventlogs.spread_color_picker       = { r=255, g=225, b=115, rawget=get_color }
+    eventlogs.miss_color_picker         = { r=255, g=98,  b=98,  rawget=get_color }
     eventlogs.unregistered_color_picker = { r=100, g=100, b=255, rawget=get_color }
 
     -- ── public API ───────────────────────────────────────────────────────────
+    -- unique key counter for one-shot entries without a stable handle
+    local _entry_seq = 0
+
+    -- add_stable: uses caller-supplied key so the same logical entry is
+    -- refreshed in place every frame rather than spawning a new one.
+    function eventlogs.add_stable(r, g, b, a, text, kind, key)
+        if key == nil then
+            _entry_seq = _entry_seq + 1
+            key = 'seq_'.._entry_seq
+        end
+        local e = push_entry(r, g, b, text, kind or 'hit', key, a * ALPHA_UNIT)
+        e.is_preview = false
+        return e
+    end
+
+    -- legacy one-shot add (still used by preview internally)
     function eventlogs.add(r, g, b, a, text, kind)
-        if #queue >= MAX_ENTRIES then return end
-        local log = { r=r, g=g, b=b, a=a, msg=text, kind=kind or 'hit' }
-        table.insert(queue, log)
-        return log
+        return eventlogs.add_stable(r, g, b, a, text, kind, nil)
     end
 
     function eventlogs.pre_frame()
-        table.clear(queue)
+        -- real shot entries: set target to 0 so they fade once the push stops
+        -- (they will be re-pushed each frame while alive via update_regular_logs)
+        for _, e in ipairs(live_entries) do
+            if not e.is_preview then
+                e.target_alpha = 0
+            end
+        end
     end
 
     function eventlogs.post_frame()
