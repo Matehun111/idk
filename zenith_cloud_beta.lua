@@ -8228,29 +8228,42 @@ do
     end
     function mp.show() end
 
-    -- ── round events: force-apply immediately so scoreboard is correct
+    -- ── net_update_end: the ONLY place client.set_clan_tag works ────────
+    -- Reset _force_apply on round events so the tag is pushed immediately
+    -- on the next net_update_end tick without waiting for the interval.
+    local _last_rt     = 0
+    local _force_apply = false
+    local _ANIM_INTERVAL = 0.065  -- throttle animated modes (~4 ticks)
+
     client.set_event_callback('round_start', function()
-        client.delay_call(0, _apply)
+        _force_apply = true   -- bypass throttle next tick
     end)
     client.set_event_callback('round_poststart', function()
-        client.delay_call(0, _apply)
+        _force_apply = true
+    end)
+    client.set_event_callback('round_prestart', function()
+        _force_apply = true
     end)
     client.set_event_callback('cs_win_panel_match', function()
-        client.set_clan_tag(_get_text())
+        _force_apply = true
     end)
-
-    -- ── net_update_end: run every 3 ticks ────────────────────────────
-    local _last_rt = 0
-    local _INTERVAL = 0.065  -- ~4 ticks at 64tick, feels responsive
 
     client.set_event_callback('net_update_end', function()
         -- don't fight native clantag spammer if it's on
         local ok, gs_ct = pcall(ui.get, ui.reference('Misc','Miscellaneous','Clan tag spammer'))
         if ok and gs_ct then return end
 
-        local now = globals.realtime()
-        if now - _last_rt < _INTERVAL then return end
-        _last_rt = now
+        local mode = mp.ct_en:get() and mp.ct_mode:get() or 'off'
+        local now  = globals.realtime()
+
+        -- Static: always apply (cheap, and must show on scoreboard immediately)
+        -- Animated: throttle so frames progress smoothly
+        local is_anim = (mode == 'Write' or mode == 'Scroll' or mode == 'Bounce' or mode == 'Flicker')
+        if is_anim and not _force_apply then
+            if now - _last_rt < _ANIM_INTERVAL then return end
+        end
+        _last_rt     = now
+        _force_apply = false
 
         _apply()
     end)
