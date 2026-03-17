@@ -871,7 +871,412 @@ LPH_NO_VIRTUALIZE(function ()
             callbacks[#callbacks + 1] = callback
         end
 
-        function menu.update()
+        function -- ======================================================================
+--  ZENITH RAGE SETTINGS  (ported from Valkyrie, adapted to Zenith API)
+--  Auto HC / Min-Dmg / Body-Aim / Safepoint with per-weapon presets
+--  Plugs into Zenith's software.rage.aimbot.* refs + override system
+-- ======================================================================
+local _zn_rage = {}
+do
+    -- ── weapon categories ─────────────────────────────────────────────
+    local WEAPON_CLASS = {
+        [9]  = "AWP",
+        [40] = "Scout",
+        [11] = "Auto",  [38] = "Auto",
+        [7]  = "Rifle", [60] = "Rifle", [16] = "Rifle",
+        [39] = "Rifle", [33] = "Rifle", [10] = "Rifle",
+        [13] = "Rifle", [19] = "Rifle", [24] = "Rifle",
+        [8]  = "Other",
+        [2]  = "Pistol", [3]  = "Pistol", [4]  = "Pistol",
+        [30] = "Pistol", [32] = "Pistol", [36] = "Pistol",
+        [61] = "Pistol", [63] = "Pistol", [1]  = "Pistol",
+        [64] = "Heavy Pistol",
+    }
+
+    -- ── base presets ──────────────────────────────────────────────────
+    local PRESETS = {
+        ["AWP"]          = { Safe={hc=87,dmg=100}, Aggressive={hc=70,dmg=100}, Dynamic={hc=78,dmg=100}, dmgMax=115 },
+        ["Scout"]        = { Safe={hc=82,dmg=82},  Aggressive={hc=64,dmg=82},  Dynamic={hc=72,dmg=82},  dmgMax=92  },
+        ["Auto"]         = { Safe={hc=70,dmg=40},  Aggressive={hc=52,dmg=28},  Dynamic={hc=60,dmg=35},  dmgMax=55  },
+        ["Rifle"]        = { Safe={hc=68,dmg=26},  Aggressive={hc=50,dmg=18},  Dynamic={hc=58,dmg=22},  dmgMax=38  },
+        ["Heavy Pistol"] = { Safe={hc=66,dmg=52},  Aggressive={hc=48,dmg=42},  Dynamic={hc=56,dmg=48},  dmgMax=60  },
+        ["Pistol"]       = { Safe={hc=64,dmg=16},  Aggressive={hc=48,dmg=12},  Dynamic={hc=55,dmg=14},  dmgMax=28  },
+        ["Other"]        = { Safe={hc=65,dmg=22},  Aggressive={hc=48,dmg=16},  Dynamic={hc=55,dmg=20},  dmgMax=35  },
+    }
+
+    -- ── helpers ───────────────────────────────────────────────────────
+    local function get_dist(a, b)
+        local ok1, ax, ay, az = pcall(entity.get_origin, a)
+        local ok2, bx, by, bz = pcall(entity.get_origin, b)
+        if ok1 and ok2 and ax and bx then
+            local dx, dy, dz = bx-ax, by-ay, bz-az
+            return math.sqrt(dx*dx + dy*dy + dz*dz)
+        end
+        return 800
+    end
+
+    local function clamp(v, lo, hi)
+        return math.max(lo, math.min(hi, math.floor(v + 0.5)))
+    end
+
+    -- ── per-target miss / hit tracking ────────────────────────────────
+    local hit_tracker  = {}   -- [entindex] = { misses, hits, shots }
+    local plist_cache  = {}   -- [entindex] = { baim, safe }
+    local rage_ticks   = 0
+    local last_weapon  = nil
+    local rage_prev    = { hc = -1, dmg = -1 }
+
+    -- ── backup/restore native rage values ─────────────────────────────
+    local rage_backup  = { saved = false }
+
+    local function backup_rage()
+        if rage_backup.saved then return end
+        pcall(function()
+            rage_backup.hc  = ui.get(software.rage.aimbot.hitchance)
+            rage_backup.dmg = ui.get(software.rage.aimbot.minimum_damage)
+            rage_backup.saved = true
+        end)
+    end
+
+    local function restore_rage()
+        if not rage_backup.saved then return end
+        pcall(ui.set, software.rage.aimbot.hitchance,       rage_backup.hc)
+        pcall(ui.set, software.rage.aimbot.minimum_damage,  rage_backup.dmg)
+        rage_backup.saved = false
+        rage_prev = { hc = -1, dmg = -1 }
+    end
+
+    -- ── menu items ────────────────────────────────────────────────────
+    local WEAPONS = { "Global", "AWP", "Scout", "Auto", "Rifle", "Heavy Pistol", "Pistol", "Other" }
+
+    _zn_rage.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Rage Settings")
+        :record("aa", "zn_rage::enabled"):save()
+
+    _zn_rage.weapon_picker = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
+        merge { "Weapon\n", "zn_rage::weapon_picker" }, WEAPONS)
+        :record("aa", "zn_rage::weapon_picker"):save()
+
+    _zn_rage.weapons = {}
+    for _, w in ipairs(WEAPONS) do
+        local ws = {
+            aim_mode   = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Aim Mode\n", "zn_rage::aim_mode_", w },
+                { "Safe", "Aggressive", "Dynamic" }):record("aa", "zn_rage::aim_mode_"..w):save(),
+
+            auto_hc    = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Auto Hit Chance\n", "zn_rage::auto_hc_", w })
+                :record("aa", "zn_rage::auto_hc_"..w):save(),
+
+            auto_dmg   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Auto Min Damage\n", "zn_rage::auto_dmg_", w })
+                :record("aa", "zn_rage::auto_dmg_"..w):save(),
+
+            -- ── Body Aim ──
+            baim_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Auto Body Aim\n", "zn_rage::baim_en_", w })
+                :record("aa", "zn_rage::baim_en_"..w):save(),
+
+            baim_mode  = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Baim Trigger\n", "zn_rage::baim_mode_", w },
+                { "Always", "HP Threshold", "After N Misses", "Airborne" })
+                :record("aa", "zn_rage::baim_mode_"..w):save(),
+
+            baim_hp    = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Baim HP\n", "zn_rage::baim_hp_", w },
+                1, 100, 40, true, "hp"):record("aa", "zn_rage::baim_hp_"..w):save(),
+
+            baim_miss  = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Baim Misses\n", "zn_rage::baim_miss_", w },
+                1, 10, 3, true, "x"):record("aa", "zn_rage::baim_miss_"..w):save(),
+
+            -- ── Safepoint ──
+            sp_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] Auto Safepoint\n", "zn_rage::sp_en_", w })
+                :record("aa", "zn_rage::sp_en_"..w):save(),
+
+            sp_mode    = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] SP Trigger\n", "zn_rage::sp_mode_", w },
+                { "Always", "HP Threshold", "After N Misses", "Airborne" })
+                :record("aa", "zn_rage::sp_mode_"..w):save(),
+
+            sp_hp      = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] SP HP\n", "zn_rage::sp_hp_", w },
+                1, 100, 40, true, "hp"):record("aa", "zn_rage::sp_hp_"..w):save(),
+
+            sp_miss    = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+                merge { "[" .. w .. "] SP Misses\n", "zn_rage::sp_miss_", w },
+                1, 10, 2, true, "x"):record("aa", "zn_rage::sp_miss_"..w):save(),
+        }
+        _zn_rage.weapons[w] = ws
+    end
+
+    -- ── reset on toggle off ───────────────────────────────────────────
+    _zn_rage.enabled:set_callback(function()
+        if not _zn_rage.enabled:get() then
+            restore_rage()
+        else
+            rage_backup.saved = false
+        end
+    end)
+
+    -- ── per-target trackers ───────────────────────────────────────────
+    client.set_event_callback("aim_miss", function(e)
+        if not _zn_rage.enabled:get() then return end
+        local t = e and e.target
+        if not t or t <= 0 then return end
+        hit_tracker[t] = hit_tracker[t] or { misses = 0, hits = 0, shots = 0 }
+        hit_tracker[t].misses = hit_tracker[t].misses + 1
+        hit_tracker[t].shots  = hit_tracker[t].shots  + 1
+    end)
+
+    client.set_event_callback("aim_hit", function(e)
+        if not _zn_rage.enabled:get() then return end
+        local t = e and e.target
+        if not t or t <= 0 then return end
+        hit_tracker[t] = hit_tracker[t] or { misses = 0, hits = 0, shots = 0 }
+        local tk = hit_tracker[t]
+        tk.hits   = tk.hits  + 1
+        tk.shots  = tk.shots + 1
+        if tk.misses > 0 then tk.misses = tk.misses - 1 end
+    end)
+
+    client.set_event_callback("round_start", function()
+        hit_tracker = {}
+        plist_cache = {}
+    end)
+
+    client.set_event_callback("player_death", function(e)
+        local ent = client.userid_to_entindex(e.userid)
+        if ent then
+            hit_tracker[ent] = nil
+            plist_cache[ent] = nil
+        end
+    end)
+
+    -- ── main setup_command tick ───────────────────────────────────────
+    client.set_event_callback("setup_command", function()
+        if not _zn_rage.enabled:get() then
+            restore_rage()
+            return
+        end
+
+        local me = entity.get_local_player()
+        if not me or not entity.is_alive(me) then return end
+
+        backup_rage()
+
+        -- detect active weapon class
+        local active_w = "Other"
+        local wpn_ent = entity.get_player_weapon(me)
+        if wpn_ent then
+            local wpn_id = bit.band(entity.get_prop(wpn_ent, "m_iItemDefinitionIndex") or 0, 0xFFFF)
+            active_w = WEAPON_CLASS[wpn_id] or "Other"
+        end
+
+        -- pick config: per-weapon if picker matches, else Global
+        local picker = _zn_rage.weapon_picker:get()
+        local cfg_key = (picker == "Global") and "Global" or active_w
+        local wcfg = _zn_rage.weapons[cfg_key] or _zn_rage.weapons["Global"]
+
+        local mode   = wcfg.aim_mode:get()
+        local do_hc  = wcfg.auto_hc:get()
+        local do_dmg = wcfg.auto_dmg:get()
+
+        if not do_hc and not do_dmg then
+            restore_rage()
+            return
+        end
+
+        local wp_table = PRESETS[active_w] or PRESETS["Other"]
+        local preset   = wp_table[mode] or wp_table["Dynamic"]
+        local dmgMax   = wp_table.dmgMax
+
+        -- ── find target ───────────────────────────────────────────────
+        local target_ent   = nil
+        local target_dist  = 99999
+        local target_hp    = 100
+        local target_flags = 0
+        local target_vel   = 0
+
+        local ok, threat = pcall(client.current_threat)
+        if ok and threat and threat > 0 and entity.is_alive(threat) then
+            target_ent = threat
+        end
+
+        if target_ent then
+            target_dist  = get_dist(me, target_ent)
+            target_hp    = entity.get_prop(target_ent, "m_iHealth") or 100
+            target_flags = entity.get_prop(target_ent, "m_fFlags")  or 0
+            local vx = entity.get_prop(target_ent, "m_vecVelocity[0]") or 0
+            local vy = entity.get_prop(target_ent, "m_vecVelocity[1]") or 0
+            target_vel = math.sqrt(vx*vx + vy*vy)
+        else
+            local enemies = entity.get_players(true)
+            for i = 1, #enemies do
+                local ent = enemies[i]
+                if entity.is_alive(ent) and not entity.is_dormant(ent) then
+                    local d = get_dist(me, ent)
+                    if d < target_dist then
+                        target_dist  = d
+                        target_ent   = ent
+                        target_hp    = entity.get_prop(ent, "m_iHealth") or 100
+                        target_flags = entity.get_prop(ent, "m_fFlags")  or 0
+                        local vx = entity.get_prop(ent, "m_vecVelocity[0]") or 0
+                        local vy = entity.get_prop(ent, "m_vecVelocity[1]") or 0
+                        target_vel = math.sqrt(vx*vx + vy*vy)
+                    end
+                end
+            end
+        end
+
+        -- ── start from preset ─────────────────────────────────────────
+        local hc  = preset.hc
+        local dmg = preset.dmg
+
+        -- ── distance modifier ─────────────────────────────────────────
+        if target_dist < 250 then
+            hc = hc - 10
+        elseif target_dist < 450 then
+            hc = hc - 5
+        elseif target_dist > 2200 then
+            hc = hc + 12
+        elseif target_dist > 1400 then
+            hc = hc + 6
+        end
+
+        -- ── movement modifier ─────────────────────────────────────────
+        local is_airborne = target_ent and (bit.band(target_flags, 1) == 0)
+        if is_airborne then
+            hc = hc + 10
+        elseif target_vel > 260 then
+            hc = hc + 8
+        elseif target_vel > 150 then
+            hc = hc + 4
+        elseif target_vel < 10 then
+            hc = math.max(hc - 5, 40)
+        end
+
+        -- ── target HP modifier ────────────────────────────────────────
+        if target_hp <= 12 then
+            dmg = math.max(math.floor(target_hp * 0.8), 5)
+        elseif target_hp <= 30 then
+            dmg = math.max(dmg - math.floor(preset.dmg * 0.35), 8)
+        elseif target_hp >= 95 then
+            dmg = math.min(dmg + 5, dmgMax)
+            hc  = math.min(hc + 2, 95)
+        end
+
+        -- ── resolver miss tracker modifier ────────────────────────────
+        if target_ent then
+            local tk = hit_tracker[target_ent] or { misses = 0, hits = 0, shots = 0 }
+            if tk.misses >= 6 then
+                hc  = math.min(hc + 22, 97)
+                dmg = math.max(dmg - 12, 8)
+            elseif tk.misses >= 4 then
+                hc  = math.min(hc + 14, 93)
+                dmg = math.max(dmg - 7, 10)
+            elseif tk.misses >= 2 then
+                hc  = math.min(hc + 7, 90)
+            end
+            local shots = tk.shots or 0
+            local hits  = tk.hits  or 0
+            if shots >= 5 and (hits / shots) >= 0.80 then
+                hc  = math.max(hc - 3, 40)
+                dmg = math.min(dmg + 4, dmgMax)
+            end
+        end
+
+        -- ── own HP panic mode ─────────────────────────────────────────
+        local my_hp = entity.get_prop(me, "m_iHealth") or 100
+        if my_hp <= 15 then
+            hc  = math.max(hc - 15, 30)
+            dmg = math.max(dmg - 15, 5)
+        elseif my_hp <= 40 then
+            hc  = math.max(hc - 8, 38)
+            dmg = math.max(dmg - 8, 10)
+        end
+
+        -- ── clamp ─────────────────────────────────────────────────────
+        hc  = clamp(hc,  1, 100)
+        dmg = clamp(dmg, 1, dmgMax)
+
+        -- ── throttled apply (every 4 ticks, or on weapon change) ──────
+        rage_ticks = rage_ticks + 1
+        local should_apply = (rage_ticks % 4 == 0)
+        if active_w ~= last_weapon then
+            last_weapon = active_w
+            rage_prev   = { hc = -1, dmg = -1 }
+            should_apply = true
+        end
+
+        if should_apply then
+            if do_hc and hc ~= rage_prev.hc then
+                pcall(ui.set, software.rage.aimbot.hitchance, hc)
+                rage_prev.hc = hc
+            end
+            if do_dmg and dmg ~= rage_prev.dmg then
+                pcall(ui.set, software.rage.aimbot.minimum_damage, dmg)
+                rage_prev.dmg = dmg
+            end
+        end
+
+        -- ── body aim / safepoint per-target ──────────────────────────
+        if target_ent then
+            local tk = hit_tracker[target_ent] or { misses = 0 }
+
+            -- body aim
+            local force_baim = false
+            if wcfg.baim_enabled:get() then
+                local modes = wcfg.baim_mode:get()
+                for _, m in ipairs(modes) do
+                    if m == "Always" then
+                        force_baim = true; break
+                    elseif m == "HP Threshold" and target_hp <= wcfg.baim_hp:get() then
+                        force_baim = true; break
+                    elseif m == "After N Misses" and tk.misses >= wcfg.baim_miss:get() then
+                        force_baim = true; break
+                    elseif m == "Airborne" and is_airborne then
+                        force_baim = true; break
+                    end
+                end
+            end
+
+            -- safepoint
+            local force_sp = false
+            if wcfg.sp_enabled:get() then
+                local modes = wcfg.sp_mode:get()
+                for _, m in ipairs(modes) do
+                    if m == "Always" then
+                        force_sp = true; break
+                    elseif m == "HP Threshold" and target_hp <= wcfg.sp_hp:get() then
+                        force_sp = true; break
+                    elseif m == "After N Misses" and tk.misses >= wcfg.sp_miss:get() then
+                        force_sp = true; break
+                    elseif m == "Airborne" and is_airborne then
+                        force_sp = true; break
+                    end
+                end
+            end
+
+            -- apply via plist (cached to avoid spam)
+            local cached = plist_cache[target_ent] or {}
+            if cached.baim ~= force_baim then
+                pcall(plist.set, target_ent, "Override prefer body aim", force_baim and "On" or "Off")
+                cached.baim = force_baim
+            end
+            if cached.sp ~= force_sp then
+                pcall(plist.set, target_ent, "Override safe point", force_sp and "On" or "Off")
+                cached.sp = force_sp
+            end
+            plist_cache[target_ent] = cached
+        end
+    end)
+
+    _G.__zn_rage = _zn_rage
+end
+
+
+menu.update()
             update_items()
         end
 
@@ -6740,6 +7145,40 @@ menu.set_callback(function()
     -- ── MISC ─────────────────────────────────────────────────────────
     -- Features/tweaks, AA tweaks, Safe Head, Buy Bot, Clantag, extras
     if page == "Misc" then
+        -- ── Rage Settings ───────────────────────────────────────────
+        local rg = _G.__zn_rage
+        if rg then
+            _safe_display(rg.enabled)
+            if rg.enabled:get() then
+                _safe_display(rg.weapon_picker)
+                local picker = rg.weapon_picker:get()
+                local wcfg   = rg.weapons[picker] or rg.weapons["Global"]
+                if wcfg then
+                    _safe_display(wcfg.aim_mode)
+                    _safe_display(wcfg.auto_hc)
+                    _safe_display(wcfg.auto_dmg)
+                    _safe_display(wcfg.baim_enabled)
+                    if wcfg.baim_enabled:get() then
+                        _safe_display(wcfg.baim_mode)
+                        local bm = wcfg.baim_mode:get()
+                        for _, v in ipairs(bm) do
+                            if v == "HP Threshold"   then _safe_display(wcfg.baim_hp)   end
+                            if v == "After N Misses" then _safe_display(wcfg.baim_miss)  end
+                        end
+                    end
+                    _safe_display(wcfg.sp_enabled)
+                    if wcfg.sp_enabled:get() then
+                        _safe_display(wcfg.sp_mode)
+                        local sm = wcfg.sp_mode:get()
+                        for _, v in ipairs(sm) do
+                            if v == "HP Threshold"   then _safe_display(wcfg.sp_hp)   end
+                            if v == "After N Misses" then _safe_display(wcfg.sp_miss)  end
+                        end
+                    end
+                end
+            end
+        end
+
         -- Features toggle
         _safe_display(settings.tweaks_enable)
         if settings.tweaks_enable:get() then
