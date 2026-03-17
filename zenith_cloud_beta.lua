@@ -6416,64 +6416,83 @@ end
 --  AUTO OS (auto switch DT -> HideShot in bad conditions)
 -- ======================================================================
 do
+    -- ── Auto OS ──────────────────────────────────────────────────────────
+    -- Suppresses DT shots when not in a valid state (prevents wasted DT)
     local auto_os = {}
     auto_os.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Auto OS")
-    : record("aa", "auto_os::enabled") : save()
+        :record("aa", "auto_os::enabled"):save()
 
-    auto_os.states = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- States",
-        {"Stand", "Crouch", "Air", "Move"})
-    : record("aa", "auto_os::states") : save()
+    auto_os.states = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
+        merge { "- Enable On
+", "auto_os::states" },
+        { "Stand", "Crouch", "Air", "Move" })
+        :record("aa", "auto_os::states"):save()
 
-    auto_os.avoid_weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- Avoid States",
-        {"Desert Eagle & Crouch", "Knife & Air", "Pistol & Move"})
-    : record("aa", "auto_os::avoid") : save()
+    auto_os.avoid_weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
+        merge { "- Avoid On
+", "auto_os::avoid" },
+        { "Deagle + Crouch", "Knife + Air", "Pistol + Move" })
+        :record("aa", "auto_os::avoid"):save()
 
-    local function os_get_state()
+    local function _os_state()
         local me = entity.get_local_player()
         if not me then return "Stand" end
-        local vel = {entity.get_prop(me, "m_vecVelocity[0]"), entity.get_prop(me, "m_vecVelocity[1]")}
-        local spd = math.sqrt((vel[1] or 0)^2 + (vel[2] or 0)^2)
+        local vx = entity.get_prop(me, "m_vecVelocity[0]") or 0
+        local vy = entity.get_prop(me, "m_vecVelocity[1]") or 0
+        local spd = math.sqrt(vx*vx + vy*vy)
         local flags = entity.get_prop(me, "m_fFlags") or 0
         local on_ground = bit.band(flags, 1) ~= 0
-        local crouched = entity.get_prop(me, "m_bDucked") == 1
+        local ducked = (entity.get_prop(me, "m_flDuckAmount") or 0) > 0.5
         if not on_ground then return "Air" end
-        if crouched then return "Crouch" end
+        if ducked then return "Crouch" end
         if spd > 10 then return "Move" end
         return "Stand"
+    end
+
+    local function _os_weapon_class(me)
+        local wpn = entity.get_player_weapon(me)
+        if not wpn then return "other" end
+        local wid = bit.band(entity.get_prop(wpn, "m_iItemDefinitionIndex") or 0, 0xFFFF)
+        -- deagle = 1, r8 = 64
+        if wid == 1 or wid == 64 then return "deagle" end
+        -- knives: 42,59,41 + butterfly/other
+        if wid == 42 or wid == 59 or wid == 41 or (wid >= 500 and wid <= 520) then return "knife" end
+        -- pistols
+        local pistols = {2,3,4,30,32,36,61,63}
+        for _, p in ipairs(pistols) do if wid == p then return "pistol" end end
+        return "other"
     end
 
     client.set_event_callback("setup_command", function(cmd)
         if not auto_os.enabled:get() then return end
         if not software.is_double_tap() then return end
 
-        local me  = entity.get_local_player()
-        local wpn = me and entity.get_player_weapon(me)
-        local cls = wpn and entity.get_classname(wpn) or ""
+        local me = entity.get_local_player()
+        if not me or not entity.is_alive(me) then return end
 
-        -- only suppress on actual guns - let everything else through (knife, nades, zeus, c4)
-        local is_gun = cls:find("rifle") or cls:find("pistol") or cls:find("sniper") or
-                       cls:find("machinegun") or cls:find("shotgun") or cls:find("smg") or
-                       cls:find("ak47") or cls:find("m4a") or cls:find("awp") or
-                       cls:find("aug") or cls:find("sg5") or cls:find("famas") or
-                       cls:find("galil") or cls:find("scar") or cls:find("g3sg") or
-                       cls:find("ssg") or cls:find("deagle") or cls:find("elite") or
-                       cls:find("fiveseven") or cls:find("glock") or cls:find("hkp") or
-                       cls:find("p250") or cls:find("revolver") or cls:find("tec9") or
-                       cls:find("usp") or cls:find("cz75") or cls:find("mp5") or
-                       cls:find("mp7") or cls:find("mp9") or cls:find("mac10") or
-                       cls:find("p90") or cls:find("bizon") or cls:find("ump") or
-                       cls:find("m249") or cls:find("negev") or cls:find("nova") or
-                       cls:find("xm1014") or cls:find("mag7") or cls:find("sawedoff") or
-                       cls:find("scout")
-        if not is_gun then return end
+        local state  = _os_state()
+        local wclass = _os_weapon_class(me)
 
-        local state  = os_get_state()
-        local states = auto_os.states:get()
-        for _, s in ipairs(states) do
-            if s == state then
-                cmd.in_attack = false
+        -- check avoid conditions first
+        local avoid = auto_os.avoid_weapons:get()
+        for _, av in ipairs(avoid) do
+            if (av == "Deagle + Crouch" and wclass == "deagle" and state == "Crouch") or
+               (av == "Knife + Air"     and wclass == "knife"  and state == "Air")    or
+               (av == "Pistol + Move"   and wclass == "pistol" and state == "Move")   then
+                cmd.in_attack = 0
                 return
             end
+        end
+
+        -- check allowed states
+        local states = auto_os.states:get()
+        local allowed = (#states == 0)
+        for _, s in ipairs(states) do
+            if s == state then allowed = true; break end
+        end
+
+        if not allowed then
+            cmd.in_attack = 0
         end
     end)
 
@@ -6481,64 +6500,132 @@ do
 end
 
 -- ======================================================================
---  AIR TELEPORT (peek from air using DT + jump timing)
+--  AIR TELEPORT
+--  When DT is on and an enemy is VISIBLE (not behind wall):
+--    1. Disable DT so the server sees us on ground
+--    2. Jump to snap position to ground
+--    3. Re-enable DT on next ground tick
+--  This lets you peek from air, land, and immediately DT shoot.
 -- ======================================================================
 do
     local air_tel = {}
+
     air_tel.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Air Teleport")
-    : record("aa", "air_tel::enabled") : save()
+        :record("aa", "air_tel::enabled"):save()
 
-    air_tel.weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- Weapons",
-        {"AWP", "Scout", "Taser", "Pistol", "Rifle"})
-    : record("aa", "air_tel::weapons") : save()
+    air_tel.weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
+        merge { "- Weapons
+", "air_tel::weapons" },
+        { "AWP", "Scout", "Taser", "Pistol", "Rifle" })
+        :record("aa", "air_tel::weapons"):save()
 
-    air_tel.allow_cross = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Allow on cross",
-        {"No", "Yes"})
-    : record("aa", "air_tel::cross") : save()
+    air_tel.allow_cross = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
+        merge { "- Allow on crosshair
+", "air_tel::cross" },
+        { "No", "Yes" })
+        :record("aa", "air_tel::cross"):save()
 
-    local _at_was_air   = false
-    local _at_charge    = false
+    -- ── internal state ───────────────────────────────────────────────
+    local _at_state       = "idle"  -- "idle" | "triggered" | "restoring"
+    local _at_dt_was_on   = false
+    local _at_land_tick   = 0
+    local _at_restore_in  = 0       -- ticks until we re-enable DT
 
-    client.set_event_callback("setup_command", function(cmd)
-        if not air_tel.enabled:get() then return end
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
-
-        -- weapon check
-        local wpn = entity.get_player_weapon(me)
-        local wpn_class = wpn and entity.get_classname(wpn) or ""
-        local sel = air_tel.weapons:get()
-        local allowed = false
-        if #sel == 0 then allowed = true else
-            for _, w in ipairs(sel) do
-                if (w == "AWP"    and wpn_class:find("awp"))    or
-                   (w == "Scout"  and wpn_class:find("ssg"))    or
-                   (w == "Taser"  and wpn_class:find("taser"))  or
-                   (w == "Pistol" and wpn_class:find("pistol")) or
-                   (w == "Rifle"  and (wpn_class:find("ak47") or wpn_class:find("m4"))) then
-                    allowed = true; break
+    -- check if any enemy is visible from our eye position
+    local function _at_has_visible_enemy(me)
+        local ex, ey, ez = client.eye_position()
+        if not ex then return false end
+        local enemies = entity.get_players(true)
+        for _, ent in ipairs(enemies) do
+            if entity.is_alive(ent) and not entity.is_dormant(ent) then
+                -- check chest hitbox (1) and head hitbox (0)
+                for _, hg in ipairs({0, 1}) do
+                    local hx, hy, hz = entity.hitbox_position(ent, hg)
+                    if hx then
+                        local frac, hit = client.trace_line(me, ex, ey, ez, hx, hy, hz)
+                        if frac > 0.97 or (hit == ent) then
+                            return true
+                        end
+                    end
                 end
             end
         end
-        if not allowed then _at_was_air = false; return end
+        return false
+    end
+
+    -- weapon filter
+    local function _at_weapon_allowed(me)
+        local wpn = entity.get_player_weapon(me)
+        if not wpn then return false end
+        local cls = entity.get_classname(wpn) or ""
+        local sel = air_tel.weapons:get()
+        if #sel == 0 then return true end
+        for _, w in ipairs(sel) do
+            if (w == "AWP"    and cls:find("awp"))    or
+               (w == "Scout"  and cls:find("ssg"))    or
+               (w == "Taser"  and cls:find("taser"))  or
+               (w == "Pistol" and cls:find("pistol")) or
+               (w == "Rifle"  and (cls:find("ak47") or cls:find("m4"))) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local _dt_ref = software.rage.aimbot.double_tap[1]
+
+    client.set_event_callback("setup_command", function(cmd)
+        if not air_tel.enabled:get() then
+            _at_state = "idle"
+            return
+        end
+
+        local me = entity.get_local_player()
+        if not me or not entity.is_alive(me) then
+            _at_state = "idle"
+            return
+        end
+
+        if not _at_weapon_allowed(me) then
+            _at_state = "idle"
+            return
+        end
 
         local flags     = entity.get_prop(me, "m_fFlags") or 0
         local on_ground = bit.band(flags, 1) ~= 0
         local in_air    = not on_ground
+        local dt_active = software.is_double_tap()
 
-        if in_air then
-            -- build up DT charge while airborne, never shoot
-            _at_charge = software.is_double_tap()
+        if _at_state == "idle" then
+            -- waiting: in air + DT on + visible enemy → trigger
+            if in_air and dt_active and _at_has_visible_enemy(me) then
+                _at_dt_was_on  = true
+                _at_state      = "triggered"
+                -- disable DT so server registers us on the ground tick
+                pcall(ui.set, _dt_ref, false)
+            end
+
+        elseif _at_state == "triggered" then
+            -- DT is off — press jump this tick to snap to ground position
+            if on_ground then
+                cmd.in_jump = 1
+                _at_state   = "restoring"
+                _at_restore_in = 2   -- wait 2 ticks then re-enable DT
+            elseif in_air then
+                -- still in air — keep waiting, keep DT off
+                cmd.in_jump = 1   -- push down
+            end
+
+        elseif _at_state == "restoring" then
+            -- landed, counting down before re-enabling DT
+            _at_restore_in = _at_restore_in - 1
+            if _at_restore_in <= 0 then
+                if _at_dt_was_on then
+                    pcall(ui.set, _dt_ref, true)
+                end
+                _at_state = "idle"
+            end
         end
-
-        -- landed this tick after being in air with DT active → teleport tick
-        -- only press jump to snap position, do NOT set in_attack
-        if _at_was_air and on_ground and _at_charge then
-            cmd.in_jump = true   -- forces a small ground-level snap
-            _at_charge  = false
-        end
-
-        _at_was_air = in_air
     end)
 
     _G.__air_tel = air_tel
