@@ -5923,9 +5923,9 @@ do
 
     -- hitgroup prefix icon
     local function hitgroup_prefix(hg)
-        if hg == 1 then return "â¦ " end   -- ✦ head
-        if hg == 8 then return "â¢ " end   -- • neck
-        return "â¸ "                       -- ▸ body
+        if hg == 1 then return "[HS] " end
+        if hg == 8 then return "[NK] " end
+        return ""   -- no prefix for body shots
     end
 
     -- ── state ───────────────────────────────────────────────────────────────
@@ -6016,11 +6016,12 @@ do
                     -- ── main text ─────────────────────────────────────────
                     renderer.text(px, py, r, g, b, ia, "c", nil, txt)
 
-                    -- ── accent dot under the number (headshots only) ──────
+                    -- ── accent bar under headshot numbers ─────────────────
                     if m[4][4] then   -- flag: is headshot
-                        local dot_a = math.floor(ia * 0.9 * (1 - t))
-                        renderer.text(px, py + 10, ar, ag, ab, dot_a, "c", nil,
-                            "â¢")   -- •
+                        local bar_a = math.floor(ia * 0.7 * (1 - t * t))
+                        local bar_w = 18
+                        renderer.rectangle(math.floor(px - bar_w*0.5), py + 12,
+                            bar_w, 2, ar, ag, ab, bar_a)
                     end
                 end
 
