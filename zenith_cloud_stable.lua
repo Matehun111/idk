@@ -955,7 +955,7 @@ end
 
 -- ======================================================================
 --  ZENITH UI  -  Zenith pui tabs
---  Tabs: Anti Aim | Visuals | Misc | Configs
+--  Pages: Home | Builder | Defensive | Visual | Misc | Configs
 --  (replaces the original gui.selection combobox approach)
 -- ======================================================================
 
@@ -1337,14 +1337,14 @@ client.set_event_callback('shutdown', function()
 end)
 
 -- ── GUI system: create proper menu items for original code compatibility ──────
--- gui.selection: real combobox for sub-page navigation inside Anti Aim
+-- gui.selection: sub-page navigation
 gui = gui or {}
 -- gui.enabled stub (checkbox removed, always on)
 gui.enabled = gui.enabled or { get=function() return true end, set=function() end, set_callback=function() end }
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Setup", "Builder", "Defensive", "Visual", "Configs"}
+    local pages = {"Home", "Builder", "Defensive", "Visual", "Misc", "Configs"}
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -6584,26 +6584,10 @@ menu.set_callback(function()
 
     local page = gui.selection:get()
 
-    -- ── SETUP ────────────────────────────────────────────────────────
-    -- Features, Safe Head, Manual, Edge Yaw, Freestand, AA tweaks
-    if page == "Setup" then
-        _safe_display(settings.tweaks_enable)
-        if settings.tweaks_enable:get() then
-            _safe_display(settings.tweaks)
-        end
-
-        _safe_display(aa_tweaks.enable)
-        if aa_tweaks.enable:get() then
-            _safe_display(aa_tweaks.items)
-        end
-
-        _safe_display(safe_head.enabled)
-        if safe_head.enabled:get() then
-            _safe_display(safe_head.states)
-        end
-
-        _safe_display(fs_disablers.states)
-
+    -- ── BUILDER ──────────────────────────────────────────────────────
+    -- AA builder + Manual Yaw + Edge Yaw + Freestanding
+    if page == "Builder" then
+        -- Manual Yaw
         _safe_display(manual_direction.enabled)
         if manual_direction.enabled:get() then
             _safe_display(manual_direction.options)
@@ -6617,20 +6601,12 @@ menu.set_callback(function()
             _safe_display(manual_direction.disabled_manual)
         end
 
+        -- Edge Yaw / Freestanding
         _safe_display(yaw_direction.edge_yaw)
         _safe_display(yaw_direction.freestanding)
+        _safe_display(fs_disablers.states)
 
-        local dn = _G.__drop_nades
-        if dn then _safe_display(dn.key) end
-        local cr = _G.__chat_reveal
-        if cr then _safe_display(cr.enabled) end
-
-    end
-
-
-    -- ── BUILDER ──────────────────────────────────────────────────────
-    -- Custom AA angles builder (offset, modifier, desync, limitation)
-    if page == "Builder" then
+        -- Animation Breakers
         _safe_display(anim_breakers.enabled)
         if anim_breakers.enabled:get() then
             _safe_display(anim_breakers.ground)
@@ -6729,7 +6705,7 @@ menu.set_callback(function()
     -- ── RESOLVER ─────────────────────────────────────────────────────
 
     -- ── VISUAL ───────────────────────────────────────────────────────
-    -- Widgets, Custom scope, Buy bot, Clientside nickname
+    -- Widgets, Custom scope, Clientside nickname
     if page == "Visual" then
         _safe_display(widgets.enabled)
         if widgets.enabled:get() then
@@ -6754,6 +6730,35 @@ menu.set_callback(function()
             _safe_display(custom_scope.offset)
         end
 
+        _safe_display(clientside_nickname.enabled)
+        if clientside_nickname.enabled:get() then
+            _safe_display(clientside_nickname.nickname)
+            _safe_display(clientside_nickname.apply)
+        end
+    end
+
+    -- ── MISC ─────────────────────────────────────────────────────────
+    -- Features/tweaks, AA tweaks, Safe Head, Buy Bot, Clantag, extras
+    if page == "Misc" then
+        -- Features toggle
+        _safe_display(settings.tweaks_enable)
+        if settings.tweaks_enable:get() then
+            _safe_display(settings.tweaks)
+        end
+
+        -- AA tweaks
+        _safe_display(aa_tweaks.enable)
+        if aa_tweaks.enable:get() then
+            _safe_display(aa_tweaks.items)
+        end
+
+        -- Safe Head
+        _safe_display(safe_head.enabled)
+        if safe_head.enabled:get() then
+            _safe_display(safe_head.states)
+        end
+
+        -- Buy Bot
         _safe_display(buy_bot.enabled)
         if buy_bot.enabled:get() then
             _safe_display(buy_bot.primary)
@@ -6761,24 +6766,23 @@ menu.set_callback(function()
             _safe_display(buy_bot.utility)
         end
 
-        _safe_display(clientside_nickname.enabled)
-        if clientside_nickname.enabled:get() then
-            _safe_display(clientside_nickname.nickname)
-            _safe_display(clientside_nickname.apply)
-        end
-
-        -- Clantag on Visual page
+        -- Clantag
         if _G.__misc_page and _G.__misc_page.show_clantag then
             _G.__misc_page.show_clantag()
         end
+
+        -- Drop Nades / Chat Reveal
+        local dn = _G.__drop_nades
+        if dn then _safe_display(dn.key) end
+        local cr = _G.__chat_reveal
+        if cr then _safe_display(cr.enabled) end
+
     end
 
     -- HOME PAGE
     if page == "Home" then
         if _G.__home then _G.__home.show() end
     end
-
-
 
     if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
@@ -7097,7 +7101,7 @@ do
     home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session time: \a71bc78ff0 Minutes')
     home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Headshots: \a71bc78ff0%')
     home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Enemy killed: \a71bc78ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'X Misses at me: \a71bc78ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Misses: \a71bc78ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
