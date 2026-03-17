@@ -872,9 +872,6 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         function menu.update()
-
-
-menu.update()
             update_items()
         end
 
