@@ -8058,8 +8058,7 @@ local _res_ui_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles
 _res_ui_enabled:set(true)
 
 local _res_ui_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles',
-    merge { 'Resolver Engine
-', 'resolver::mode' },
+    merge { "Resolver Engine", "\n", "resolver::mode" },
     { 'Pattern Core', 'Hybrid Engine', 'Bruteforce Only' })
     :record('aa', 'resolver::mode'):save()
 
