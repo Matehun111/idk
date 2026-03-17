@@ -3555,12 +3555,13 @@ do
     -- ── icon prefixes by type ────────────────────────────────────────────────
     -- type is set on each log when added:
     --   'hit'  'miss'  'spread'  'net'
+    -- Plain ASCII prefixes — safe across all renderers
     local TYPE_ICONS = {
-        hit    = "â ",   -- ⊕
-        miss   = "â ",   -- ⊘
-        spread = "â¡ ",   -- ⚡
-        net    = "â ",   -- ◈
-        burned = "ð¥ "-- 🔥 (fallback to plain if unsupported)
+        hit    = "[+] ",
+        miss   = "[-] ",
+        spread = "[~] ",
+        net    = "[?] ",
+        burned = "[F] ",
     }
 
     -- ── helpers ──────────────────────────────────────────────────────────────
@@ -3745,11 +3746,16 @@ do
             local slide_x  = SLIDE_AMOUNT * (1.0 - ease_out_quart(slide_p))
 
             local r, g, b  = e.r, e.g, e.b
-            local raw_text = replacement(e.msg, {r, g, b, 255}, {255, 255, 255, 255})
-            local icon     = TYPE_ICONS[e.kind] or ""
-            local full_txt = icon .. raw_text
+            -- plain_msg: strip ${...} markers for shadow + measure
+            local plain_msg = string.gsub(e.msg, "${(.-)}", "%1")
+            local icon      = TYPE_ICONS[e.kind] or ""
+            local plain_txt = icon .. plain_msg
 
-            local tw, th  = renderer.measure_text(flags, full_txt)
+            -- full_txt: colour-escaped version for main render
+            local raw_text  = replacement(e.msg, {r, g, b, 255}, {255, 255, 255, 255})
+            local full_txt  = icon .. raw_text
+
+            local tw, th  = renderer.measure_text(flags, plain_txt)
             local pill_w  = tw + PILL_PAD_X * 2 + ACCENT_BAR_W
             local pill_h  = th + PILL_PAD_Y * 2
 
@@ -3781,7 +3787,9 @@ do
             -- text
             local tx = pill_x + ACCENT_BAR_W + PILL_PAD_X
             local ty = pill_y + PILL_PAD_Y
-            renderer.text(tx+1, ty+1, 0,0,0, math.floor(120*alpha), flags, nil, full_txt)
+            -- shadow uses plain text (no colour escapes)
+            renderer.text(tx+1, ty+1, 0,0,0, math.floor(120*alpha), flags, nil, plain_txt)
+            -- main uses colour-escaped text via graphics.text
             graphics.text(tx, ty, 255,255,255, ia_txt, flags, 0, full_txt)
 
             draw_y = draw_y + pill_h + PILL_GAP
