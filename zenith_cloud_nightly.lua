@@ -2568,7 +2568,7 @@ do
     : record("visuals", "widgets::items")
     : save()
 
-    widgets.display = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- Display", "\n", "widgets::display" }, { "Username", "Latency", "Time", "FPS", "Server frametime" })
+    widgets.display = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- Display", "\n", "widgets::display" }, { "Username", "Latency", "Time", "FPS", "Server frametime", "Game Mode" })
     : record("visuals", "widgets::display")
     : save()
 
@@ -4316,6 +4316,21 @@ LPH_NO_VIRTUALIZE(function ()
     do
         local FRAMERATE_AVG_FRAC = 0.9
         local cl_updaterate = cvar["cl_updaterate"]
+        local game_type_cvar = cvar["game_type"]
+        local game_mode_cvar = cvar["game_mode"]
+
+        local GAME_MODE_NAMES = {
+            [0] = { [0] = "Casual", [1] = "Competitive", [2] = "Wingman" },
+            [1] = { [0] = "Arms Race", [1] = "Demolition", [2] = "Deathmatch" },
+            [2] = { [0] = "Training", [1] = "Custom", [2] = "Cooperative" },
+        }
+
+        local function get_game_mode_name()
+            local gt = game_type_cvar and game_type_cvar:get_int() or 0
+            local gm = game_mode_cvar and game_mode_cvar:get_int() or 0
+            local modes = GAME_MODE_NAMES[gt]
+            return modes and modes[gm] or nil
+        end
 
         local alpha     = 0.0
         local framerate = 0.0
@@ -4427,6 +4442,10 @@ LPH_NO_VIRTUALIZE(function ()
             end
             if widgets.display:have_key("Time") then
                 tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
+            end
+            if widgets.display:have_key("Game Mode") then
+                local gm = get_game_mode_name()
+                if gm then tokens[#tokens+1] = { label = gm } end
             end
 
             -- ── Layout constants ───────────────────────────────────────────────
@@ -4877,7 +4896,7 @@ LPH_NO_VIRTUALIZE(function ()
                 utils.breathe(clock + 0.5 - 0.5 * align)
             )
 
-            -- -- damage indicator (draggable pill) ---------------------
+            -- -- damage indicator (clean text, no background) ----------
             if damage_alpha > 0 then
                 local val   = utils.round(damage_value)
                 local text  = f("%d", val)
@@ -4888,26 +4907,22 @@ LPH_NO_VIRTUALIZE(function ()
                 local mw, mh   = renderer.measure_text(dflags, text)
                 mw = mw + 1
                 local pos      = window.pos:clone()
-                local PAD      = 9
-                local rect_sz  = vector(mw + PAD*2, mh + 10)
+                local PAD      = 6
+                local rect_sz  = vector(mw + PAD*2, mh + 8)
                 local tx       = pos.x + (rect_sz.x - mw) * 0.5
                 local ty       = pos.y + (rect_sz.y - mh) * 0.5
                 local da       = damage_alpha * damage_holding
 
-                -- THEME C: flat sharp bg, full-height left strip
-                renderer.rectangle(pos.x, pos.y, rect_sz.x, rect_sz.y,
-                    9, 9, 12, math.floor(210 * da))
-                renderer.rectangle(pos.x, pos.y, 2, rect_sz.y,
-                    r1, g1, b1, math.floor(215 * da))
-
-                if damage_moving > 0 then
-                    graphics.rectangle_outline(pos.x, pos.y, rect_sz.x, rect_sz.y,
-                        255, 255, 255, math.floor(90 * damage_moving * damage_holding), 4)
-                end
-
                 local dr, dg, db = can_show_ind and r or r1, can_show_ind and g or g1, can_show_ind and b or b1
-                renderer.text(tx, ty, dr, dg, db,
-                    math.floor(a * damage_alpha * damage_holding), dflags, 0, text)
+                local ta = math.floor(a * damage_alpha * damage_holding)
+
+                -- Text shadow for readability
+                renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(ta * 0.55), dflags, 0, text)
+                -- Main text
+                renderer.text(tx, ty, dr, dg, db, ta, dflags, 0, text)
+                -- Thin accent underline
+                renderer.rectangle(tx - 1, ty + mh + 2, mw + 2, 1,
+                    dr, dg, db, math.floor(da * 140))
 
                 window:set_size(rect_sz)
                 window:update()
@@ -4929,6 +4944,14 @@ LPH_NO_VIRTUALIZE(function ()
             renderer.text(bx + 1, cy + 1, 0, 0, 0, math.floor(120 * alpha), dflags, 0, brand)
             -- Main text
             renderer.text(bx, cy, r, g, b, math.floor(255 * alpha), dflags, 0, brand)
+
+            -- Subtle horizontal separators flanking the brand text
+            local line_y   = cy + math.floor(bh * 0.5)
+            local line_len = 14
+            renderer.rectangle(bx - line_len - 4, line_y, line_len, 1,
+                r, g, b, math.floor(70 * alpha))
+            renderer.rectangle(bx + bw + 4, line_y, line_len, 1,
+                r, g, b, math.floor(70 * alpha))
 
             cy = cy + bh + 4
 
@@ -5168,6 +5191,9 @@ end)()
 
 --- hit marker zenith
 do
+    local MARKER_LIFETIME   = 3     -- seconds a damage number stays on screen
+    local MARKER_FLOAT_SPEED = 22   -- pixels per second floating upward
+
     local ctx = {
         target = 0,
         pos = vector()
@@ -5185,18 +5211,27 @@ do
         end
 
         local realtime = globals.realtime()
-        for i, data in ipairs(pending_markers) do
+        local i = 1
+        while i <= #pending_markers do
+            local data = pending_markers[i]
             local diff = data[3] - realtime
-
-            local alpha = math.min(1, diff)--diff < 1 and math.max(0, diff) or 1
-
-            local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
-
-            local r, g, b = unpack(data[4])
-            renderer.text(x, y, r, g, b, 255 * alpha, "c", nil, data[2])
 
             if data[3] < realtime then
                 table.remove(pending_markers, i)
+            else
+                local age   = MARKER_LIFETIME - diff   -- elapsed seconds since creation
+                local alpha = diff < 1 and math.max(0, diff) or 1
+                local y_off = age * MARKER_FLOAT_SPEED  -- float upward
+
+                local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
+                y = y - y_off
+
+                local r, g, b = unpack(data[4])
+                -- Shadow for readability
+                renderer.text(x + 1, y + 1, 0, 0, 0, math.floor(180 * alpha), "c", nil, data[2])
+                -- Main text
+                renderer.text(x, y, r, g, b, math.floor(255 * alpha), "c", nil, data[2])
+                i = i + 1
             end
         end
     end
@@ -5228,7 +5263,7 @@ do
                 pending_markers,
                 {
                     ctx.pos, tostring(e.damage),
-                    globals.realtime() + 3,
+                    globals.realtime() + MARKER_LIFETIME,
                     e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
                 }
             )
