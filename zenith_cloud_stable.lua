@@ -6948,14 +6948,16 @@ do
     }
 
     -- ── base presets ──────────────────────────────────────────────────
+    -- dmg = minimum damage gamesense must be able to deal before firing
+    -- set to values that guarantee meaningful hits — not too low or you spray for free
     local PRESETS = {
         ["AWP"]          = { Safe={hc=87,dmg=100}, Aggressive={hc=70,dmg=100}, Dynamic={hc=78,dmg=100}, dmgMax=115 },
         ["Scout"]        = { Safe={hc=82,dmg=82},  Aggressive={hc=64,dmg=82},  Dynamic={hc=72,dmg=82},  dmgMax=92  },
-        ["Auto"]         = { Safe={hc=70,dmg=40},  Aggressive={hc=52,dmg=28},  Dynamic={hc=60,dmg=35},  dmgMax=55  },
-        ["Rifle"]        = { Safe={hc=68,dmg=26},  Aggressive={hc=50,dmg=18},  Dynamic={hc=58,dmg=22},  dmgMax=38  },
-        ["Heavy Pistol"] = { Safe={hc=66,dmg=52},  Aggressive={hc=48,dmg=42},  Dynamic={hc=56,dmg=48},  dmgMax=60  },
-        ["Pistol"]       = { Safe={hc=64,dmg=16},  Aggressive={hc=48,dmg=12},  Dynamic={hc=55,dmg=14},  dmgMax=28  },
-        ["Other"]        = { Safe={hc=65,dmg=22},  Aggressive={hc=48,dmg=16},  Dynamic={hc=55,dmg=20},  dmgMax=35  },
+        ["Auto"]         = { Safe={hc=70,dmg=95},  Aggressive={hc=52,dmg=85},  Dynamic={hc=60,dmg=90},  dmgMax=110 },
+        ["Rifle"]        = { Safe={hc=68,dmg=90},  Aggressive={hc=50,dmg=80},  Dynamic={hc=58,dmg=85},  dmgMax=100 },
+        ["Heavy Pistol"] = { Safe={hc=66,dmg=80},  Aggressive={hc=48,dmg=70},  Dynamic={hc=56,dmg=75},  dmgMax=95  },
+        ["Pistol"]       = { Safe={hc=64,dmg=70},  Aggressive={hc=48,dmg=60},  Dynamic={hc=55,dmg=65},  dmgMax=85  },
+        ["Other"]        = { Safe={hc=65,dmg=80},  Aggressive={hc=48,dmg=70},  Dynamic={hc=55,dmg=75},  dmgMax=95  },
     }
 
     -- ── helpers ───────────────────────────────────────────────────────
@@ -7211,47 +7213,42 @@ do
         end
 
         -- ── target HP modifier (only when a real target exists) ─────
+        -- never reduce dmg — keep it high so gamesense only fires lethal shots
         if target_ent then
             if target_hp <= 12 then
-                -- any shot kills — drop min dmg dramatically
-                dmg = math.max(math.floor(target_hp * 0.8), 5)
+                -- near dead: set dmg to exactly their HP so any hit fires
+                dmg = math.max(target_hp, 1)
             elseif target_hp <= 30 then
-                dmg = math.max(dmg - math.floor(preset.dmg * 0.35), 8)
-            elseif target_hp >= 95 then
-                -- genuinely full HP confirmed on a real target
-                dmg = math.min(dmg + 5, dmgMax)
-                hc  = math.min(hc + 2, 95)
+                -- low HP: lower dmg slightly to allow body shots to finish
+                dmg = math.max(target_hp - 5, 1)
             end
+            -- full HP (>= 95): no change, preset dmg is already correct
         end
 
-        -- ── resolver miss tracker modifier ────────────────────────────
+        -- ── resolver miss tracker modifier (HC only — never lower dmg) ──
         if target_ent then
             local tk = hit_tracker[target_ent] or { misses = 0, hits = 0, shots = 0 }
             if tk.misses >= 6 then
-                hc  = math.min(hc + 22, 97)
-                dmg = math.max(dmg - 12, 8)
+                hc = math.min(hc + 22, 97)
             elseif tk.misses >= 4 then
-                hc  = math.min(hc + 14, 93)
-                dmg = math.max(dmg - 7, 10)
+                hc = math.min(hc + 14, 93)
             elseif tk.misses >= 2 then
-                hc  = math.min(hc + 7, 90)
+                hc = math.min(hc + 7, 90)
             end
+            -- good accuracy: slightly relax HC
             local shots = tk.shots or 0
             local hits  = tk.hits  or 0
             if shots >= 5 and (hits / shots) >= 0.80 then
-                hc  = math.max(hc - 3, 40)
-                dmg = math.min(dmg + 4, dmgMax)
+                hc = math.max(hc - 3, 40)
             end
         end
 
-        -- ── own HP panic mode ─────────────────────────────────────────
+        -- ── own HP panic mode (only loosen HC — never touch dmg) ──────
         local my_hp = entity.get_prop(me, "m_iHealth") or 100
         if my_hp <= 15 then
-            hc  = math.max(hc - 15, 30)
-            dmg = math.max(dmg - 15, 5)
+            hc = math.max(hc - 15, 30)
         elseif my_hp <= 40 then
-            hc  = math.max(hc - 8, 38)
-            dmg = math.max(dmg - 8, 10)
+            hc = math.max(hc - 8, 38)
         end
 
         -- ── clamp ─────────────────────────────────────────────────────
