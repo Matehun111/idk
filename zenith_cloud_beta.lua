@@ -6549,7 +6549,7 @@ do
 end
 
 -- ======================================================================
---  FAKE DUCK IN AIR (air exploit — crouch tickbase shift while airborne)
+--  FAKE DUCK IN AIR (air exploit — rapid duck spam to shift tickbase)
 -- ======================================================================
 do
     local fd_air = {}
@@ -6561,46 +6561,51 @@ do
         merge { "FD Air Key", "\n", "fd_air::key" })
         :record("aa", "fd_air::key"):save()
 
-    fd_air.mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
-        merge { "Mode", "\n", "fd_air::mode" },
-        { "Always", "On Hotkey" })
-        :record("aa", "fd_air::mode"):save()
-
     -- ── how it works ──────────────────────────────────────────────────
-    -- While airborne and DT is active, inject in_duck on every CHOKED
-    -- tick. This shifts the tickbase forward faster while in air, giving
-    -- you a fully charged DT shot the moment you land (or shoot mid-air).
-    -- We remove in_duck on the SEND tick so the sent packet is clean and
-    -- the server doesn't see an interrupted duck sequence.
+    -- Rapidly alternates in_duck ON/OFF every tick while airborne.
+    -- The constant duck/unduck cycle forces the server to process
+    -- extra simulation steps per frame, shifting the tickbase forward
+    -- much faster than normal — effectively the same as spamming duck
+    -- manually at 64hz but automatic and frame-perfect every tick.
     --
-    -- Only runs when DT is enabled — safe to leave on permanently.
+    -- Does NOT require DT to be on — it works standalone.
+    -- The key acts as a toggle hold: release to stop.
     -- ──────────────────────────────────────────────────────────────────
 
-    client.set_event_callback("setup_command", function(cmd)
-        if not fd_air.enabled:get() then return end
+    local _fd_flip = false  -- alternates each tick
 
-        -- hotkey gate
-        if fd_air.mode:get() == "On Hotkey" and not fd_air.key:get() then return end
+    client.set_event_callback("setup_command", function(cmd)
+        if not fd_air.enabled:get() then
+            _fd_flip = false
+            return
+        end
+
+        -- rawget() reads live key state — :get() is cached and won't work here
+        if not fd_air.key:rawget() then
+            _fd_flip = false
+            cmd.in_duck = 0
+            return
+        end
 
         local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
-
-        -- only while DT is active
-        if not software.is_double_tap() then return end
+        if not me or not entity.is_alive(me) then
+            _fd_flip = false
+            return
+        end
 
         -- only while airborne
         local flags = entity.get_prop(me, "m_fFlags") or 0
-        if bit.band(flags, 1) ~= 0 then return end  -- on ground, skip
-
-        local choked = globals.chokedcommands()
-
-        if choked > 0 then
-            -- choked tick: inject the duck to shift tickbase
-            cmd.in_duck = 1
-        else
-            -- send tick: make sure duck is cleared so packet is clean
+        if bit.band(flags, 1) ~= 0 then
+            -- on ground — reset and clear duck
+            _fd_flip = false
             cmd.in_duck = 0
+            return
         end
+
+        -- alternate duck every single tick: ON → OFF → ON → OFF ...
+        -- this is the actual fake duck spam that shifts the tickbase
+        _fd_flip = not _fd_flip
+        cmd.in_duck = _fd_flip and 1 or 0
     end)
 
     _G.__fd_air = fd_air
@@ -7170,10 +7175,7 @@ menu.set_callback(function()
         if fda then
             _safe_display(fda.enabled)
             if fda.enabled:get() then
-                _safe_display(fda.mode)
-                if fda.mode:get() == "On Hotkey" then
-                    _safe_display(fda.key)
-                end
+                _safe_display(fda.key)
             end
         end
 
@@ -7714,14 +7716,18 @@ do
             hc = math.max(hc - 5, 40)
         end
 
-        -- ── target HP modifier ────────────────────────────────────────
-        if target_hp <= 12 then
-            dmg = math.max(math.floor(target_hp * 0.8), 5)
-        elseif target_hp <= 30 then
-            dmg = math.max(dmg - math.floor(preset.dmg * 0.35), 8)
-        elseif target_hp >= 95 then
-            dmg = math.min(dmg + 5, dmgMax)
-            hc  = math.min(hc + 2, 95)
+        -- ── target HP modifier (only when a real target exists) ─────
+        if target_ent then
+            if target_hp <= 12 then
+                -- any shot kills — drop min dmg dramatically
+                dmg = math.max(math.floor(target_hp * 0.8), 5)
+            elseif target_hp <= 30 then
+                dmg = math.max(dmg - math.floor(preset.dmg * 0.35), 8)
+            elseif target_hp >= 95 then
+                -- genuinely full HP confirmed on a real target
+                dmg = math.min(dmg + 5, dmgMax)
+                hc  = math.min(hc + 2, 95)
+            end
         end
 
         -- ── resolver miss tracker modifier ────────────────────────────

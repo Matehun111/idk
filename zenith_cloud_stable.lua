@@ -7210,14 +7210,18 @@ do
             hc = math.max(hc - 5, 40)
         end
 
-        -- ── target HP modifier ────────────────────────────────────────
-        if target_hp <= 12 then
-            dmg = math.max(math.floor(target_hp * 0.8), 5)
-        elseif target_hp <= 30 then
-            dmg = math.max(dmg - math.floor(preset.dmg * 0.35), 8)
-        elseif target_hp >= 95 then
-            dmg = math.min(dmg + 5, dmgMax)
-            hc  = math.min(hc + 2, 95)
+        -- ── target HP modifier (only when a real target exists) ─────
+        if target_ent then
+            if target_hp <= 12 then
+                -- any shot kills — drop min dmg dramatically
+                dmg = math.max(math.floor(target_hp * 0.8), 5)
+            elseif target_hp <= 30 then
+                dmg = math.max(dmg - math.floor(preset.dmg * 0.35), 8)
+            elseif target_hp >= 95 then
+                -- genuinely full HP confirmed on a real target
+                dmg = math.min(dmg + 5, dmgMax)
+                hc  = math.min(hc + 2, 95)
+            end
         end
 
         -- ── resolver miss tracker modifier ────────────────────────────
