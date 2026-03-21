@@ -8861,6 +8861,40 @@ local function _real_desync(ast)
     return d
 end
 
+
+-- air velocity resolver
+local function _air_vel(ent, d, ast)
+    local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local spd = _sqrt(vx*vx + vy*vy)
+    if spd < 5 then return nil, 0, 0.35 end
+    local vel_yaw = math.deg(math.atan2(vy, vx))
+    local eye_yaw = ast and ast.m_flEyeYaw or 0
+    local vd = _ydelta(vel_yaw, eye_yaw)
+    local side = vd > 18 and 2 or vd < -18 and 1 or d.side
+    local conf  = _clamp(spd / 220, 0.32, 0.76)
+    local desync = _fl(_clamp(spd * 0.17, 8, 48))
+    return side, desync, conf
+end
+
+-- lean-based resolver
+local function _lean_resolve(d, ld)
+    if d.lean_side == 0 or ld.lean_w < 0.25 then return nil end
+    local side = d.lean_side > 0 and 2 or 1
+    local conf = _clamp(d.lean_magnitude * 1.6, 0.55, 0.86)
+    return side, _fl(ld.lean_w * 40), conf
+end
+
+-- pitch resolver
+local function _pitch(d)
+    if not _M.ui_pitch:get() or #d.pitch_hist < 8 then return end
+    local w = _exp_weights(#d.pitch_hist, 0.85)
+    local sw, wt = 0, 0
+    for i, v in ipairs(d.pitch_hist) do sw = sw + v*w[i]; wt = wt + w[i] end
+    local avg = wt > 0 and sw/wt or 0
+    d.pitch_res = avg < -55 and 89 or avg > 55 and -89 or 0
+end
+
 -- ── main pattern resolver ────────────────────────────────────────────────
 local function _pattern(ent, d, state, ld, jt, decay)
     local at, swing, bias = _classify(d, jt, decay)
@@ -9211,6 +9245,14 @@ local function _upd_ss(d, state, hit, side, desync)
     else
         ss.misses = ss.misses + 1
     end
+end
+
+local function _suppress(ent)
+    if not _M.ui_suppress:get() then return false end
+    local me=entity.get_local_player(); if not me then return false end
+    local mx,my=entity.get_origin(me); local ex,ey=entity.get_origin(ent)
+    if not mx or not ex then return false end
+    return math.sqrt((ex-mx)^2+(ey-my)^2) < _M.ui_sup_rng:get()
 end
 
 -- ── screen log ──────────────────────────────────────────────────────────
