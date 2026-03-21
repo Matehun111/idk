@@ -8376,52 +8376,129 @@ local bit = require('bit')
 -- ======================================================================
 
 -- ======================================================================
---  ZENITH RESOLVER  (nightly only)
 -- ======================================================================
+--  ZENITH RESOLVER  v3  (nightly only)
+--  ~2800 lines of pure resolver logic
+--  Jitter · LBY · Air-Vel · Def-Snap · Def-Flick · Lean · FakeDuck
+--  OS-Timing · Multi-Point · Side-Confirm · Adaptive · FreqAnalysis
+--  PerState · BacktrackHistory · LayerFingerprint · ExploitPredictor
+-- ======================================================================
+
+local NN3 = {
+    cfg  = { inp=20, hid=48, out=3, lr=0.038, mom=0.87 },
+    wh={}, wo={}, vh={}, vo={}, mem={},
+    trained_samples = 0,
+}
+
+local function _nn3_xavier(a, b)
+    return (math.random()*2-1) * _sqrt(6/(a+b))
+end
+
+for i = 1, 20 do
+    NN3.wh[i]={}; NN3.vh[i]={}
+    for j = 1, 48 do
+        NN3.wh[i][j] = _nn3_xavier(20, 48)
+        NN3.vh[i][j] = 0
+    end
+end
+for i = 1, 48 do
+    NN3.wo[i]={}; NN3.vo[i]={}
+    for j = 1, 3 do
+        NN3.wo[i][j] = _nn3_xavier(48, 3)
+        NN3.vo[i][j] = 0
+    end
+end
+
+local function _lrelu3(x) return x > 0 and x or 0.018*x end
+local function _sig3(x)   return 1/(1+_exp(-_clamp(x,-14,14))) end
+local function _softmax3(o)
+    local m = _max(o[1], o[2], o[3])
+    local s = 0
+    for i=1,3 do s = s + _exp(o[i]-m) end
+    local r = {}
+    for i=1,3 do r[i] = _exp(o[i]-m) / s end
+    return r
+end
+
 if _HAS_RESOLVER and _auth_alive then
--- ======================================================================
+(function()
 
--- ── menu items ────────────────────────────────────────────────────────
-local _res_ui_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Enable Resolver')
-    :record('aa', 'resolver::enabled'):save()
-_res_ui_enabled:set(true)
-
-local _res_ui_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles',
-    merge { "Resolver Engine", "\n", "resolver::mode" },
-    { 'Pattern Core', 'Hybrid Engine', 'Bruteforce Only' })
-    :record('aa', 'resolver::mode'):save()
-
-local _res_ui_verbose = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Verbose Logging')
-    :record('aa', 'resolver::verbose'):save()
-
-local _res_ui_lbl_class  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'AA Class: -')
-local _res_ui_lbl_desync = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Desync: -')
-local _res_ui_lbl_fails  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Fail Streak: 0')
-
--- ── math helpers ──────────────────────────────────────────────────────
-local _sqrt = math.sqrt
+-- ── stdlib shortcuts ────────────────────────────────────────────────────
+local _f    = string.format
 local _abs  = math.abs
-local _floor= math.floor
 local _min  = math.min
 local _max  = math.max
+local _fl   = math.floor
+local _ceil = math.ceil
+local _sqrt = math.sqrt
+local _pi   = math.pi
+local _sin  = math.sin
+local _cos  = math.cos
+local _tan  = math.tan
+local _atan = math.atan2
 local _exp  = math.exp
+local _huge = math.huge
 
-local function _norm_yaw(y)
-    while y >  180 do y = y - 360 end
-    while y < -180 do y = y + 360 end
-    return y
+-- ── math helpers ────────────────────────────────────────────────────────
+local function _nrm(y)
+    y = y % 360
+    return y > 180 and y - 360 or y
 end
-local function _yaw_delta(a, b) return _norm_yaw(a - b) end
+local function _ydelta(a, b) return _nrm(a - b) end
+local function _lerp(a, b, t) return a + (b - a) * t end
+local function _clamp(v, lo, hi) return v < lo and lo or v > hi and hi or v end
+local function _sign(v) return v >= 0 and 1 or -1 end
+local function _round(v) return _fl(v + 0.5) end
+local function _deg2rad(d) return d * _pi / 180 end
+local function _rad2deg(r) return r * 180 / _pi end
 
--- ── FFI: animstate + animation layers ────────────────────────────────
+-- weighted average
+local function _wavg(tbl, weights)
+    local sum, wsum = 0, 0
+    for i, v in ipairs(tbl) do
+        local w = weights and weights[i] or 1
+        sum  = sum  + v * w
+        wsum = wsum + w
+    end
+    return wsum > 0 and sum / wsum or 0
+end
+
+-- exponential weights for a table of length n (most recent = highest weight)
+local function _exp_weights(n, decay)
+    decay = decay or 0.88
+    local w = {}
+    for i = 1, n do w[i] = decay ^ (n - i) end
+    return w
+end
+
+-- simple FFT-lite: dominant frequency in a signal (0..N-1 -> freq index)
+local function _dominant_freq(sig)
+    local n = #sig
+    if n < 8 then return 0, 0 end
+    local best_mag, best_k = 0, 0
+    for k = 1, _fl(n/2) do
+        local re, im = 0, 0
+        for j = 1, n do
+            local angle = 2 * _pi * k * (j-1) / n
+            re = re + sig[j] * _cos(angle)
+            im = im + sig[j] * _sin(angle)
+        end
+        local mag = _sqrt(re*re + im*im) / n
+        if mag > best_mag then best_mag = mag; best_k = k end
+    end
+    return best_k, best_mag
+end
+
+-- ── FFI: animstate + anim layers ────────────────────────────────────────
 local ffi = require 'ffi'
 pcall(ffi.cdef, [[
-    struct zn_animstate {
+    struct zn3_animstate {
         char pad[3]; char m_bForceWeaponUpdate; char pad1[91];
         void* m_pBaseEntity; void* m_pActiveWeapon; void* m_pLastActiveWeapon;
         float m_flLastClientSideAnimationUpdateTime;
         int   m_iLastClientSideAnimationUpdateFramecount;
-        float m_flAnimUpdateDelta; float m_flEyeYaw; float m_flPitch;
+        float m_flAnimUpdateDelta;
+        float m_flEyeYaw; float m_flPitch;
         float m_flSpeedNormalized; float m_flGoalFeetYaw;
         float m_flAffectedFraction; float m_flDuckAmount;
         float m_flCurrentFeetYaw; float m_flCurrentTorsoYaw;
@@ -8430,8 +8507,8 @@ pcall(ffi.cdef, [[
         char pad3[4]; float m_fDuckAmount; float m_fLandingDuckAdditiveSomething;
         char pad4[4]; float m_vOriginX; float m_vOriginY; float m_vOriginZ;
         float m_vLastOriginX; float m_vLastOriginY; float m_vLastOriginZ;
-        float m_vVelocityX; float m_vVelocityY; char pad5[4];
-        float m_flUnknownFloat1; char pad6[8];
+        float m_vVelocityX; float m_vVelocityY;
+        char pad5[4]; float m_flUnknownFloat1; char pad6[8];
         float m_flUnknownFloat2; float m_flUnknownFloat3; float m_flUnknown;
         float m_flSpeed2D; float m_flUpVelocity; float m_flSpeedNormalized2;
         float m_flFeetSpeedForwardsOrSideWays;
@@ -8440,606 +8517,1601 @@ pcall(ffi.cdef, [[
         bool m_bOnGround; bool m_bInHitGroundAnimation;
         float m_flTimeSinceInAir; float m_flLastOriginZ;
         float m_flHeadHeightOrOffsetFromHittingGroundAnimation;
-        float m_flStopToFullRunningFraction; char pad7[4]; float m_flMagicFraction;
+        float m_flStopToFullRunningFraction;
+        char pad7[4]; float m_flMagicFraction;
         char pad8[60]; float m_flWorldForce; char pad9[462];
         float m_flPlaybackRate; float m_flMaxYaw;
     };
     typedef struct {
-        float m_anim_time; float m_fade_out_time; int m_flags; int m_activity;
-        int m_priority; int m_order; int m_sequence; float m_prev_cycle;
-        float m_weight; float m_weight_delta_rate; float m_playback_rate;
-        float m_cycle; void* m_owner; int m_bits;
-    } zn_anim_layer_t;
-    typedef void* (__thiscall* zn_get_entity_t)(void*, int);
+        float m_anim_time; float m_fade_out_time;
+        int m_flags; int m_activity; int m_priority; int m_order;
+        int m_sequence; float m_prev_cycle;
+        float m_weight; float m_weight_delta_rate;
+        float m_playback_rate; float m_cycle;
+        void* m_owner; int m_bits;
+    } zn3_anim_layer_t;
+    typedef void* (__thiscall* zn3_get_entity_t)(void*, int);
 ]])
 
-local _elist = pcall(function()
-    return ffi.cast('void***', client.create_interface('client_panorama.dll', 'VClientEntityList003'))
-end) and ffi.cast('void***', client.create_interface('client_panorama.dll', 'VClientEntityList003')) or nil
+local _elist3 = (function()
+    local ok, r = pcall(function()
+        return ffi.cast('void***',
+            client.create_interface('client_panorama.dll','VClientEntityList003'))
+    end)
+    return ok and r or nil
+end)()
+local _get_ent3 = _elist3 and ffi.cast('zn3_get_entity_t', _elist3[0][3]) or nil
 
-local _get_entity_fn = _elist and ffi.cast('zn_get_entity_t', _elist[0][3]) or nil
-
-local function _get_ent_addr(idx)
-    if not _get_entity_fn then return nil end
-    local ok, r = pcall(_get_entity_fn, _elist, idx)
+local function _ent_addr3(idx)
+    if not _get_ent3 then return nil end
+    local ok, r = pcall(_get_ent3, _elist3, idx)
     return ok and r or nil
 end
 
-local function _get_animstate(idx)
-    local addr = _get_ent_addr(idx)
+local function _animstate3(idx)
+    local addr = _ent_addr3(idx)
     if not addr then return nil end
     local ok, p = pcall(function()
-        return ffi.cast('struct zn_animstate**', ffi.cast('char*', addr) + 39264)[0]
+        return ffi.cast('struct zn3_animstate**',
+            ffi.cast('char*', addr) + 39264)[0]
     end)
     return ok and p or nil
 end
 
-local function _get_layers(idx)
-    local addr = _get_ent_addr(idx)
+-- layer read with safety
+local function _layers3(idx)
+    local addr = _ent_addr3(idx)
     if not addr then return nil end
-    local ok, layers = pcall(function()
-        local ptr = ffi.cast('zn_anim_layer_t**', ffi.cast('char*', addr) + 39264)
-        if not ptr or not ptr[0] then return nil end
-        local t = {}
+    local ok, t = pcall(function()
+        local base = ffi.cast('char*', addr) + 39264
+        local lptr = ffi.cast('zn3_anim_layer_t*', base + 0xC98)
+        local out  = {}
         for i = 0, 12 do
-            local l = ptr[0] + i
-            t[i+1] = { weight=l.m_weight, cycle=l.m_cycle,
-                       playback_rate=l.m_playback_rate, sequence=l.m_sequence }
+            local l = lptr[i]
+            out[i+1] = {
+                weight        = l.m_weight,
+                cycle         = l.m_cycle,
+                playback_rate = l.m_playback_rate,
+                sequence      = l.m_sequence,
+                prev_cycle    = l.m_prev_cycle,
+                anim_time     = l.m_anim_time,
+            }
         end
-        return t
+        return out
     end)
-    return ok and layers or nil
+    return ok and t or nil
 end
 
--- ── player state enum ─────────────────────────────────────────────────
-local O = { STAND=1, MOVE=2, CROUCH=3, AIR=4, SLOWWALK=5, AIR_CROUCH=6, SNAKING=7 }
+-- ── state enum ──────────────────────────────────────────────────────────
+local ST = {
+    STAND=1, MOVE=2, CROUCH=3, AIR=4,
+    SLOWWALK=5, AIR_CROUCH=6, SNAKING=7
+}
+local ST_STR = {
+    [1]='Stand', [2]='Move', [3]='Crouch', [4]='Air',
+    [5]='SlowWalk', [6]='AirCrouch', [7]='Snaking'
+}
 
-local function _get_state(ent)
-    local ast = _get_animstate(ent)
-    local vx = entity.get_prop(ent, 'm_vecVelocity[0]') or 0
-    local vy = entity.get_prop(ent, 'm_vecVelocity[1]') or 0
-    local speed = _sqrt(vx*vx + vy*vy)
-    local duck  = entity.get_prop(ent, 'm_flDuckAmount') or 0
-    local flags = entity.get_prop(ent, 'm_fFlags') or 0
-    local onground = bit.band(flags, 1) ~= 0
-    local slow = ast and (ast.m_flSpeedNormalized > 0.1 and ast.m_flSpeedNormalized < 0.35) or false
+local function _get_state3(ent)
+    local ast  = _animstate3(ent)
+    local vx   = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy   = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local spd  = _sqrt(vx*vx + vy*vy)
+    local duck = entity.get_prop(ent,'m_flDuckAmount') or 0
+    local flags= entity.get_prop(ent,'m_fFlags') or 0
+    local gnd  = bit.band(flags,1) ~= 0
+    local slow = ast and
+        (ast.m_flSpeedNormalized > 0.05 and ast.m_flSpeedNormalized < 0.34) or false
 
-    local s = O.STAND
-    if speed >= 5          then s = O.MOVE       end
-    if slow                then s = O.SLOWWALK   end
-    if duck > 0.1 then
-        s = speed < 5 and O.CROUCH or O.SNAKING
+    if not gnd then
+        return duck > 0.15 and ST.AIR_CROUCH or ST.AIR
     end
-    if not onground        then s = O.AIR        end
-    if not onground and duck > 0.1 then s = O.AIR_CROUCH end
-    return s
+    if duck > 0.5  then return spd > 3 and ST.SNAKING or ST.CROUCH end
+    if slow        then return ST.SLOWWALK end
+    if spd > 5     then return ST.MOVE end
+    return ST.STAND
 end
 
--- ── per-player database ───────────────────────────────────────────────
+-- ── layer analysis ──────────────────────────────────────────────────────
+local function _ld3(ent)
+    local L = _layers3(ent)
+    local r = {
+        move_w=0, aim_w=0, lean_w=0, jump_w=0, walk_w=0,
+        desync_cycle=0, aim_cycle=0, wpn_cycle=0,
+        is_moving=false, is_airborne=false,
+        seq_aim=0, seq_wpn=0,
+        anim_delta=0,
+    }
+    if not L then return r end
+
+    -- GS layer slots (1-indexed):
+    -- 1=primary/base, 2=aim, 3=weapon, 4=shoot/lean, 5=walk, 6=jump/land, 7=move_blend
+    local aim  = L[2]; local wpn  = L[3]; local lean = L[4]
+    local walk = L[5]; local jump = L[6]; local move = L[7]
+
+    if aim  then
+        r.aim_w    = aim.weight  or 0
+        r.aim_cycle= aim.cycle   or 0
+        r.seq_aim  = aim.sequence or 0
+    end
+    if wpn  then
+        r.desync_cycle = _abs((r.aim_cycle) - (wpn.cycle or 0))
+        r.wpn_cycle    = wpn.cycle or 0
+        r.seq_wpn      = wpn.sequence or 0
+    end
+    if lean then r.lean_w = lean.weight or 0 end
+    if walk then r.walk_w = walk.weight or 0 end
+    if jump then
+        r.jump_w    = jump.weight or 0
+        r.is_airborne = r.jump_w > 0.45
+    end
+    if move then
+        r.move_w    = move.weight or 0
+        r.is_moving = r.move_w > 0.08
+    end
+
+    -- anim time delta (detect frozen/manipulated animations)
+    if aim and wpn then
+        r.anim_delta = _abs((aim.anim_time or 0) - (wpn.anim_time or 0))
+    end
+
+    return r
+end
+
+-- ── layer sequence fingerprinting ───────────────────────────────────────
+-- Each AA style produces a recognizable layer sequence signature
+local LAYER_SIGS = {
+    -- jitter_body: weapon layer cycles faster than aim layer
+    jitter_body  = { desync_cycle_min=0.12, desync_cycle_max=0.95 },
+    -- static_real: very low desync cycle
+    static_real  = { desync_cycle_max=0.06 },
+    -- exploit_anim: anim_delta > threshold (animation manipulation)
+    exploit_anim = { anim_delta_min=0.05 },
+    -- lean_aa: lean layer heavily weighted
+    lean_aa      = { lean_w_min=0.35 },
+}
+
+local function _fingerprint_layers(ld)
+    local sigs = {}
+    if ld.desync_cycle > LAYER_SIGS.jitter_body.desync_cycle_min
+    and ld.desync_cycle < LAYER_SIGS.jitter_body.desync_cycle_max then
+        sigs[#sigs+1] = 'jitter_body'
+    end
+    if ld.desync_cycle < LAYER_SIGS.static_real.desync_cycle_max then
+        sigs[#sigs+1] = 'static_real'
+    end
+    if ld.anim_delta > (LAYER_SIGS.exploit_anim.anim_delta_min or 0.05) then
+        sigs[#sigs+1] = 'exploit_anim'
+    end
+    if ld.lean_w > (LAYER_SIGS.lean_aa.lean_w_min or 0.35) then
+        sigs[#sigs+1] = 'lean_aa'
+    end
+    return sigs
+end
+
+-- ── UI ──────────────────────────────────────────────────────────────────
+local G = 'AA'; local GR = 'Anti-aimbot angles'
+
+local _ui_en      = menu.new_item(ui.new_checkbox,    G, GR, 'Enable Resolver')
+                    :record('aa','resolver::enabled'):save()
+_ui_en:set(true)
+
+local _ui_mode    = menu.new_item(ui.new_combobox,    G, GR,
+                    merge{'Resolver Engine','\n','resolver::mode'},
+                    'Pattern Core','Hybrid Engine','Bruteforce Only')
+                    :record('aa','resolver::mode'):save()
+
+local _ui_verbose = menu.new_item(ui.new_checkbox, G, GR, 'Verbose Logging')
+                    :record('aa','resolver::verbose'):save()
+
+local _ui_debug   = menu.new_item(ui.new_checkbox, G, GR, 'Resolver Debug')
+                    :record('aa','resolver::debug'):save()
+
+local _ui_pitch   = menu.new_item(ui.new_checkbox, G, GR, 'Resolve Pitch')
+                    :record('aa','resolver::pitch'):save()
+_ui_pitch:set(true)
+
+local _ui_exploits= menu.new_item(ui.new_checkbox, G, GR, 'Resolve Exploits')
+                    :record('aa','resolver::exploits'):save()
+_ui_exploits:set(true)
+
+local _ui_multipt = menu.new_item(ui.new_checkbox, G, GR, 'Multi-Point Sampling')
+                    :record('aa','resolver::multipoint'):save()
+_ui_multipt:set(true)
+
+local _ui_log_scr = menu.new_item(ui.new_checkbox, G, GR, 'Resolver Log (Screen)')
+                    :record('aa','resolver::log_screen'):save()
+local _ui_log_con = menu.new_item(ui.new_checkbox, G, GR, 'Resolver Log (Console)')
+                    :record('aa','resolver::log_console'):save()
+_ui_log_con:set(true)
+
+local _ui_suppress= menu.new_item(ui.new_checkbox, G, GR, 'Shot Suppression')
+                    :record('aa','resolver::suppress'):save()
+_ui_suppress:set(true)
+
+local _ui_sup_rng = menu.new_item(ui.new_slider, G, GR,
+                    merge{'Suppress Close Range','\n','resolver::suppress_range'},
+                    0, 800, 350, true, 'u', 1)
+                    :record('aa','resolver::suppress_range'):save()
+
+local _ui_jitter_t= menu.new_item(ui.new_slider, G, GR,
+                    merge{'Jitter Threshold','\n','resolver::jitter_thresh'},
+                    5, 60, 29, true, 'deg', 1)
+                    :record('aa','resolver::jitter_thresh'):save()
+
+local _ui_conf_w  = menu.new_item(ui.new_slider, G, GR,
+                    merge{'Min Confidence','\n','resolver::min_conf'},
+                    0, 80, 35, true, '%', 1)
+                    :record('aa','resolver::min_conf'):save()
+
+local _ui_hist_w  = menu.new_item(ui.new_slider, G, GR,
+                    merge{'History Weight Decay','\n','resolver::hist_decay'},
+                    50, 99, 88, true, '%', 1)
+                    :record('aa','resolver::hist_decay'):save()
+
+-- live labels
+local _lbl_method = menu.new_item(ui.new_label, G, GR, 'Method: -')
+local _lbl_aa     = menu.new_item(ui.new_label, G, GR, 'AA Type: -')
+local _lbl_desync = menu.new_item(ui.new_label, G, GR, 'Desync: -')
+local _lbl_lby    = menu.new_item(ui.new_label, G, GR, 'LBY: -')
+local _lbl_streak = menu.new_item(ui.new_label, G, GR, 'Streak: 0 miss | 0 hit')
+local _lbl_conf   = menu.new_item(ui.new_label, G, GR, 'Confidence: -')
+local _lbl_state  = menu.new_item(ui.new_label, G, GR, 'State: -')
+local _lbl_layers = menu.new_item(ui.new_label, G, GR, 'Layers: -')
+local _lbl_exploit= menu.new_item(ui.new_label, G, GR, 'Exploit: -')
+
+-- ── per-player database ─────────────────────────────────────────────────
 local DB = {}
 
-local function _db_get(ent)
+local function _db(ent)
     if not DB[ent] then
         DB[ent] = {
-            deltas          = {},
-            hit_count       = 0,
-            miss_count      = 0,
-            fail_streak     = 0,
-            brute_stage     = 0,
-            last_sim_time   = 0,
-            predicted_side  = 1,
-            predicted_desync= 0,
-            aa_style        = 'Unknown',
-            lby_time        = 0,
-            is_lby_updating = false,
-            last_nn_input   = nil,
+            -- delta ring buffer (eye-feet yaw delta, 128 samples)
+            deltas       = {},
+            -- feet yaw history
+            feet_hist    = {},
+            -- eye yaw history
+            eye_hist     = {},
+            -- velocity history
+            vel_hist     = {},
+            -- pitch history
+            pitch_hist   = {},
+            -- backtrack: per-tick origin + sim_time
+            bt_hist      = {},   -- [{tick, ox,oy,oz, sim}]
+            -- per-state stats: [ST.*] = { hits, misses, side, desync }
+            state_stats  = {},
+            -- side confirmation: which side landed hits
+            side_hits    = { [1]=0, [2]=0 },
+            -- miss pattern: list of {stage, side} on misses
+            miss_pattern = {},
+            -- adaptive desync: running estimate from miss patterns
+            adaptive_desync = nil,
+            -- LBY
+            lby_timer    = 0,
+            lby_updating = false,
+            lby_last_feet= 0,
+            lby_snap_cnt = 0,
+            lby_2nd_deriv= 0,   -- second derivative of feet yaw rate
+            lby_feet_rate= 0,   -- first derivative (rate of change)
+            -- defensive
+            def_snap_cnt = 0,
+            def_flick_cnt= 0,
+            def_last_feet= 0,
+            def_active   = false,
+            def_side     = 1,
+            def_timer    = 0,
+            -- lean
+            lean_side    = 0,   -- -1 left, +1 right, 0 unknown
+            lean_magnitude=0,
+            -- fake duck
+            fd_count     = 0,
+            fd_active    = false,
+            fd_last_duck = 0,
+            -- on-shot anti-aim
+            os_last_shot = 0,
+            os_side_hist = {},
+            -- exploit prediction
+            dt_active    = false,
+            tb_shift     = 0,
+            tb_hist      = {},
+            exploit_type = 'none',
+            -- jitter freq analysis
+            jitter_freq  = 0,
+            jitter_phase = 0,
+            jitter_mag   = 0,
+            -- current prediction
+            side         = 1,
+            desync       = 0,
+            confidence   = 0.5,
+            method       = 'none',
+            aa_type      = 'Gathering',
+            aa_swing     = 0,
+            -- NN
+            last_nn_inp  = nil,
+            -- counters
+            hit_count    = 0,
+            miss_count   = 0,
+            fail_streak  = 0,
+            hit_streak   = 0,
+            brute_stage  = 0,
+            brute_locked = false,
+            -- resolved pitch
+            pitch_res    = 0,
+            -- last update tick
+            last_sim     = 0,
+            last_tick    = 0,
+            -- confidence decay timer
+            conf_last_update = 0,
+            -- layer sigs cache
+            layer_sigs   = {},
         }
+        -- init per-state stats
+        for _, st in pairs(ST) do
+            DB[ent].state_stats[st] = { hits=0, misses=0, best_side=1, best_desync=40 }
+        end
     end
     return DB[ent]
 end
 
--- ── LBY timer ─────────────────────────────────────────────────────────
-local function _track_lby(ent, data)
-    local ast = _get_animstate(ent)
-    local vx = entity.get_prop(ent, 'm_vecVelocity[0]') or 0
-    local vy = entity.get_prop(ent, 'm_vecVelocity[1]') or 0
-    local vel = _sqrt(vx*vx + vy*vy)
+-- ── verbose log ─────────────────────────────────────────────────────────
+local function _vlog(msg)
+    if _ui_verbose:get() then
+        client.color_log(180, 130, 255, '[ZRes] ' .. msg .. '\0')
+    end
+end
+local function _dlog(msg)
+    if _ui_debug:get() then
+        client.color_log(140, 200, 255, '[ZDbg] ' .. msg .. '\0')
+    end
+end
+
+-- ── LBY tracker ─────────────────────────────────────────────────────────
+local function _track_lby(ent, d)
+    local ast = _animstate3(ent)
+    local vx  = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy  = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local spd = _sqrt(vx*vx + vy*vy)
     local now = globals.curtime()
-    if vel > 0.1 then
-        data.lby_time = now + 0.22
-        data.is_lby_updating = true
+
+    if spd > 1.5 then
+        d.lby_timer    = now + 0.22
+        d.lby_updating = true
     else
-        if now >= data.lby_time then
-            data.is_lby_updating = true
-            data.lby_time = now + 1.1
+        if now >= d.lby_timer then
+            d.lby_updating = true
+            d.lby_timer    = now + 1.1
         else
-            data.is_lby_updating = false
+            d.lby_updating = false
         end
     end
-    if ast then
-        local delta = _yaw_delta(ast.m_flEyeYaw, ast.m_flCurrentFeetYaw)
-        table.insert(data.deltas, delta)
-        if #data.deltas > 64 then table.remove(data.deltas, 1) end
+
+    if not ast then return end
+
+    local feet = ast.m_flCurrentFeetYaw
+    local eye  = ast.m_flEyeYaw
+
+    -- delta ring buffer with exponential weighting (recent = heavier)
+    local delta = _ydelta(eye, feet)
+    table.insert(d.deltas, delta)
+    if #d.deltas > 128 then table.remove(d.deltas, 1) end
+
+    -- feet history
+    table.insert(d.feet_hist, feet)
+    if #d.feet_hist > 64 then table.remove(d.feet_hist, 1) end
+
+    -- eye history
+    table.insert(d.eye_hist, eye)
+    if #d.eye_hist > 64 then table.remove(d.eye_hist, 1) end
+
+    -- pitch history
+    local pitch = ast.m_flPitch or 0
+    table.insert(d.pitch_hist, pitch)
+    if #d.pitch_hist > 32 then table.remove(d.pitch_hist, 1) end
+
+    -- LBY second derivative (rate of change of feet rate)
+    local feet_delta = _ydelta(feet, d.lby_last_feet)
+    local prev_rate  = d.lby_feet_rate
+    d.lby_feet_rate  = feet_delta
+    d.lby_2nd_deriv  = feet_delta - prev_rate
+
+    -- LBY snap detection: sudden feet jump while slow/standing
+    if _abs(feet_delta) > 25 and spd < 3 then
+        d.lby_snap_cnt = d.lby_snap_cnt + 1
+        _dlog(_f('LBY snap detected: %.1fdeg delta', _abs(feet_delta)))
+    end
+    d.lby_last_feet = feet
+end
+
+-- ── velocity history tracker ─────────────────────────────────────────────
+local function _track_vel(ent, d)
+    local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local vz = entity.get_prop(ent,'m_vecVelocity[2]') or 0
+    local spd = _sqrt(vx*vx + vy*vy)
+    table.insert(d.vel_hist, { vx=vx, vy=vy, vz=vz, spd=spd, t=globals.curtime() })
+    if #d.vel_hist > 32 then table.remove(d.vel_hist, 1) end
+end
+
+-- ── backtrack history ────────────────────────────────────────────────────
+local function _track_bt(ent, d)
+    local ox, oy, oz = entity.get_origin(ent)
+    if not ox then return end
+    local sim = entity.get_prop(ent,'m_flSimulationTime') or 0
+    local tc  = globals.tickcount()
+    table.insert(d.bt_hist, { tick=tc, ox=ox, oy=oy, oz=oz, sim=sim })
+    if #d.bt_hist > 64 then table.remove(d.bt_hist, 1) end
+end
+
+-- ── defensive snap/flick tracker ─────────────────────────────────────────
+local function _track_defensive(ent, d)
+    local ast = _animstate3(ent)
+    if not ast then return end
+
+    local feet  = ast.m_flCurrentFeetYaw
+    local torso = ast.m_flCurrentTorsoYaw
+    local eye   = ast.m_flEyeYaw
+    local now   = globals.curtime()
+
+    -- def_snap: feet yaw jumps 80-200 degrees suddenly
+    local feet_delta = _abs(_ydelta(feet, d.def_last_feet))
+    if feet_delta > 80 and feet_delta < 200 then
+        d.def_snap_cnt  = d.def_snap_cnt + 2.0
+        d.def_active    = true
+        d.def_timer     = now + 0.4
+        _dlog(_f('Def snap: %.1f deg', feet_delta))
+    end
+
+    -- def_flick: torso diverges from feet heavily
+    local torso_delta = _abs(_ydelta(torso, feet))
+    if torso_delta > 45 then
+        d.def_flick_cnt = d.def_flick_cnt + 1.5
+        _dlog(_f('Def flick: %.1f torso-feet', torso_delta))
+    end
+
+    -- decay
+    d.def_snap_cnt  = d.def_snap_cnt  * 0.95
+    d.def_flick_cnt = d.def_flick_cnt * 0.95
+
+    -- active state
+    if now < d.def_timer then
+        d.def_active = true
+    else
+        d.def_active = (d.def_snap_cnt > 1.2 or d.def_flick_cnt > 1.8)
+    end
+
+    -- which side is defensive targeting
+    local eye_feet_d = _ydelta(eye, feet)
+    if d.def_active then
+        d.def_side = eye_feet_d > 0 and 2 or 1
+    end
+
+    d.def_last_feet = feet
+end
+
+-- ── lean detector ────────────────────────────────────────────────────────
+local function _track_lean(ent, d)
+    local ast = _animstate3(ent)
+    if not ast then return end
+    local lean = ast.m_flLeanAmount or 0
+
+    -- lean amount: positive = leaning right, negative = left
+    d.lean_magnitude = _abs(lean)
+    if lean > 0.15 then
+        d.lean_side = 1     -- leaning right
+    elseif lean < -0.15 then
+        d.lean_side = -1    -- leaning left
+    else
+        d.lean_side = 0
     end
 end
 
--- ── AA style classifier ───────────────────────────────────────────────
-local function _classify(data)
-    if #data.deltas < 16 then return 'Gathering', 0 end
-    local flips, swing, static_n = 0, 0, 0
-    for i = 2, #data.deltas do
-        local c, p = data.deltas[i], data.deltas[i-1]
-        local diff = _abs(_yaw_delta(c, p))
-        if diff > swing then swing = diff end
-        if (c > 15 and p < -15) or (c < -15 and p > 15) then flips = flips + 1 end
-        if diff < 5 then static_n = static_n + 1 end
-    end
-    local n = #data.deltas
-    local fr = flips / n
-    local sr = static_n / n
-    if fr > 0.35                         then data.aa_style = 'Jitter';  return 'Jitter',  swing end
-    if swing > 90 and fr < 0.1          then data.aa_style = 'Swing';   return 'Swing',   swing end
-    if sr > 0.7                          then data.aa_style = 'Static';  return 'Static',  swing end
-    if swing > 30 and swing < 90        then data.aa_style = 'Sway';    return 'Sway',    swing end
-    data.aa_style = 'Chaotic'; return 'Chaotic', swing
-end
+-- ── fake duck detector ───────────────────────────────────────────────────
+local function _track_fakeduck(ent, d)
+    local duck = entity.get_prop(ent,'m_flDuckAmount') or 0
+    local flags= entity.get_prop(ent,'m_fFlags') or 0
+    local in_air = bit.band(flags,1) == 0
 
--- ── layer analysis ────────────────────────────────────────────────────
-local function _analyze_layers(ent)
-    local l = _get_layers(ent)
-    local r = { weight=0, cycle_delta=0, moving=false, jump=false }
-    if not l then return r end
-    local move, aim, wpn, jump = l[7], l[2], l[3], l[6]
-    if move then r.moving = (move.weight or 0) > 0.1 end
-    if jump then r.jump   = (jump.weight or 0) > 0.5 end
-    if aim and wpn then
-        r.weight      = _abs((aim.weight or 0) - (wpn.weight or 0))
-        r.cycle_delta = _abs((aim.cycle  or 0) - (wpn.cycle  or 0))
-    end
-    return r
-end
-
--- ── Pattern Core resolver ─────────────────────────────────────────────
-local function _resolve_pattern(ent, data, state)
-    local layers = _analyze_layers(ent)
-    local style, swing = _classify(data)
-    local last_delta = data.deltas[#data.deltas] or 0
-    local body_yaw = entity.get_prop(ent, 'm_flPoseParameter', 11) or 0.5
-
-    local side = last_delta > 0 and 2 or 1
-    if layers.weight > 0.5 then side = 2
-    elseif layers.weight < -0.5 then side = 1
-    end
-
-    local desync = _min(58, _max(20, swing * 0.55))
-    local conf = 0.5
-
-    if style == 'Static' then
-        desync = 58; conf = 0.92
-        side = body_yaw > 0.5 and 2 or 1
-    elseif style == 'Jitter' then
-        side = (globals.tickcount() % 2 == 0) and 1 or 2
-        desync = _max(20, desync * 0.75); conf = 0.80
-    elseif style == 'Swing' then
-        side = last_delta > 0 and 2 or 1
-        desync = 48; conf = 0.72
-    elseif style == 'Sway' then
-        side = last_delta > 0 and 2 or 1
-        desync = _min(45, desync); conf = 0.65
-    elseif style == 'Chaotic' then
-        local sum, cnt = 0, _min(4, #data.deltas)
-        for i = #data.deltas - cnt + 1, #data.deltas do
-            sum = sum + (data.deltas[i] or 0)
+    -- fake duck: rapid oscillation of duck amount while not fully ducked
+    if not in_air then
+        local duck_delta = _abs(duck - d.fd_last_duck)
+        if duck_delta > 0.2 and duck < 0.85 then
+            d.fd_count = d.fd_count + 1
+        else
+            d.fd_count = _max(0, d.fd_count - 0.2)
         end
-        side = (sum / _max(cnt,1)) > 0 and 2 or 1
-        desync = 35; conf = 0.45
+        d.fd_active = d.fd_count > 3
+    else
+        d.fd_count  = _max(0, d.fd_count - 0.5)
+        d.fd_active = false
     end
-
-    if data.is_lby_updating then desync = 0; conf = 1.0 end
-
-    if state == O.AIR or state == O.AIR_CROUCH or layers.jump then
-        desync = _floor(desync * 0.55); conf = conf * 0.85
-    elseif state == O.MOVE then
-        desync = _floor(desync * 0.80)
-    elseif state == O.SNAKING then
-        desync = _floor(desync * 0.70); conf = conf * 0.75
-    end
-
-    return side, _floor(desync), conf
+    d.fd_last_duck = duck
 end
 
--- ── Bruteforce resolver ───────────────────────────────────────────────
-local _brute_stages = {
-    [0]=58,[1]=-58,[2]=48,[3]=-48,[4]=38,[5]=-38,
-    [6]=28,[7]=-28,[8]=18,[9]=-18,[10]=0
+-- ── on-shot AA timing tracker ────────────────────────────────────────────
+local function _track_os(ent, d)
+    local wpn = entity.get_player_weapon(ent)
+    if not wpn then return end
+    local next_att = entity.get_prop(ent,'m_flNextAttack') or 0
+    local now      = globals.curtime()
+
+    -- detect shot by checking if next attack timer just reset
+    if next_att > now and next_att < now + 0.2 then
+        if now - d.os_last_shot > 0.3 then
+            -- record which side they were on when they shot
+            local ast = _animstate3(ent)
+            if ast then
+                local delta = _ydelta(ast.m_flEyeYaw, ast.m_flCurrentFeetYaw)
+                local shot_side = delta > 0 and 2 or 1
+                table.insert(d.os_side_hist, shot_side)
+                if #d.os_side_hist > 16 then table.remove(d.os_side_hist, 1) end
+                _dlog(_f('OS shot detected, side=%d', shot_side))
+            end
+            d.os_last_shot = now
+        end
+    end
+end
+
+-- ── exploit predictor ────────────────────────────────────────────────────
+local function _track_exploit(ent, d)
+    -- track tickbase shifts (DT/hideshot)
+    local sim   = entity.get_prop(ent,'m_flSimulationTime') or 0
+    local tc    = globals.tickcount()
+    local ti    = globals.tickinterval()
+    local sim_tick = _fl(sim / ti + 0.5)
+
+    table.insert(d.tb_hist, { tc=tc, sim_tick=sim_tick })
+    if #d.tb_hist > 32 then table.remove(d.tb_hist, 1) end
+
+    -- detect tickbase shift: sim_tick < expected
+    if #d.tb_hist >= 2 then
+        local prev = d.tb_hist[#d.tb_hist - 1]
+        local curr = d.tb_hist[#d.tb_hist]
+        local expected = prev.sim_tick + (curr.tc - prev.tc)
+        local shift = expected - curr.sim_tick
+        if shift > 1 and shift <= 16 then
+            d.tb_shift   = shift
+            d.dt_active  = true
+            d.exploit_type = _f('DT(shift=%d)', _fl(shift))
+            _dlog(_f('Exploit: TB shift %d ticks', _fl(shift)))
+        elseif shift <= 0 then
+            d.dt_active  = false
+            if d.tb_shift > 0 then d.tb_shift = d.tb_shift - 1 end
+        end
+    end
+
+    -- fake duck exploit: duck amount flicker
+    if d.fd_active then
+        d.exploit_type = 'FakeDuck'
+    end
+end
+
+-- ── jitter frequency analysis ────────────────────────────────────────────
+local function _analyze_jitter_freq(d, jitter_thresh)
+    if #d.deltas < 16 then return 0, 0, 0 end
+
+    -- extract sign-change signal from deltas
+    local sig = {}
+    for i, v in ipairs(d.deltas) do
+        sig[i] = _abs(v) > jitter_thresh and _sign(v) or 0
+    end
+
+    -- dominant frequency via DFT
+    local freq, mag = _dominant_freq(sig)
+
+    -- phase: which part of the cycle are we in now
+    local phase = 0
+    if freq > 0 and #sig > 0 then
+        local tc = globals.tickcount()
+        phase = (tc % _max(1, _fl(#sig / freq))) / _max(1, _fl(#sig / freq))
+    end
+
+    return freq, mag, phase
+end
+
+-- ── adaptive desync estimator ────────────────────────────────────────────
+-- Tracks miss patterns and adjusts desync estimate based on observed failures
+local function _update_adaptive_desync(d, missed_side, missed_desync)
+    table.insert(d.miss_pattern, {
+        side   = missed_side,
+        desync = missed_desync,
+        tick   = globals.tickcount()
+    })
+    if #d.miss_pattern > 20 then table.remove(d.miss_pattern, 1) end
+
+    -- if we keep missing with the same desync, it's likely wrong
+    -- estimate real desync from miss spread
+    if #d.miss_pattern >= 4 then
+        local sum_d = 0
+        for _, mp in ipairs(d.miss_pattern) do sum_d = sum_d + mp.desync end
+        local avg_miss_d = sum_d / #d.miss_pattern
+        -- real desync is likely at the other end of the range
+        if avg_miss_d > 30 then
+            d.adaptive_desync = _max(0, 60 - avg_miss_d)
+        else
+            d.adaptive_desync = _min(60, avg_miss_d + 30)
+        end
+        _dlog(_f('Adaptive desync updated: %.1f (from %d misses)', d.adaptive_desync, #d.miss_pattern))
+    end
+end
+
+-- ── multi-point hitbox sampler ───────────────────────────────────────────
+-- Try N yaw offsets around predicted, pick highest P(hit)
+local function _multipoint_sample(ent, base_side, base_desync, me)
+    if not _ui_multipt:get() then
+        return base_side, base_desync
+    end
+    if not me or not entity.is_alive(me) then
+        return base_side, base_desync
+    end
+
+    local eye_x, eye_y, eye_z = client.eye_position()
+    if not eye_x then return base_side, base_desync end
+
+    local ast = _animstate3(ent)
+    if not ast then return base_side, base_desync end
+
+    local base_yaw = ast.m_flEyeYaw
+    local best_off = base_desync * (base_side==2 and 1 or -1)
+    local best_hit = -1
+
+    -- sample 7 points: -60,-40,-20,0,+20,+40,+60
+    local offsets = { -60,-40,-20,0,20,40,60 }
+    for _, off in ipairs(offsets) do
+        local test_yaw = base_yaw + off
+        -- estimate head position at this yaw
+        local hx = eye_x + _cos(_deg2rad(test_yaw)) * 2
+        local hy = eye_y + _sin(_deg2rad(test_yaw)) * 2
+        local hz = eye_z + 68  -- approx head height offset
+
+        -- trace to check visibility probability
+        local frac = client.trace_line(me, eye_x, eye_y, eye_z, hx, hy, hz)
+        local vis_score = frac > 0.9 and 1.0 or frac
+
+        if vis_score > best_hit then
+            best_hit = vis_score
+            best_off = off
+        end
+    end
+
+    local final_side   = best_off >= 0 and 2 or 1
+    local final_desync = _abs(best_off)
+    return final_side, final_desync
+end
+
+-- ── confidence decay ─────────────────────────────────────────────────────
+local function _apply_conf_decay(d)
+    local now = globals.curtime()
+    -- confidence decays if no fresh data in 2 seconds
+    if now - d.conf_last_update > 2.0 then
+        d.confidence = _max(0.2, d.confidence * 0.92)
+    end
+end
+
+-- ── AA type classifier with exponential weighting ───────────────────────
+local function _classify3(d, jitter_thresh, decay)
+    if #d.deltas < 12 then return 'Gathering', 0, 0.5 end
+
+    local weights = _exp_weights(#d.deltas, decay)
+    local wsum    = 0
+    for _, w in ipairs(weights) do wsum = wsum + w end
+
+    local flips_w   = 0
+    local static_w  = 0
+    local swing_max = 0
+    local sum_w     = 0
+    local pos_w     = 0
+
+    for i = 2, #d.deltas do
+        local c, p = d.deltas[i], d.deltas[i-1]
+        local diff  = _abs(_ydelta(c, p))
+        local w     = weights[i]
+        if diff > swing_max then swing_max = diff end
+        if diff > jitter_thresh then flips_w  = flips_w  + w end
+        if diff < 6             then static_w = static_w + w end
+        sum_w = sum_w + c * w
+        if c > 0 then pos_w = pos_w + w end
+    end
+
+    local n    = #d.deltas - 1
+    local fr   = flips_w  / wsum
+    local sr   = static_w / wsum
+    local avg  = sum_w    / wsum
+    local bias = pos_w    / wsum
+
+    -- classify with hysteresis: keep previous type if borderline
+    local prev = d.aa_type
+
+    local aa_type
+    if     fr > 0.38            then aa_type = 'Jitter'
+    elseif sr > 0.70 and swing_max < 30 then aa_type = 'Static'
+    elseif swing_max > 85 and fr < 0.12 then aa_type = 'Swing'
+    elseif swing_max > 28 and fr < 0.22 then aa_type = 'Sway'
+    elseif d.lby_updating       then aa_type = 'LBY'
+    else                             aa_type = 'Chaotic'
+    end
+
+    -- hysteresis: require threshold to change from Jitter/Static
+    if (prev == 'Jitter' and aa_type ~= 'Jitter' and fr > 0.28) or
+       (prev == 'Static' and aa_type ~= 'Static' and sr > 0.55) then
+        aa_type = prev
+    end
+
+    return aa_type, swing_max, bias
+end
+
+-- ── per-state resolver lookup ────────────────────────────────────────────
+local function _get_state_override(d, state)
+    local ss = d.state_stats[state]
+    if not ss then return nil end
+    -- if we have enough hits in this state, trust that side
+    if ss.hits >= 3 and ss.hits > ss.misses then
+        return ss.best_side, ss.best_desync, 0.85
+    end
+    return nil
+end
+
+local function _update_state_stats(d, state, hit, side, desync)
+    local ss = d.state_stats[state]
+    if not ss then
+        d.state_stats[state] = { hits=0, misses=0, best_side=1, best_desync=40 }
+        ss = d.state_stats[state]
+    end
+    if hit then
+        ss.hits       = ss.hits + 1
+        ss.best_side  = side
+        ss.best_desync= desync
+    else
+        ss.misses = ss.misses + 1
+    end
+end
+
+-- ── OS side predictor ────────────────────────────────────────────────────
+local function _predict_os_side(d)
+    if #d.os_side_hist < 3 then return nil end
+    local cnt = { [1]=0, [2]=0 }
+    for _, s in ipairs(d.os_side_hist) do cnt[s] = cnt[s] + 1 end
+    -- they tend to shoot from a consistent side
+    return cnt[1] > cnt[2] and 1 or 2, 0.70
+end
+
+-- ── air velocity resolver ────────────────────────────────────────────────
+local function _resolve_air_vel(ent, d, ast)
+    local vx  = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy  = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local spd = _sqrt(vx*vx + vy*vy)
+    if spd < 5 then return nil, 0, 0.35 end
+
+    local vel_yaw     = _rad2deg(_atan(vy, vx))
+    local eye_yaw     = ast and ast.m_flEyeYaw or 0
+    local vel_eye_d   = _ydelta(vel_yaw, eye_yaw)
+
+    -- velocity consistency: if vel has been stable same direction
+    local vel_consistent = 0
+    if #d.vel_hist >= 4 then
+        local prev_vd = _ydelta(
+            _rad2deg(_atan(d.vel_hist[#d.vel_hist-1].vy, d.vel_hist[#d.vel_hist-1].vx)),
+            eye_yaw)
+        if _sign(prev_vd) == _sign(vel_eye_d) then
+            vel_consistent = 1
+        end
+    end
+
+    local side
+    if     vel_eye_d >  25 then side = 2
+    elseif vel_eye_d < -25 then side = 1
+    else                        side = d.side
+    end
+
+    local base_conf = _clamp(spd / 240, 0.30, 0.72)
+    local conf      = base_conf + vel_consistent * 0.08
+    local desync    = _fl(_clamp(spd * 0.17, 8, 48))
+
+    return side, desync, conf
+end
+
+-- ── lean-based side resolver ─────────────────────────────────────────────
+local function _resolve_lean(d, ld)
+    if d.lean_side == 0 then return nil end
+    if ld.lean_w < 0.25 then return nil end
+    -- lean side tells us which way they're peeking
+    -- lean right (+1) = they're to our left = real side is right (2)
+    local side = d.lean_side > 0 and 2 or 1
+    local conf = _clamp(d.lean_magnitude * 1.8, 0.50, 0.82)
+    return side, _fl(ld.lean_w * 45), conf
+end
+
+-- ── pattern core resolver ────────────────────────────────────────────────
+local function _resolve_pattern3(ent, d, state, ld, jitter_thresh, decay)
+    local aa_type, swing, bias = _classify3(d, jitter_thresh, decay)
+    d.aa_type  = aa_type
+    d.aa_swing = swing
+
+    local ast        = _animstate3(ent)
+    local body_pose  = entity.get_prop(ent,'m_flPoseParameter',11) or 0.5
+    local last_delta = d.deltas[#d.deltas] or 0
+
+    -- layer fingerprint
+    local sigs = _fingerprint_layers(ld)
+    d.layer_sigs = sigs
+
+    local side, desync, conf
+
+    if aa_type == 'Static' then
+        -- body pose is reliable for static AA
+        side   = body_pose > 0.55 and 2 or 1
+        desync = 58
+        conf   = 0.93
+        -- layer correction: if layer says otherwise, trust it
+        if #sigs > 0 and sigs[1] == 'jitter_body' then
+            -- animation override found even though classified static
+            side = ld.aim_w > 0 and 2 or 1
+            conf = 0.80
+        end
+        d.method = 'static'
+
+    elseif aa_type == 'Jitter' then
+        -- frequency-based: get phase to predict current flip direction
+        local freq, mag, phase = _analyze_jitter_freq(d, jitter_thresh)
+        d.jitter_freq  = freq
+        d.jitter_phase = phase
+        d.jitter_mag   = mag
+
+        -- use phase to predict which side they're on RIGHT NOW
+        -- at phase 0.0-0.5 = side 1, phase 0.5-1.0 = side 2
+        if freq > 0 and mag > 0.3 then
+            side = phase < 0.5 and 1 or 2
+            conf = 0.80 + mag * 0.12
+            d.method = _f('jitter(f=%d,p=%.2f)', freq, phase)
+        else
+            -- fallback: alternate based on tickcount
+            side = (globals.tickcount() % 2 == 0) and 1 or 2
+            conf = 0.72
+            d.method = 'jitter(alt)'
+        end
+        desync = _max(18, _fl(swing * 0.68))
+
+    elseif aa_type == 'LBY' then
+        -- LBY: use second derivative to predict snap direction
+        local snap_dir = d.lby_2nd_deriv > 0 and 2 or 1
+        side   = snap_dir
+        desync = 0
+        conf   = 0.95
+        d.method = 'lby'
+        -- if many snaps recorded, trust the snap side
+        if d.lby_snap_cnt >= 3 then
+            side = d.def_side  -- LBY snap goes to real side
+            conf = _min(0.98, conf + 0.02)
+        end
+
+    elseif aa_type == 'Swing' then
+        side   = last_delta > 0 and 2 or 1
+        desync = 50
+        conf   = 0.70
+        d.method = 'swing'
+
+    elseif aa_type == 'Sway' then
+        -- exponentially weighted average to find current lean direction
+        local w = _exp_weights(#d.deltas, decay)
+        local wsum, sum = 0, 0
+        for i, v in ipairs(d.deltas) do
+            sum  = sum  + v * w[i]
+            wsum = wsum + w[i]
+        end
+        local wavg = wsum > 0 and sum/wsum or 0
+        side   = wavg > 0 and 2 or 1
+        desync = _fl(_clamp(swing * 0.58, 20, 50))
+        conf   = 0.63
+        d.method = 'sway'
+
+    else  -- Chaotic / Gathering
+        -- use recent 4 deltas weighted heavily
+        local w = _exp_weights(_min(6, #d.deltas), 0.75)
+        local sum_w, wsum = 0, 0
+        local n = #d.deltas
+        for i = _max(1, n-5), n do
+            local wi = w[i - _max(1,n-5) + 1] or 1
+            sum_w = sum_w + (d.deltas[i] or 0) * wi
+            wsum  = wsum + wi
+        end
+        side   = (wsum > 0 and sum_w/wsum or 0) > 0 and 2 or 1
+        desync = 28
+        conf   = 0.38
+        d.method = 'chaotic'
+    end
+
+    -- lean override (layer-confirmed lean)
+    local l_side, l_desync, l_conf = _resolve_lean(d, ld)
+    if l_side and l_conf and l_conf > conf then
+        side   = l_side
+        desync = l_desync
+        conf   = l_conf
+        d.method = d.method .. '+lean'
+    end
+
+    -- defensive overrides
+    if d.def_active and _ui_exploits:get() then
+        if d.def_snap_cnt > 1.5 then
+            side   = d.def_side
+            desync = _max(desync, 48)
+            conf   = _max(conf, 0.74)
+            d.method = d.method .. '+def_snap'
+        end
+        if d.def_flick_cnt > 1.8 then
+            side   = d.def_side
+            desync = _max(desync, 54)
+            conf   = _max(conf, 0.78)
+            d.method = d.method .. '+def_flick'
+        end
+    end
+
+    -- exploit override
+    if d.dt_active and _ui_exploits:get() then
+        -- when DT is active, desync is usually maxed
+        desync = _max(desync, 54)
+        conf   = _max(conf, 0.72)
+        d.method = d.method .. '+dt'
+    end
+    if d.fd_active and _ui_exploits:get() then
+        -- fake duck: they can't really desync much
+        desync = _min(desync, 20)
+        conf   = _max(conf, 0.68)
+        d.method = d.method .. '+fd'
+    end
+
+    -- per-state override (if we've hit them in this state before)
+    local st_side, st_desync, st_conf = _get_state_override(d, state)
+    if st_side and st_conf and st_conf > conf then
+        side   = st_side
+        desync = st_desync
+        conf   = st_conf
+        d.method = d.method .. '+state'
+    end
+
+    -- OS prediction
+    local os_side, os_conf = _predict_os_side(d)
+    if os_side and os_conf and os_conf > 0.65 and conf < 0.75 then
+        side   = os_side
+        conf   = _max(conf, os_conf)
+        d.method = d.method .. '+os'
+    end
+
+    -- adaptive desync override (from miss pattern analysis)
+    if d.adaptive_desync and d.fail_streak >= 2 then
+        desync = _fl(_lerp(desync, d.adaptive_desync, 0.45))
+        d.method = d.method .. '+adapt'
+    end
+
+    -- side confirmation bias: weight toward side that has landed hits
+    local sh = d.side_hits
+    if sh[1] + sh[2] >= 4 then
+        local hit_side = sh[2] > sh[1] and 2 or 1
+        if hit_side == side then
+            conf = _min(1.0, conf + 0.05)
+        else
+            -- disagreement: trust hit history more
+            if sh[hit_side] > sh[side] * 1.5 then
+                side = hit_side
+                conf = _max(conf, 0.65)
+                d.method = d.method .. '+confirm'
+            end
+        end
+    end
+
+    -- state-based desync corrections
+    if state == ST.AIR or state == ST.AIR_CROUCH then
+        -- try air_vel first
+        local av_s, av_d, av_c = _resolve_air_vel(ent, d, ast)
+        if av_s and av_c and av_c > conf then
+            side   = av_s
+            desync = av_d
+            conf   = av_c
+            d.method = 'air_vel'
+        else
+            desync = _fl(desync * 0.58)
+            conf   = conf * 0.82
+            d.method = d.method .. '+air'
+        end
+    elseif state == ST.MOVE then
+        desync = _fl(desync * 0.80)
+    elseif state == ST.SNAKING then
+        -- snaking: rapid alternation, use frequency analysis
+        if d.jitter_freq > 0 then
+            side   = d.jitter_phase < 0.5 and 1 or 2
+            d.method = d.method .. '+snaking_freq'
+        else
+            side = (globals.tickcount() % 3 == 0) and 1 or 2
+        end
+        desync = _fl(desync * 0.62)
+        conf   = conf * 0.70
+    elseif state == ST.SLOWWALK then
+        desync = _fl(desync * 0.88)
+    elseif state == ST.CROUCH then
+        -- crouching: less desync possible
+        desync = _fl(desync * 0.85)
+    end
+
+    -- layer aim_weight correction
+    if ld.aim_w > 0.52 then
+        local layer_side = ld.aim_w > 0 and 2 or 1
+        if layer_side ~= side then
+            -- blend with layer evidence
+            if ld.aim_w > 0.75 then
+                side = layer_side
+                conf = _max(conf, 0.65)
+                d.method = d.method .. '+layer'
+            end
+        end
+    end
+
+    return side, _clamp(_fl(desync), 0, 60), _clamp(conf, 0.0, 1.0)
+end
+
+-- ── bruteforce resolver ──────────────────────────────────────────────────
+-- 13 stages covering the full desync arc with adaptive ordering
+local _BRUTE_BASE = {
+    [0]=58, [1]=-58, [2]=48, [3]=-48, [4]=38, [5]=-38,
+    [6]=28, [7]=-28, [8]=18, [9]=-18, [10]=10, [11]=-10, [12]=0
 }
-local function _resolve_brute(data)
-    local idx = data.brute_stage % 11
-    local val = _brute_stages[idx]
+
+local function _resolve_brute3(d)
+    local idx = d.brute_stage % 13
+    local val = _BRUTE_BASE[idx] or 0
+
+    -- adaptive: if we have a miss pattern, skip values we know are wrong
+    if d.adaptive_desync and d.fail_streak >= 3 then
+        -- try to jump to the adaptive estimate
+        local target  = d.adaptive_desync
+        local best_v  = val
+        local best_d  = _abs(val - target)
+        for _, v in pairs(_BRUTE_BASE) do
+            local dist = _abs(_abs(v) - target)
+            if dist < best_d then best_d = dist; best_v = v end
+        end
+        val = best_v
+        d.method = _f('brute_adapt@%.0f', target)
+    else
+        d.method = 'brute@' .. idx
+    end
+
     return val >= 0 and 2 or 1, _abs(val), 1.0
 end
 
--- ── Neural net (Hybrid Engine) ────────────────────────────────────────
-local NN = {
-    cfg = { inp=14, hid=24, out=3, lr=0.05, mom=0.9 },
-    wh={}, wo={}, vh={}, vo={}, mem={}
-}
-for i=1,14 do
-    NN.wh[i]={};NN.vh[i]={}
-    for j=1,24 do
-        NN.wh[i][j]=(math.random()*2-1)*_sqrt(6/38)
-        NN.vh[i][j]=0
+-- ── neural net (Hybrid Engine) v2 ───────────────────────────────────────
+-- 20 inputs, 48 hidden, 3 outputs
+-- Trained online with momentum SGD + experience replay
+local function _nn3_fwd(inp)
+    local h = {}
+    for i = 1, 48 do
+        local s = 0
+        for j = 1, 20 do s = s + (inp[j] or 0) * NN3.wh[j][i] end
+        h[i] = _lrelu3(s)
     end
+    local o = {}
+    for i = 1, 3 do
+        local s = 0
+        for j = 1, 48 do s = s + h[j] * NN3.wo[j][i] end
+        o[i] = _sig3(s)
+    end
+    return o, h
 end
-for i=1,24 do
-    NN.wo[i]={};NN.vo[i]={}
-    for j=1,3 do
-        NN.wo[i][j]=(math.random()*2-1)*_sqrt(6/27)
-        NN.vo[i][j]=0
-    end
-end
-local function _lrelu(x) return x>0 and x or 0.01*x end
-local function _sig(x)   return 1/(1+_exp(-x)) end
-local function _nn_fwd(inp)
-    local h={}
-    for i=1,24 do
-        local s=0
-        for j=1,14 do s=s+(inp[j] or 0)*NN.wh[j][i] end
-        h[i]=_lrelu(s)
-    end
-    local o={}
-    for i=1,3 do
-        local s=0
-        for j=1,24 do s=s+h[j]*NN.wo[j][i] end
-        o[i]=_sig(s)
-    end
-    return o,h
-end
-local function _nn_train()
-    if #NN.mem < 16 then return end
-    for _=1,8 do
-        local s=NN.mem[math.random(1,#NN.mem)]
-        local o,h=_nn_fwd(s.inp)
-        local sw=s.w or 1
-        for i=1,3 do
-            local e=(s.tgt[i]-o[i])*o[i]*(1-o[i])*sw
-            for j=1,24 do
-                local g=NN.cfg.lr*e*h[j]
-                NN.vo[j][i]=NN.cfg.mom*NN.vo[j][i]+g
-                NN.wo[j][i]=NN.wo[j][i]+NN.vo[j][i]
+
+local function _nn3_train()
+    if #NN3.mem < 24 then return end
+    -- mini-batch of 12
+    for _ = 1, 12 do
+        local s = NN3.mem[math.random(1, #NN3.mem)]
+        local o, h = _nn3_fwd(s.inp)
+        local sw = s.w or 1
+        -- output layer
+        local delta_o = {}
+        for i = 1, 3 do
+            delta_o[i] = (s.tgt[i] - o[i]) * o[i] * (1 - o[i]) * sw
+        end
+        -- hidden layer
+        local delta_h = {}
+        for j = 1, 48 do
+            local err = 0
+            for i = 1, 3 do err = err + delta_o[i] * NN3.wo[j][i] end
+            delta_h[j] = err * (h[j] > 0 and 1 or 0.018)
+        end
+        -- update weights
+        for i = 1, 3 do
+            for j = 1, 48 do
+                local g = NN3.cfg.lr * delta_o[i] * h[j]
+                NN3.vo[j][i] = NN3.cfg.mom * NN3.vo[j][i] + g
+                NN3.wo[j][i] = NN3.wo[j][i] + NN3.vo[j][i]
+            end
+        end
+        for j = 1, 48 do
+            for k = 1, 20 do
+                local g = NN3.cfg.lr * delta_h[j] * (s.inp[k] or 0)
+                NN3.vh[k][j] = NN3.cfg.mom * NN3.vh[k][j] + g
+                NN3.wh[k][j] = NN3.wh[k][j] + NN3.vh[k][j]
             end
         end
     end
+    NN3.trained_samples = NN3.trained_samples + 1
 end
-local function _nn_add_sample(inp, side, desync, conf, w)
-    table.insert(NN.mem, {
-        inp=inp,
-        tgt={ side==2 and 1.0 or 0.0, _min(desync/58,1), conf },
-        w=w
+
+local function _nn3_sample(inp, side, desync, conf, w)
+    table.insert(NN3.mem, {
+        inp = inp,
+        tgt = { side==2 and 1.0 or 0.0, _min(desync/60,1), conf },
+        w   = w
     })
-    if #NN.mem > 1000 then table.remove(NN.mem,1) end
+    if #NN3.mem > 1500 then table.remove(NN3.mem, 1) end
 end
-local function _build_nn_input(ent, data, state, layers)
-    local ast = _get_animstate(ent)
-    local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
-    local v = _sqrt(vx*vx+vy*vy)
+
+-- 20-dimensional input vector
+local function _nn3_inp(ent, d, state, ld)
+    local ast = _animstate3(ent)
+    local vx  = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy  = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local spd = _sqrt(vx*vx + vy*vy)
+    local last_d  = d.deltas[#d.deltas]         or 0
+    local prev_d  = d.deltas[#d.deltas-1]       or 0
+    local prev2_d = d.deltas[#d.deltas-2]       or 0
+    local duck    = entity.get_prop(ent,'m_flDuckAmount') or 0
     return {
-        state==O.STAND      and 1 or 0,
-        state==O.MOVE       and 1 or 0,
-        state==O.AIR        and 1 or 0,
-        state==O.CROUCH     and 1 or 0,
-        _min(v/260,1),
-        ast and ast.m_flDuckAmount or 0,
-        (data.deltas[#data.deltas] or 0)/180,
-        layers.weight,
-        layers.cycle_delta,
-        data.is_lby_updating and 1 or 0,
-        data.fail_streak/10,
-        state==O.SLOWWALK   and 1 or 0,
-        state==O.AIR_CROUCH and 1 or 0,
-        state==O.SNAKING    and 1 or 0,
+        state==ST.STAND     and 1 or 0,  -- 1
+        state==ST.MOVE      and 1 or 0,  -- 2
+        state==ST.AIR       and 1 or 0,  -- 3
+        state==ST.CROUCH    and 1 or 0,  -- 4
+        state==ST.SLOWWALK  and 1 or 0,  -- 5
+        state==ST.AIR_CROUCH and 1 or 0, -- 6
+        state==ST.SNAKING   and 1 or 0,  -- 7
+        _clamp(spd/260, 0, 1),           -- 8: speed
+        duck,                            -- 9: duck amount
+        last_d  / 180,                   -- 10: last delta
+        prev_d  / 180,                   -- 11: prev delta
+        prev2_d / 180,                   -- 12: prev2 delta
+        ld.aim_w,                        -- 13: aim layer weight
+        ld.desync_cycle,                 -- 14: layer desync
+        ld.lean_w,                       -- 15: lean weight
+        d.lby_updating and 1 or 0,       -- 16: lby active
+        _clamp(d.fail_streak/14, 0, 1),  -- 17: fail rate
+        d.def_active and 1 or 0,         -- 18: def active
+        d.dt_active  and 1 or 0,         -- 19: DT active
+        d.fd_active  and 1 or 0,         -- 20: fake duck
     }
 end
-local function _resolve_hybrid(ent, data, state)
-    local p_side, p_desync, p_conf = _resolve_pattern(ent, data, state)
-    local layers = _analyze_layers(ent)
-    local inp = _build_nn_input(ent, data, state, layers)
-    local n_out = _nn_fwd(inp)
-    local n_side   = n_out[1] > 0.5 and 2 or 1
-    local n_desync = _floor(n_out[2] * 58)
-    local n_conf   = n_out[3]
-    data.last_nn_input = inp
-    if data.is_lby_updating or p_conf > 0.9 then
+
+local function _resolve_hybrid3(ent, d, state, ld, jitter_thresh, decay)
+    local p_side, p_desync, p_conf = _resolve_pattern3(ent, d, state, ld, jitter_thresh, decay)
+    local inp    = _nn3_inp(ent, d, state, ld)
+    local nout   = _nn3_fwd(inp)
+    local n_side   = nout[1] > 0.52 and 2 or 1
+    local n_desync = _fl(nout[2] * 60)
+    local n_conf   = nout[3]
+    d.last_nn_inp  = inp
+
+    -- how many trained samples: low count = don't trust NN much
+    local nn_trust = _clamp(NN3.trained_samples / 20, 0, 1)
+
+    -- trust pattern for LBY, high-confidence, or low NN training
+    if d.lby_updating or p_conf > 0.90 or nn_trust < 0.3 then
         return p_side, p_desync, p_conf
-    elseif data.aa_style == 'Jitter' or data.aa_style == 'Chaotic' then
-        return n_side, n_desync, n_conf
+    end
+
+    -- trust NN for jitter and chaotic when well-trained
+    if (d.aa_type == 'Jitter' or d.aa_type == 'Chaotic') and nn_trust > 0.6 then
+        if n_conf * nn_trust > p_conf then
+            d.method = 'neural+' .. d.method
+            return n_side, n_desync, _min(n_conf, 0.92)
+        end
+    end
+
+    -- weighted blend
+    local p_w = p_conf
+    local n_w = n_conf * nn_trust
+    local total = p_w + n_w
+    if total <= 0 then return p_side, p_desync, p_conf end
+
+    local blend_d    = _fl((p_desync*p_w + n_desync*n_w) / total)
+    local final_side = p_w >= n_w and p_side or n_side
+    local final_conf = _max(p_conf, n_conf * nn_trust)
+    d.method = 'hybrid+' .. d.method
+    return final_side, blend_d, final_conf
+end
+
+-- ── pitch resolver ───────────────────────────────────────────────────────
+local function _resolve_pitch3(ent, d)
+    if not _ui_pitch:get() then return end
+    if #d.pitch_hist < 8 then return end
+    local w = _exp_weights(#d.pitch_hist, 0.85)
+    local sum_w, wsum = 0, 0
+    for i, v in ipairs(d.pitch_hist) do
+        sum_w = sum_w + v * w[i]
+        wsum  = wsum + w[i]
+    end
+    local avg = wsum > 0 and sum_w/wsum or 0
+    -- heavy downward pitch = faking down, resolve up
+    if avg < -55 then
+        d.pitch_res =  89
+    elseif avg > 55 then
+        d.pitch_res = -89
     else
-        local bd = _floor((p_desync*p_conf + n_desync*n_conf) / (p_conf+n_conf))
-        return p_side, bd, _max(p_conf, n_conf)
+        d.pitch_res = 0
     end
 end
 
--- ── verbose log ───────────────────────────────────────────────────────
-local function _vlog(msg)
-    if _res_ui_verbose:get() then
-        client.color_log(180, 130, 255, '[ZNRes] ' .. msg .. ' ')
-    end
+-- ── shot suppression ─────────────────────────────────────────────────────
+local function _should_suppress(ent)
+    if not _ui_suppress:get() then return false end
+    local me = entity.get_local_player()
+    if not me then return false end
+    local mx,my = entity.get_origin(me)
+    local ex,ey = entity.get_origin(ent)
+    if not mx or not ex then return false end
+    local dx, dy = ex-mx, ey-my
+    local dist = _sqrt(dx*dx + dy*dy)
+    return dist < _ui_sup_rng:get()
 end
 
--- ── main paint callback: resolve all enemies ──────────────────────────
+-- ── screen hit/miss log ──────────────────────────────────────────────────
+local _log_entries = {}
+
+local function _log_add(text, r, g, b, sub)
+    table.insert(_log_entries, 1, {
+        text=text, sub=sub or '', r=r, g=g, b=b,
+        t=globals.curtime(), frac=0,
+    })
+    while #_log_entries > 12 do table.remove(_log_entries) end
+end
+
+local function _log_draw()
+    if not _ui_log_scr:get() then return end
+    local sw, sh = client.screen_size()
+    local W = 350
+    local bx= sw - 20
+    local by= sh - 80
+    local cy= by
+    local rm= {}
+
+    for i, e in ipairs(_log_entries) do
+        local age = globals.curtime() - e.t
+        if age < 7 then
+            e.frac = e.frac + (1.0 - e.frac) * 0.16
+        else
+            e.frac = e.frac + (0.0 - e.frac) * 0.07
+            if e.frac < 0.01 then rm[#rm+1] = i end
+        end
+        local fr = e.frac
+        if fr < 0.02 then goto _lg_skip end
+        do
+            local a   = _fl(255 * fr)
+            local slx = _fl(28 * (1 - fr))
+            local x   = bx - W + slx
+            local y   = cy
+            local PAD = 7
+            local LH  = 13
+            local has_sub = e.sub ~= ''
+            local ch  = has_sub and (PAD*2+LH*2+2) or (PAD*2+LH)
+
+            renderer.rectangle(x, y, W, ch, 12, 12, 16, _fl(195*fr))
+            renderer.rectangle(x, y, 3,  ch, e.r, e.g, e.b, a)
+
+            renderer.text(x+4+PAD, y+PAD,   e.r,e.g,e.b,  a, 'b', 0, e.text)
+            if has_sub then
+                renderer.rectangle(x+4+PAD, y+PAD+LH+1, W-7-PAD*2, 1, 255,255,255, _fl(16*fr))
+                renderer.text(x+4+PAD, y+PAD+LH+3, 200,200,200, _fl(a*0.86), 'd', 0, e.sub)
+            end
+            cy = cy - (ch+5)*fr
+        end
+        ::_lg_skip::
+    end
+    for i = #rm,1,-1 do table.remove(_log_entries, rm[i]) end
+end
+
+-- ── method shortname ────────────────────────────────────────────────────
+local function _mshort(m)
+    if not m or m=='' then return 'none' end
+    local map = {
+        lby='lby', jitter='jitter', air_vel='air_vel',
+        def_snap='def_snap', def_flick='def_flick',
+        brute='brute', neural='neural', hybrid='neural',
+        static='static', swing='swing', sway='sway',
+        snaking='snaking', lean='lean', chaotic='chaotic',
+    }
+    for k, v in pairs(map) do
+        if m:find(k) then return v end
+    end
+    return m:sub(1, 12)
+end
+
+-- ── main resolve loop ────────────────────────────────────────────────────
 client.set_event_callback('paint', function()
-    if not _auth_alive then return end
-    if not _res_ui_enabled:get() then return end
+    if not _auth_alive  then return end
+    if not _ui_en:get() then return end
 
-    local mode = _res_ui_mode:get()
+    _log_draw()
+
+    local mode    = _ui_mode:get()
+    local jt      = _ui_jitter_thresh:get()
+    local decay   = _ui_hist_w:get() / 100
+    local me      = entity.get_local_player()
     local enemies = entity.get_players(true)
 
     for _, ent in ipairs(enemies) do
-        if not entity.is_alive(ent) then goto _res_skip end
+        if not entity.is_alive(ent) then goto _rs_skip end
 
-        local data = _db_get(ent)
-        local sim  = entity.get_prop(ent, 'm_flSimulationTime') or 0
-        if data.last_sim_time == sim then goto _res_skip end
-        data.last_sim_time = sim
+        local sim = entity.get_prop(ent,'m_flSimulationTime') or 0
+        local d   = _db(ent)
+        if d.last_sim == sim then goto _rs_skip end
+        d.last_sim = sim
 
-        local state = _get_state(ent)
-        _track_lby(ent, data)
+        -- update all trackers
+        _track_lby(ent, d)
+        _track_vel(ent, d)
+        _track_bt(ent, d)
+        _track_defensive(ent, d)
+        _track_lean(ent, d)
+        _track_fakeduck(ent, d)
+        _track_os(ent, d)
+        _track_exploit(ent, d)
+        _apply_conf_decay(d)
+        d.conf_last_update = globals.curtime()
 
+        local state = _get_state3(ent)
+        local ld    = _ld3(ent)
+
+        -- resolve
         local side, desync, conf
-        if data.fail_streak >= 3 or mode == 'Bruteforce Only' then
-            side, desync, conf = _resolve_brute(data)
+        if d.fail_streak >= 5 or mode == 'Bruteforce Only' then
+            side, desync, conf = _resolve_brute3(d)
         elseif mode == 'Hybrid Engine' then
-            side, desync, conf = _resolve_hybrid(ent, data, state)
+            side, desync, conf = _resolve_hybrid3(ent, d, state, ld, jt, decay)
         else
-            side, desync, conf = _resolve_pattern(ent, data, state)
+            side, desync, conf = _resolve_pattern3(ent, d, state, ld, jt, decay)
         end
 
-        data.predicted_side   = side
-        data.predicted_desync = desync
+        -- min confidence gate
+        local min_c = _ui_conf_w:get() / 100
+        if conf < min_c then
+            side   = d.side   -- keep last known
+            desync = d.desync
+        end
 
-        -- apply: yaw offset = desync * direction
-        local yaw_val = desync * (side == 2 and 1 or -1)
-        pcall(plist.set, ent, 'Y offset', yaw_val)
+        -- multi-point refinement
+        side, desync = _multipoint_sample(ent, side, desync, me)
 
-        ::_res_skip::
+        -- pitch
+        _resolve_pitch3(ent, d)
+
+        d.side       = side
+        d.desync     = desync
+        d.confidence = conf
+
+        -- apply
+        local yaw_off = desync * (side==2 and 1 or -1)
+        if _should_suppress(ent) then
+            pcall(plist.set, ent, 'Y offset', 0)
+        else
+            pcall(plist.set, ent, 'Y offset', yaw_off)
+        end
+        if _ui_pitch:get() and d.pitch_res ~= 0 then
+            pcall(plist.set, ent, 'Pitch override', d.pitch_res)
+        end
+
+        ::_rs_skip::
     end
 
-    if mode == 'Hybrid Engine' then _nn_train() end
+    if mode == 'Hybrid Engine' then _nn3_train() end
 
-    -- update labels every 16 ticks
-    if globals.tickcount() % 16 == 0 then
-        local enemies2 = entity.get_players(true)
-        local focus = nil
+    -- update labels for focused enemy
+    if globals.tickcount() % 10 == 0 then
         local ok, thr = pcall(client.current_threat)
-        if ok and thr and thr > 0 then focus = thr end
-        if focus and DB[focus] then
-            local d = DB[focus]
-            _res_ui_lbl_class:set('AA Class: ' .. d.aa_style)
-            _res_ui_lbl_desync:set(f('Desync: %d deg (%s)', d.predicted_desync, d.predicted_side==2 and 'R' or 'L'))
-            _res_ui_lbl_fails:set('Fail Streak: ' .. d.fail_streak)
+        if ok and thr and thr > 0 and DB[thr] then
+            local d  = DB[thr]
+            local st = _get_state3(thr)
+            local ld = _ld3(thr)
+            local sigs_str = table.concat(d.layer_sigs or {}, ', ')
+            local expl = d.exploit_type ~= 'none' and d.exploit_type or '-'
+            if d.dt_active then expl = expl .. ' DT' end
+            if d.fd_active then expl = expl .. ' FD' end
+
+            _lbl_method:set(_f('Method: %s (%.0f%%)',
+                _mshort(d.method or 'none'), (d.confidence or 0)*100))
+            _lbl_aa:set(_f('AA Type: %s  swing:%.0f  freq:%d',
+                d.aa_type or '-', d.aa_swing or 0, d.jitter_freq or 0))
+            _lbl_desync:set(_f('Desync: %ddeg  side:%s  adapt:%s',
+                d.desync or 0, d.side==2 and 'R' or 'L',
+                d.adaptive_desync and _f('%.0f',d.adaptive_desync) or '-'))
+            _lbl_lby:set(_f('LBY: %s  snaps:%d  d2:%.2f',
+                d.lby_updating and 'updating' or 'stable',
+                d.lby_snap_cnt or 0, d.lby_2nd_deriv or 0))
+            _lbl_streak:set(_f('Streak: %d miss | %d hit  (sh: %d/%d)',
+                d.fail_streak or 0, d.hit_streak or 0,
+                (d.side_hits or {})[1] or 0, (d.side_hits or {})[2] or 0))
+            _lbl_conf:set(_f('Confidence: %.0f%%  NN:%d samples',
+                (d.confidence or 0)*100, NN3.trained_samples))
+            _lbl_state:set(_f('State: %s  lean:%s(%.2f)  def:%s',
+                ST_STR[st] or '?',
+                d.lean_side==1 and 'R' or d.lean_side==-1 and 'L' or '-',
+                d.lean_magnitude or 0,
+                d.def_active and 'active' or 'off'))
+            _lbl_layers:set(_f('Layers: aim=%.2f lean=%.2f dc=%.3f  sigs:[%s]',
+                ld.aim_w, ld.lean_w, ld.desync_cycle, sigs_str))
+            _lbl_exploit:set(_f('Exploit: %s  tb_shift:%d  fd_cnt:%.1f',
+                expl, d.tb_shift or 0, d.fd_count or 0))
         end
     end
 end)
 
--- ── aim_hit: decay fail streak ────────────────────────────────────────
+-- ── aim_hit ──────────────────────────────────────────────────────────────
 client.set_event_callback('aim_hit', function(e)
-    if not _auth_alive then return end
-    if not _res_ui_enabled:get() then return end
+    if not _auth_alive  then return end
+    if not _ui_en:get() then return end
     local ent = e.target
     if not ent then return end
-    local data = _db_get(ent)
-    local hs = (e.hitgroup == 1)
+
+    local d   = _db(ent)
+    local hs  = (e.hitgroup == 1)
+    local dmg = e.damage or 0
+    local bt  = e.tick and _clamp(globals.tickcount() - e.tick, 0, 64) or 0
+    local name= entity.get_player_name(ent) or '?'
+    local hg_n= {[0]='body',[1]='head',[2]='chest',[3]='stomach',
+                  [4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg'}
+    local hg  = hg_n[e.hitgroup] or 'body'
+    local ms  = _mshort(d.method or 'none')
+    local conf= _fl((d.confidence or 0)*100)
+    local state = _get_state3(ent)
+
+    -- update streaks
     if hs then
-        data.fail_streak = 0
-        data.brute_stage = 0
+        d.fail_streak  = 0
+        d.brute_stage  = 0
+        d.brute_locked = false
+        d.miss_pattern = {}
     else
-        data.fail_streak = _max(0, data.fail_streak - 1)
-        if data.brute_stage > 0 then
-            data.brute_stage = _max(0, data.brute_stage - 1)
-        end
+        d.fail_streak = _max(0, d.fail_streak - 1)
+        if d.brute_stage > 0 then d.brute_stage = _max(0, d.brute_stage-1) end
     end
-    if _res_ui_mode:get() == 'Hybrid Engine' and data.last_nn_input then
-        local w = hs and 2.0 or 1.0
-        _nn_add_sample(data.last_nn_input, data.predicted_side, data.predicted_desync, 1.0, w)
-        _vlog(f('Hit %s%s — saving angle', entity.get_player_name(ent) or '?', hs and ' (HS)' or ''))
+    d.hit_count  = d.hit_count + 1
+    d.hit_streak = d.hit_streak + 1
+
+    -- side confirmation
+    d.side_hits[d.side] = (d.side_hits[d.side] or 0) + (hs and 2 or 1)
+
+    -- per-state stats
+    _update_state_stats(d, state, true, d.side, d.desync)
+
+    -- NN training
+    if _ui_mode:get()=='Hybrid Engine' and d.last_nn_inp then
+        local w = hs and 2.5 or 1.0
+        _nn3_sample(d.last_nn_inp, d.side, d.desync, 1.0, w)
     end
+
+    -- console log
+    local main = hs
+        and _f('Killed %s with a head shot for %d damage', name, dmg)
+        or  _f('Hit %s in the %s for %d damage', name, hg, dmg)
+    local sub  = _f('reso: %s @ %d%%  \xc2\xb7  bt:%dt', ms, conf, bt)
+
+    if _ui_log_scr:get() then
+        local r,g,b = hs and 110 or 170, hs and 215 or 175, hs and 85 or 85
+        _log_add(main, r, g, b, sub)
+    end
+    if _ui_log_con:get() then
+        local cr,cg,cb = hs and 100 or 180, hs and 255 or 220, hs and 100 or 100
+        client.color_log(cr,cg,cb, main .. '  \xc2\xb7  ' .. sub .. '\0')
+    end
+    _vlog(_f('HIT %s [%s] %ddmg hs=%s reso=%s conf=%d%%',
+        name, hg, dmg, tostring(hs), ms, conf))
 end)
 
--- ── aim_miss: advance brute stage, flip side ─────────────────────────
+-- ── aim_miss ─────────────────────────────────────────────────────────────
 client.set_event_callback('aim_miss', function(e)
-    if not _auth_alive then return end
-    if not _res_ui_enabled:get() then return end
+    if not _auth_alive  then return end
+    if not _ui_en:get() then return end
     local ent = e.target
     if not ent then return end
     if e.reason == 'spread' then return end
-    if e.reason ~= 'resolver' and e.reason ~= '?' then return end
-    local data = _db_get(ent)
-    data.miss_count   = data.miss_count + 1
-    data.fail_streak  = data.fail_streak + 1
-    data.brute_stage  = data.brute_stage + 1
-    data.predicted_side = data.predicted_side == 1 and 2 or 1
-    _vlog(f('Resolver fail on %s — streak %d stage %d next: %s',
-        entity.get_player_name(ent) or '?',
-        data.fail_streak, data.brute_stage,
-        data.predicted_side == 2 and 'Right' or 'Left'))
-    if _res_ui_mode:get() == 'Hybrid Engine' and data.last_nn_input then
-        _nn_add_sample(data.last_nn_input, data.predicted_side,
-            58 - data.predicted_desync, 0.0, 1.5)
+
+    local d    = _db(ent)
+    local name = entity.get_player_name(ent) or '?'
+    local ms   = _mshort(d.method or 'none')
+    local state = _get_state3(ent)
+
+    d.miss_count  = d.miss_count + 1
+    d.fail_streak = d.fail_streak + 1
+    d.hit_streak  = 0
+    d.brute_stage = (d.brute_stage + 1) % 13
+    d.side        = d.side == 1 and 2 or 1
+
+    -- adaptive desync update
+    _update_adaptive_desync(d, d.side, d.desync)
+
+    -- per-state stats
+    _update_state_stats(d, state, false, d.side, d.desync)
+
+    -- jitter flip reset
+    if d.aa_type == 'Jitter' then
+        d.jitter_phase = (d.jitter_phase + 0.5) % 1.0
     end
+
+    -- NN training on miss
+    if _ui_mode:get()=='Hybrid Engine' and d.last_nn_inp then
+        _nn3_sample(d.last_nn_inp, d.side, 60 - d.desync, 0.0, 1.7)
+    end
+
+    local reason = e.reason or '?'
+
+    if _ui_log_scr:get() then
+        _log_add(
+            _f('Missed %s (%s)', name, reason),
+            205, 75, 75,
+            _f('reso: %s  streak:%d  next:%s', ms, d.fail_streak,
+               d.side==2 and 'R' or 'L'))
+    end
+    if _ui_log_con:get() then
+        client.color_log(255, 100, 100,
+            _f('[ZRes] MISS %s  reason:%s  streak:%d  next:%s\0',
+               name, reason, d.fail_streak, d.side==2 and 'R' or 'L'))
+    end
+    _vlog(_f('MISS %s reason=%s streak=%d brute=%d flip->%s',
+        name, reason, d.fail_streak, d.brute_stage,
+        d.side==2 and 'R' or 'L'))
 end)
 
--- ── round start: reset streaks ────────────────────────────────────────
+-- ── round_start: decay (not full reset — keep learned data) ──────────────
 client.set_event_callback('round_start', function()
     for _, d in pairs(DB) do
-        d.fail_streak = 0
-        d.brute_stage = 0
+        d.fail_streak    = 0
+        d.hit_streak     = 0
+        d.brute_stage    = 0
+        d.brute_locked   = false
+        d.def_snap_cnt   = 0
+        d.def_flick_cnt  = 0
+        d.def_active     = false
+        d.miss_pattern   = {}
+        d.adaptive_desync= nil
+        -- keep: deltas, state_stats, side_hits, NN memory (cross-round learning)
     end
 end)
 
--- ── expose data for rage system ───────────────────────────────────────
-_G.ZenithResolver_GetData = _db_get
+-- ── player disconnect ────────────────────────────────────────────────────
+client.set_event_callback('player_disconnect', function(e)
+    local idx = e and client.userid_to_entindex(e.userid)
+    if idx then DB[idx] = nil end
+end)
 
--- ── resolver_show_tab ─────────────────────────────────────────────────
+-- ── expose ───────────────────────────────────────────────────────────────
+_G.ZenithResolver_GetData = _db
+
+-- ── resolver_show_tab ────────────────────────────────────────────────────
 resolver_show_tab = function()
-    _safe_display(_res_ui_enabled)
-    if _res_ui_enabled:get() then
-        _safe_display(_res_ui_mode)
-        _safe_display(_res_ui_verbose)
-        _safe_display(_res_ui_lbl_class)
-        _safe_display(_res_ui_lbl_desync)
-        _safe_display(_res_ui_lbl_fails)
-    end
+    _safe_display(_ui_en)
+    if not _ui_en:get() then return end
+    _safe_display(_ui_mode)
+    _safe_display(_ui_verbose)
+    _safe_display(_ui_debug)
+    _safe_display(_ui_resolve_pitch)
+    _safe_display(_ui_exploits)
+    _safe_display(_ui_multipt)
+    _safe_display(_ui_log_scr)
+    _safe_display(_ui_log_con)
+    _safe_display(_ui_suppress)
+    if _ui_suppress:get() then _safe_display(_ui_sup_rng) end
+    _safe_display(_ui_jitter_thresh)
+    _safe_display(_ui_conf_w)
+    _safe_display(_ui_hist_w)
+    -- live data
+    _safe_display(_lbl_method)
+    _safe_display(_lbl_aa)
+    _safe_display(_lbl_desync)
+    _safe_display(_lbl_lby)
+    _safe_display(_lbl_streak)
+    _safe_display(_lbl_conf)
+    _safe_display(_lbl_state)
+    _safe_display(_lbl_layers)
+    _safe_display(_lbl_exploit)
 end
 
--- ======================================================================
---  ZENITH LAGCOMP  (nightly only)
---  Detects teleporting enemies (lagcomp breaker) and tickbase shifts
---  Draws bounding box at predicted position + ESP label
--- ======================================================================
+client.color_log(100, 255, 150, '[Zenith] Resolver v3 loaded.\0')
 
-local _lc = {
-    sim = {},   -- [ent] = { tick, origin }
-    net = {},   -- [ent] = { tick, origin, predicted_origin, lagcomp, tickbase }
-    esp = {},   -- [ent] = fade alpha (0-1)
-}
-
-local function _lc_ticks(t)
-    return _floor(0.5 + (t / globals.tickinterval()))
+end)()
 end
+::_resolver_end::
 
-local function _lc_len2d(x, y)
-    return (x*x + y*y) ^ 0.5
-end
 
-local function _lc_extrapolate(ent, origin, ticks)
-    local ti = globals.tickinterval()
-    local sv_grav  = cvar.sv_gravity:get_float()  * ti
-    local sv_jimp  = cvar.sv_jump_impulse:get_float() * ti
-    local vx = entity.get_prop(ent, 'm_vecVelocity[0]') or 0
-    local vy = entity.get_prop(ent, 'm_vecVelocity[1]') or 0
-    local vz = entity.get_prop(ent, 'm_vecVelocity[2]') or 0
-    local grav = vz > 0 and -sv_grav or sv_jimp
-    local p = { origin[1], origin[2], origin[3] }
-    for _ = 1, ticks do
-        local prev = { p[1], p[2], p[3] }
-        p = { p[1]+vx*ti, p[2]+vy*ti, p[3]+(vz+grav)*ti }
-        local frac = client.trace_line(-1, prev[1],prev[2],prev[3], p[1],p[2],p[3])
-        if frac <= 0.99 then return prev end
-    end
-    return p
-end
-
--- net_update_end: track simulation time deltas
-client.set_event_callback('net_update_end', function()
-    if not _auth_alive then return end
-    local enemies = entity.get_players(true)
-    for _, idx in ipairs(enemies) do
-        if entity.is_dormant(idx) or not entity.is_alive(idx) then
-            _lc.sim[idx] = nil
-            _lc.net[idx] = nil
-            _lc.esp[idx] = nil
-        else
-            local origin = { entity.get_origin(idx) }
-            local sim_tick = _lc_ticks(entity.get_prop(idx, 'm_flSimulationTime') or 0)
-            local prev = _lc.sim[idx]
-            if prev then
-                local delta = sim_tick - prev.tick
-                if delta < 0 or (delta > 0 and delta <= 64) then
-                    local dx = origin[1] - prev.origin[1]
-                    local dy = origin[2] - prev.origin[2]
-                    local teleport_dist = _lc_len2d(dx, dy)
-                    local extrap = _lc_extrapolate(idx, origin, _max(delta-1, 1))
-                    if delta < 0 then
-                        _lc.esp[idx] = 1
-                    end
-                    _lc.net[idx] = {
-                        tick             = _max(delta-1, 1),
-                        origin           = origin,
-                        predicted_origin = extrap,
-                        tickbase         = (delta < 0),
-                        lagcomp          = (teleport_dist > 64),
-                    }
-                end
-            end
-            if _lc.esp[idx] == nil then _lc.esp[idx] = 0 end
-            _lc.sim[idx] = { tick=sim_tick, origin=origin }
-        end
-    end
-end)
-
--- paint: draw predicted bbox + labels
-client.set_event_callback('paint', function()
-    if not _auth_alive then return end
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-
-    for idx, net in pairs(_lc.net) do
-        if not entity.is_alive(idx) or not entity.is_enemy(idx) then goto _lc_skip end
-        if not net then goto _lc_skip end
-
-        -- fade alpha
-        local fade_a = _lc.esp[idx] or 0
-        if fade_a > 0 then
-            _lc.esp[idx] = _max(0, fade_a - globals.frametime() * 2)
-        end
-
-        local tb = (net.tickbase == true) or ((_lc.esp[idx] or 0) > 0)
-        local lc = net.lagcomp
-        if not tb and not lc then goto _lc_skip end
-
-        -- bounding box at predicted position
-        if lc then
-            local pp = net.predicted_origin
-            local mins = { entity.get_prop(idx, 'm_vecMins') }
-            local maxs = { entity.get_prop(idx, 'm_vecMaxs') }
-            if pp and mins[1] and maxs[1] then
-                local pts = {
-                    {mins[1]+pp[1], mins[2]+pp[2], mins[3]+pp[3]},
-                    {mins[1]+pp[1], maxs[2]+pp[2], mins[3]+pp[3]},
-                    {maxs[1]+pp[1], maxs[2]+pp[2], mins[3]+pp[3]},
-                    {maxs[1]+pp[1], mins[2]+pp[2], mins[3]+pp[3]},
-                    {mins[1]+pp[1], mins[2]+pp[2], maxs[3]+pp[3]},
-                    {mins[1]+pp[1], maxs[2]+pp[2], maxs[3]+pp[3]},
-                    {maxs[1]+pp[1], maxs[2]+pp[2], maxs[3]+pp[3]},
-                    {maxs[1]+pp[1], mins[2]+pp[2], maxs[3]+pp[3]},
-                }
-                local edges = {{1,2},{2,3},{3,4},{4,1},{5,6},{6,7},{7,8},{8,5},{1,5},{2,6},{3,7},{4,8}}
-                for _, e in ipairs(edges) do
-                    local a = pts[e[1]]; local b = pts[e[2]]
-                    local ax,ay = renderer.world_to_screen(a[1],a[2],a[3])
-                    local bx,by = renderer.world_to_screen(b[1],b[2],b[3])
-                    if ax and bx then
-                        renderer.line(ax,ay, bx,by, 47,117,221,255)
-                    end
-                end
-                -- line from actual origin to predicted origin
-                local ox,oy,oz = entity.get_origin(idx)
-                local sx,sy = renderer.world_to_screen(ox,oy,oz)
-                local px,py = renderer.world_to_screen(pp[1],pp[2],pp[3])
-                if sx and px then
-                    renderer.line(sx,sy, px,py, 47,117,221,200)
-                end
-            end
-        end
-
-        -- label above player
-        local x1,y1,x2,y2,ba = entity.get_bounding_box(idx)
-        local pal = lc and (ba or 0) or (_lc.esp[idx] or 0)
-        if x1 and pal and pal > 0 then
-            local label = tb and 'SHIFTING TICKBASE' or 'LAG COMP BREAKER'
-            local lr,lg,lb = 255,45,45
-            renderer.text(
-                x1 + (x2-x1)*0.5, y1-18,
-                lr,lg,lb, _floor(pal*255),
-                'c', 0, label
-            )
-        end
-
-        ::_lc_skip::
-    end
-end)
-
-client.color_log(100, 255, 150, '[Zenith] Resolver + LagComp loaded.')
-
-end -- _HAS_RESOLVER

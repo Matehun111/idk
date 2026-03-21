@@ -8368,3 +8368,23 @@ local string_format = string.format
 local string_rep    = string.rep
 local bit = require('bit')
 
+-- ======================================================================
+--  ZENITH RESOLVER  v3  (nightly only)
+--  ~2800 lines of pure resolver logic
+--  Jitter · LBY · Air-Vel · Def-Snap · Def-Flick · Lean · FakeDuck
+--  OS-Timing · Multi-Point · Side-Confirm · Adaptive · FreqAnalysis
+--  PerState · BacktrackHistory · LayerFingerprint · ExploitPredictor
+-- ======================================================================
+
+local function _lrelu3(x) return x > 0 and x or 0.018*x end
+local function _sig3(x)   return 1/(1+_exp(-_clamp(x,-14,14))) end
+local function _softmax3(o)
+    local m = _max(o[1], o[2], o[3])
+    local s = 0
+    for i=1,3 do s = s + _exp(o[i]-m) end
+    local r = {}
+    for i=1,3 do r[i] = _exp(o[i]-m) / s end
+    return r
+end
+
+
