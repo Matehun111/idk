@@ -8962,7 +8962,7 @@ client.set_event_callback('paint',function()
             local ex,ey,ez=client.eye_position()
             if ex then
                 local ast=_astate(ent); local base_yaw=ast and ast.m_flEyeYaw or 0
-                local best_off=desync*(side==2 and 1 or -1); local best=−1
+                local best_off=desync*(side==2 and 1 or -1); local best=-1
                 for _,off in ipairs({-60,-40,-20,0,20,40,60}) do
                     local tx=ex+math.cos(math.rad(base_yaw+off))*2
                     local ty=ey+math.sin(math.rad(base_yaw+off))*2
