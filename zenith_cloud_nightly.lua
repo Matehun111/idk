@@ -2591,7 +2591,7 @@ do
     : record("aa", "defensive::state")
     : save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch" })
+    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Snap Pitch", "Fake Up" })
     : record("aa", "defensive::pitch")
     : save()
 
@@ -2625,6 +2625,8 @@ do
     local defensive_7_way = { 0, 51, 102, 154, 205, 257, 308 }
     local _chaos_seed      = 0
     local _snap_last_tick   = -999
+    local _snap_pitch_val   = 0
+    local _snap_pitch_tick  = -999
     local _snap_last_offset = 0
     local _snap_jitter_side = 1
 
@@ -2717,6 +2719,25 @@ do
                 -- alternates sharply every shot tick for a stuttering pitch
                 local tick = globals.tickcount()
                 pitch_value = (tick % 2 == 0) and client.random_float(-75, -55) or client.random_float(55, 75)
+                pitch_mode  = 'Custom'
+            elseif val == 'Snap Pitch' then
+                -- picks a completely new random extreme pitch on each defensive tick
+                -- and locks it for that choke window - makes head snap to unexpected height
+                local tc = globals.tickcount()
+                if tc ~= _snap_pitch_tick then
+                    -- snap to either far up or far down, randomly chosen each tick
+                    -- this makes it impossible to predict which height to aim at
+                    local extremes = { -89, -75, -60, 60, 75, 89 }
+                    _snap_pitch_val  = extremes[math.random(1, #extremes)]
+                    _snap_pitch_tick = tc
+                end
+                pitch_value = _snap_pitch_val
+                pitch_mode  = 'Custom'
+            elseif val == 'Fake Up' then
+                -- pitch slightly up (not full 89) to move head out of easy shot placement
+                -- without being so extreme it looks obvious
+                -- combines well with Snap yaw since the head moves both axes
+                pitch_value = client.random_float(-58, -42)
                 pitch_mode  = 'Custom'
             end
 
