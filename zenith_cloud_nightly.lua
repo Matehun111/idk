@@ -2105,10 +2105,13 @@ do
     local ctx = { }
 
     local zenithyaw_ways = {
-        ["2-Way"] = { -0.5, 0.5 },
-        ["3-Way"] = { -0.5, 0, 0.5 },
-        ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 }
-    }
+    ["2-Way"] = { -0.5, 0.5 },
+    ["3-Way"] = { -0.5, 0, 0.5 },
+    ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 },
+    ["7-Way"] = { -1, -0.57, -0.28, 0, 0.28, 0.57, 1 },
+    ["Chaos"] = { -1, -0.72, -0.44, -0.16, 0.16, 0.44, 0.72, 1 }
+}
+local _chaos_jitter_seed = 0
 
     local function calculate_jitter_way(n, offset)
         local fmod = localplayer.packets % n
@@ -2180,6 +2183,26 @@ do
             ctx.yaw_offset = ctx.yaw_offset + yaw_add
             return
         end
+
+        -- velocity jitter bias: lean jitter toward strafe direction
+        -- makes it harder to predict which way we'll be on the next shot
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off' then
+            local lp = entity.get_local_player()
+            if lp then
+                local vx = entity.get_prop(lp, 'm_vecVelocity[0]') or 0
+                local vy = entity.get_prop(lp, 'm_vecVelocity[1]') or 0
+                local spd = math.sqrt(vx*vx + vy*vy)
+                if spd > 20 then
+                    -- get strafe direction relative to view
+                    local eye_yaw = localplayer.angles and localplayer.angles.y or 0
+                    local vel_yaw = math.deg(math.atan2(vy, vx))
+                    local rel = ((vel_yaw - eye_yaw + 180) % 360) - 180
+                    -- bias: add small push toward strafe side
+                    local bias = rel > 0 and math.min(spd * 0.04, 8) or -math.min(spd * 0.04, 8)
+                    ctx.yaw_offset = (ctx.yaw_offset or 0) + bias
+                end
+            end
+        end
     end
 
     local safe_head_presets = {
@@ -2208,6 +2231,29 @@ do
     local randomized
     local val = 180
     local function modify_jitter()
+        -- micro-jitter: add tiny noise every tick to prevent stable tracking
+        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off' then
+            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
+        end
+
+        -- desync shift: flip jitter_offset sign every 18-26 ticks
+        -- makes the desync amount itself cycle, not just the direction
+        -- resolvers that pattern-match offset magnitude will mispredict
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
+        and ctx.jitter_offset ~= nil then
+            local shift_cycle = 22
+            local phase = globals.tickcount() % shift_cycle
+            if phase < shift_cycle * 0.45 then
+                -- normal phase: use jitter_offset as-is
+            elseif phase < shift_cycle * 0.55 then
+                -- transition zone: briefly reduce to confuse pattern analysis
+                ctx.jitter_offset = ctx.jitter_offset * 0.35
+            else
+                -- shifted phase: mirror the offset
+                ctx.jitter_offset = -ctx.jitter_offset
+            end
+        end
+
         if ctx.jitter_randomization ~= nil then
             if localplayer.packets % 2 == 0 or randomized == nil then
                 randomized = client.random_int(0, (ctx.jitter_offset > 0 and 1 or -1) * ctx.jitter_randomization)
@@ -2218,13 +2264,18 @@ do
 
         if ctx.body_yaw == 'Randomize Jitter' then
             ctx.body_yaw = 'Static'
-
             if localplayer.choking_bool then
                 local rand = client.random_int(0, 1)
                 val = rand == 1 and 180 or -180
             end
-
             ctx.body_yaw_offset = val
+        elseif ctx.body_yaw == 'Ghost' then
+            -- Ghost: body yaw goes OPPOSITE to the current yaw offset
+            -- makes body-based resolvers predict the wrong real side
+            ctx.body_yaw = 'Static'
+            local cur_off = ctx.yaw_offset or 0
+            -- if we're offset right, body yaw says left and vice versa
+            ctx.body_yaw_offset = cur_off > 0 and -180 or 180
         end
 
         if ctx.yaw_jitter == "Zenith" then
@@ -2239,7 +2290,17 @@ do
             local zenith_delay = ctx.zenith_delay
 
             local ways = zenithyaw_ways[zenith_mode]
-            local way = ways[(localplayer.packets % #ways) + 1]
+            local way
+            if zenith_mode == 'Chaos' then
+                -- Chaos: seed mixes tick + packets + body yaw for non-repeating pattern
+                _chaos_jitter_seed = (_chaos_jitter_seed
+                    + globals.tickcount() * 7
+                    + localplayer.packets * 13
+                    + math.floor(math.abs(localplayer.body_yaw or 0))) % #ways
+                way = ways[_chaos_jitter_seed + 1]
+            else
+                way = ways[(localplayer.packets % #ways) + 1]
+            end
 
             -- god ( qhose ) forgive me for the piece of code below
             --- region lulz diagnostics disable@
@@ -2436,6 +2497,43 @@ do
 
         setup()
     end
+end
+
+--- region aa_reactive
+do
+    local _last_hurt_tick = 0
+    local _flip_body_next = false
+
+    client.set_event_callback('player_hurt', function(e)
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local lp_uid = entity.get_prop(lp, 'm_iUserId')
+        if e.userid == lp_uid then
+            -- WE got hurt: schedule a body yaw flip for next 4 ticks
+            -- breaks enemy resolver side-confirmation
+            if angles and angles.type and angles.type:get() ~= 'Off' then
+                _flip_body_next = true
+                _last_hurt_tick = globals.tickcount()
+            end
+        end
+    end)
+
+    client.set_event_callback('setup_command', function()
+        if not _flip_body_next then return end
+        if globals.tickcount() - _last_hurt_tick > 4 then
+            _flip_body_next = false
+            return
+        end
+        -- flip body yaw for these ticks so their resolver loses confidence
+        local ok, cur = pcall(ui.get, software.aa.angles.body_yaw[1])
+        if ok and cur and cur ~= 'Off' then
+            local ok2, cur_off = pcall(ui.get, software.aa.angles.body_yaw[2])
+            if ok2 and cur_off then
+                pcall(override.set, software.aa.angles.body_yaw[2],
+                    cur_off > 0 and -180 or 180)
+            end
+        end
+    end)
 end
 
 ---region settings tweaks
@@ -5538,7 +5636,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "yaw_jitter" })
             : save()
 
-            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way" })
+            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way", "7-Way", "Chaos" })
             : record("aa", merge { "custom", "::", state, "::", "jitter_mode" })
             : save()
 
@@ -5562,7 +5660,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "zenith_safe" })
             : save()
 
-            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", 'Randomize Jitter' })
+            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", "Randomize Jitter", "Ghost" })
             : record("aa", merge { "custom", "::", state, "::", "body_yaw" })
             : save()
 
@@ -5588,16 +5686,16 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 12
+            ctx.yaw_offset = 14
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 45
-            ctx.jitter_randomization = 28
-            ctx.zenith_cycle = 22
+            ctx.jitter_mode = '7-Way'  -- 7-way is harder to resolve than 3-way
+            ctx.jitter_offset = 48
+            ctx.jitter_randomization = 32
+            ctx.zenith_cycle = 20
             ctx.zenith_delay = 14
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -50
+            ctx.body_yaw = 'Ghost'  -- body yaw lies about real side
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5624,14 +5722,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 5
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 70
-            ctx.jitter_randomization = 35
-            ctx.zenith_cycle = 14
-            ctx.zenith_delay = 10
+            ctx.jitter_mode = 'Chaos'  -- Chaos = non-repeating pattern
+            ctx.jitter_offset = 72
+            ctx.jitter_randomization = 38
+            ctx.zenith_cycle = 12
+            ctx.zenith_delay = 8
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -55
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5639,16 +5737,16 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 8
+            ctx.yaw_offset = 10
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 65
-            ctx.jitter_randomization = 30
-            ctx.zenith_cycle = 20
-            ctx.zenith_delay = 16
+            ctx.jitter_mode = '7-Way'
+            ctx.jitter_offset = 68
+            ctx.jitter_randomization = 34
+            ctx.zenith_cycle = 18
+            ctx.zenith_delay = 14
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -50
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5658,14 +5756,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 6
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 58
-            ctx.jitter_randomization = 24
-            ctx.zenith_cycle = 16
-            ctx.zenith_delay = 12
+            ctx.jitter_mode = 'Chaos'
+            ctx.jitter_offset = 60
+            ctx.jitter_randomization = 28
+            ctx.zenith_cycle = 14
+            ctx.zenith_delay = 10
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -45
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
         end,
 
         ['Air'] = function (ctx)
@@ -5675,11 +5773,11 @@ do
             ctx.yaw_180lr_mode = 'Switch delay'
             ctx.yaw_offset = 4
             ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 38
-            ctx.jitter_randomization = 20
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.jitter_mode = '5-Way'
+            ctx.jitter_offset = 44
+            ctx.jitter_randomization = 24
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5690,11 +5788,11 @@ do
             ctx.yaw_180lr_mode = 'Switch delay'
             ctx.yaw_offset = 4
             ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 38
-            ctx.jitter_randomization = 20
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.jitter_mode = '5-Way'
+            ctx.jitter_offset = 44
+            ctx.jitter_randomization = 24
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5704,14 +5802,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 0
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 30
-            ctx.jitter_randomization = 18
+            ctx.jitter_mode = '7-Way'
+            ctx.jitter_offset = 38
+            ctx.jitter_randomization = 22
             ctx.zenith_cycle = 10
             ctx.zenith_delay = 8
             ctx.zenith_safe = false
-            ctx.body_yaw = 'Opposite'
-            ctx.body_yaw_offset = 0
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end
     }
