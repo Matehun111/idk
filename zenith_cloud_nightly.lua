@@ -8391,7 +8391,7 @@ local NN3 = {
 }
 
 local function _nn3_xavier(a, b)
-    return (math.random()*2-1) * _sqrt(6/(a+b))
+    return (math.random()*2-1) * math.sqrt(6/(a+b))
 end
 
 for i = 1, 20 do
@@ -8410,13 +8410,13 @@ for i = 1, 48 do
 end
 
 local function _lrelu3(x) return x > 0 and x or 0.018*x end
-local function _sig3(x)   return 1/(1+_exp(-_clamp(x,-14,14))) end
+local function _sig3(x)   return 1/(1+math.exp(-(function(v,lo,hi) return v<lo and lo or v>hi and hi or v end)(x,-14,14))) end
 local function _softmax3(o)
-    local m = _max(o[1], o[2], o[3])
+    local m = math.max(o[1], o[2], o[3])
     local s = 0
-    for i=1,3 do s = s + _exp(o[i]-m) end
+    for i=1,3 do s = s + math.exp(o[i]-m) end
     local r = {}
-    for i=1,3 do r[i] = _exp(o[i]-m) / s end
+    for i=1,3 do r[i] = math.exp(o[i]-m) / s end
     return r
 end
 
