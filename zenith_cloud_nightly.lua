@@ -8694,190 +8694,523 @@ local function _conf_decay(d)
     if globals.curtime()-d.conf_last_update>2 then d.confidence=_max(0.2,d.confidence*0.92) end
 end
 
--- ── classifier ──────────────────────────────────────────────────────────
-local function _classify(d,jt,decay)
-    if #d.deltas<12 then return 'Gathering',0,0.5 end
-    local w=_exp_weights(#d.deltas,decay)
-    local wsum=0; for _,v in ipairs(w) do wsum=wsum+v end
-    local fw=0;local sw=0;local swing=0;local sumw=0;local posw=0
-    for i=2,#d.deltas do
-        local c,p=d.deltas[i],d.deltas[i-1]
-        local diff=_abs(_ydelta(c,p)); local wi=w[i]
-        if diff>swing then swing=diff end
-        if diff>jt then fw=fw+wi end
-        if diff<6  then sw=sw+wi end
-        sumw=sumw+c*wi; if c>0 then posw=posw+wi end
+-- ── classifier (improved) ───────────────────────────────────────────────
+local function _classify(d, jt, decay)
+    if #d.deltas < 8 then return 'Gathering', 0, 0.5 end
+    local n   = #d.deltas
+    local w   = _exp_weights(n, decay)
+    local wsum = 0; for _,v in ipairs(w) do wsum = wsum + v end
+
+    local flip_w = 0; local static_w = 0; local swing = 0
+    local pos_w  = 0; local neg_w    = 0; local sum_w = 0
+    local consec_same = 0; local max_consec = 0; local prev_sign = 0
+
+    for i = 2, n do
+        local c  = d.deltas[i]; local p = d.deltas[i-1]
+        local wi = w[i]
+        local diff = _abs(_ydelta(c, p))
+        if diff > swing then swing = diff end
+        if diff > jt    then flip_w  = flip_w  + wi end
+        if diff < 5     then static_w = static_w + wi end
+        sum_w = sum_w + c * wi
+        if c > 0 then pos_w = pos_w + wi else neg_w = neg_w + wi end
+        -- consecutive same-sign streak
+        local cs = c > 0 and 1 or -1
+        if cs == prev_sign then consec_same = consec_same + 1
+        else consec_same = 0 end
+        if consec_same > max_consec then max_consec = consec_same end
+        prev_sign = cs
     end
-    local fr=fw/wsum; local sr=sw/wsum
-    local prev=d.aa_type; local at
-    if     fr>0.38              then at='Jitter'
-    elseif sr>0.70 and swing<30 then at='Static'
-    elseif swing>85 and fr<0.12 then at='Swing'
-    elseif swing>28 and fr<0.22 then at='Sway'
-    elseif d.lby_updating       then at='LBY'
-    else                             at='Chaotic' end
-    if (prev=='Jitter' and at~='Jitter' and fr>0.28) or
-       (prev=='Static' and at~='Static' and sr>0.55) then at=prev end
-    return at,swing,posw/wsum
-end
 
--- ── resolvers ───────────────────────────────────────────────────────────
-local function _air_vel(ent,d,ast)
-    local vx=entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy=entity.get_prop(ent,'m_vecVelocity[1]') or 0
-    local spd=_sqrt(vx*vx+vy*vy); if spd<5 then return nil,0,0.35 end
-    local vy2=math.deg(math.atan2(vy,vx))
-    local eye=ast and ast.m_flEyeYaw or 0
-    local vd=_ydelta(vy2,eye)
-    local side=vd>25 and 2 or vd<-25 and 1 or d.side
-    return side,_fl(_clamp(spd*0.17,8,48)),_clamp(spd/240,0.3,0.72)
-end
+    local fr   = flip_w  / wsum
+    local sr   = static_w / wsum
+    local bias = pos_w    / (pos_w + neg_w + 0.001)
+    local prev = d.aa_type
+    local at
 
-local function _lean_resolve(d,ld)
-    if d.lean_side==0 or ld.lean_w<0.25 then return nil end
-    return d.lean_side>0 and 2 or 1, _fl(ld.lean_w*45), _clamp(d.lean_magnitude*1.8,0.5,0.82)
-end
-
-local function _pattern(ent,d,state,ld,jt,decay)
-    local at,swing,bias=_classify(d,jt,decay)
-    d.aa_type=at; d.aa_swing=swing
-    local ast=_astate(ent)
-    local bp=entity.get_prop(ent,'m_flPoseParameter',11) or 0.5
-    local ld2=d.deltas[#d.deltas] or 0
-    local sigs=_fingerprint(ld); d.layer_sigs=sigs
-    local side,desync,conf
-    if at=='Static' then
-        side=bp>0.55 and 2 or 1; desync=58; conf=0.93; d.method='static'
-        if #sigs>0 and sigs[1]=='jitter_body' then side=ld.aim_w>0 and 2 or 1; conf=0.80 end
-    elseif at=='Jitter' then
-        local freq,mag=_dominant_freq((function()
-            local s={} for i,v in ipairs(d.deltas) do s[i]=_abs(v)>jt and _sign(v) or 0 end return s
-        end)())
-        d.jitter_freq=freq; d.jitter_mag=mag
-        local ph=(globals.tickcount()%_max(1,_fl(#d.deltas/(_max(1,freq))))+0)/#d.deltas
-        d.jitter_phase=ph
-        if freq>0 and mag>0.3 then side=ph<0.5 and 1 or 2; conf=0.80+mag*0.12; d.method=_f('jitter(f=%d)',freq)
-        else side=globals.tickcount()%2==0 and 1 or 2; conf=0.72; d.method='jitter(alt)' end
-        desync=_max(18,_fl(swing*0.68))
-    elseif at=='LBY' then
-        side=d.lby_2nd_deriv>0 and 2 or 1; desync=0; conf=0.95; d.method='lby'
-        if d.lby_snap_cnt>=3 then side=d.def_side; conf=_min(0.98,conf+0.02) end
-    elseif at=='Swing' then
-        side=ld2>0 and 2 or 1; desync=50; conf=0.70; d.method='swing'
-    elseif at=='Sway' then
-        local w=_exp_weights(#d.deltas,decay); local ws,wt=0,0
-        for i,v in ipairs(d.deltas) do ws=ws+v*w[i]; wt=wt+w[i] end
-        side=wt>0 and ws/wt>0 and 2 or 1; desync=_fl(_clamp(swing*0.58,20,50)); conf=0.63; d.method='sway'
+    -- jitter: rapid flipping
+    if fr > 0.35 then
+        at = 'Jitter'
+    -- static: small deltas, consistent
+    elseif sr > 0.68 and swing < 25 then
+        at = 'Static'
+    -- LBY: we're in an LBY update window
+    elseif d.lby_updating and swing < 80 then
+        at = 'LBY'
+    -- swing: single large direction
+    elseif swing > 80 and fr < 0.10 and max_consec > 4 then
+        at = 'Swing'
+    -- sway: medium oscillation
+    elseif swing > 22 and swing <= 80 and fr < 0.25 then
+        at = 'Sway'
     else
-        local w=_exp_weights(_min(6,#d.deltas),0.75); local ws,wt=0,0
-        local n=#d.deltas
-        for i=_max(1,n-5),n do local wi=w[i-_max(1,n-5)+1] or 1; ws=ws+(d.deltas[i] or 0)*wi; wt=wt+wi end
-        side=wt>0 and ws/wt>0 and 2 or 1; desync=28; conf=0.38; d.method='chaotic'
+        at = 'Chaotic'
     end
-    -- lean override
-    local ls,ld3,lc=_lean_resolve(d,ld)
-    if ls and lc and lc>conf then side=ls; desync=ld3; conf=lc; d.method=d.method..'+lean' end
-    -- defensive
+
+    -- hysteresis: don't flip away from confident types on borderline
+    if prev == 'Jitter' and at ~= 'Jitter' and fr > 0.22 then at = 'Jitter' end
+    if prev == 'Static' and at ~= 'Static' and sr > 0.50  then at = 'Static' end
+    if prev == 'LBY'    and at ~= 'LBY'    and d.lby_updating then at = 'LBY' end
+
+    return at, swing, bias
+end
+
+-- ── jitter side predictor ───────────────────────────────────────────────
+-- Track actual flip ticks to predict which side is "up" right now
+local function _jitter_predict(d)
+    if #d.deltas < 6 then return d.side, 0.55 end
+
+    -- find the actual flip period by detecting sign changes
+    local flips = {}
+    for i = 2, #d.deltas do
+        local c, p = d.deltas[i], d.deltas[i-1]
+        if (c > 0) ~= (p > 0) and _abs(c) > 5 and _abs(p) > 5 then
+            flips[#flips+1] = i
+        end
+    end
+
+    if #flips < 3 then
+        -- not enough flips to detect period, use last delta sign
+        local last = d.deltas[#d.deltas] or 0
+        return last > 0 and 2 or 1, 0.62
+    end
+
+    -- measure average period between flips
+    local period_sum = 0
+    for i = 2, #flips do
+        period_sum = period_sum + (flips[i] - flips[i-1])
+    end
+    local avg_period = period_sum / (#flips - 1)
+
+    -- how many ticks since last flip?
+    local last_flip_idx = flips[#flips]
+    local ticks_since   = #d.deltas - last_flip_idx
+    local phase         = (ticks_since % _max(1, _fl(avg_period))) / _max(1, avg_period)
+
+    -- what side were they on after the last flip?
+    local last_delta = d.deltas[last_flip_idx] or 0
+    local side_after_flip = last_delta > 0 and 2 or 1
+
+    -- if we're in the first half of the period, same side; second half, other side
+    local current_side
+    if phase < 0.5 then
+        current_side = side_after_flip
+    else
+        current_side = side_after_flip == 1 and 2 or 1
+    end
+
+    -- confidence based on how consistent the period is
+    local period_variance = 0
+    for i = 2, #flips do
+        local p2 = flips[i] - flips[i-1]
+        period_variance = period_variance + (p2 - avg_period)^2
+    end
+    period_variance = period_variance / (#flips - 1)
+    local consistency = _clamp(1 - period_variance / (_max(1, avg_period)^2), 0.55, 0.92)
+
+    return current_side, consistency
+end
+
+-- ── LBY resolver (proper) ───────────────────────────────────────────────
+local function _resolve_lby(ent, d, ast)
+    -- When LBY is NOT updating (standing still), real body yaw = feet yaw
+    -- When LBY IS updating, feet chase eye yaw
+    -- The real side to target is the one the LBY is snapping TO
+    if not ast then return d.side, 35, 0.72 end
+
+    local feet = ast.m_flCurrentFeetYaw
+    local eye  = ast.m_flEyeYaw
+    local goal = ast.m_flGoalFeetYaw  -- GS exposes this in animstate
+    local delta = _ydelta(eye, feet)
+
+    -- If LBY is snapping, goal feet yaw tells us the real direction
+    if goal and _abs(_ydelta(goal, feet)) > 10 then
+        local snap_side = _ydelta(goal, eye) > 0 and 2 or 1
+        return snap_side, 0, 0.94
+    end
+
+    -- LBY stable (not updating): real yaw = feet yaw, minimal desync
+    if not d.lby_updating then
+        local real_side = delta > 8 and 2 or delta < -8 and 1 or d.side
+        return real_side, _fl(_abs(delta) * 0.3), 0.90
+    end
+
+    -- LBY actively updating: use rate of change to predict snap direction
+    local snap_dir = d.lby_2nd_deriv > 0 and 2 or 1
+    return snap_dir, 15, 0.82
+end
+
+-- ── body yaw real side from pose parameter ──────────────────────────────
+-- m_flPoseParameter index 11 = body yaw blend (-60 to +60 degrees mapped to 0-1)
+local function _pose_side(ent)
+    local raw = entity.get_prop(ent, 'm_flPoseParameter', 11) or 0.5
+    -- 0.5 = centered, <0.5 = left, >0.5 = right
+    -- the actual offset in degrees = (raw - 0.5) * 120
+    local offset = (raw - 0.5) * 120
+    if     offset >  15 then return 2, _abs(offset)  -- leaning right
+    elseif offset < -15 then return 1, _abs(offset)  -- leaning left
+    else                      return nil, 0
+    end
+end
+
+-- ── desync from animstate directly ─────────────────────────────────────
+local function _real_desync(ast)
+    if not ast then return 0 end
+    -- true desync = eye_yaw - current_feet_yaw
+    local d = _ydelta(ast.m_flEyeYaw, ast.m_flCurrentFeetYaw)
+    return d
+end
+
+-- ── main pattern resolver ────────────────────────────────────────────────
+local function _pattern(ent, d, state, ld, jt, decay)
+    local at, swing, bias = _classify(d, jt, decay)
+    d.aa_type = at; d.aa_swing = swing
+    local ast  = _astate(ent)
+    local sigs = _fingerprint(ld); d.layer_sigs = sigs
+    local rd   = ast and _real_desync(ast) or 0
+    local side, desync, conf
+
+    if at == 'Static' then
+        -- body pose is most reliable for static
+        local ps, pd2 = _pose_side(ent)
+        if ps then
+            side   = ps
+            desync = _clamp(_fl(pd2 * 0.85), 30, 58)
+            conf   = 0.91
+        else
+            -- fall back to last delta sign
+            side   = rd > 0 and 2 or 1
+            desync = _clamp(_fl(_abs(rd) * 0.80), 20, 58)
+            conf   = 0.87
+        end
+        d.method = 'static'
+
+    elseif at == 'Jitter' then
+        side, conf = _jitter_predict(d)
+        -- desync from current real delta
+        desync = _clamp(_fl(_abs(rd) * 0.75), 15, 50)
+        if desync < 10 then desync = _max(18, _fl(swing * 0.65)) end
+        d.method = 'jitter'
+
+    elseif at == 'LBY' then
+        side, desync, conf = _resolve_lby(ent, d, ast)
+        d.method = 'lby'
+
+    elseif at == 'Swing' then
+        -- swing: use real delta sign, high desync
+        side   = rd > 0 and 2 or 1
+        desync = _clamp(_fl(_abs(rd) * 0.88), 35, 58)
+        conf   = 0.74
+        d.method = 'swing'
+
+    elseif at == 'Sway' then
+        -- exponentially weighted average direction
+        local w = _exp_weights(#d.deltas, decay)
+        local ws, wt = 0, 0
+        for i, v in ipairs(d.deltas) do ws = ws + v * w[i]; wt = wt + w[i] end
+        local wavg = wt > 0 and ws / wt or 0
+        side   = wavg > 0 and 2 or 1
+        desync = _clamp(_fl(_abs(rd) * 0.72), 18, 48)
+        if desync < 10 then desync = _fl(_clamp(swing * 0.55, 18, 48)) end
+        conf   = 0.66
+        d.method = 'sway'
+
+    else  -- Chaotic / Gathering
+        -- use current real delta as best guess
+        side   = rd > 5 and 2 or rd < -5 and 1 or d.side
+        desync = _clamp(_fl(_abs(rd) * 0.6), 10, 38)
+        conf   = 0.42
+        d.method = 'chaotic'
+    end
+
+    -- ── layer correction ────────────────────────────────────────────────
+    -- if lean layer is heavy, trust lean side
+    if ld.lean_w > 0.30 and d.lean_side ~= 0 then
+        local ls = d.lean_side > 0 and 2 or 1
+        local lc = _clamp(d.lean_magnitude * 1.6, 0.55, 0.86)
+        if lc > conf then
+            side = ls; desync = _fl(ld.lean_w * 40); conf = lc
+            d.method = d.method .. '+lean'
+        end
+    end
+
+    -- ── defensive override ──────────────────────────────────────────────
     if d.def_active and _M.ui_exploits:get() then
-        if d.def_snap_cnt>1.5 then side=d.def_side; desync=_max(desync,48); conf=_max(conf,0.74); d.method=d.method..'+def_snap' end
-        if d.def_flick_cnt>1.8 then side=d.def_side; desync=_max(desync,54); conf=_max(conf,0.78); d.method=d.method..'+def_flick' end
+        side   = d.def_side
+        desync = _max(desync, d.def_snap_cnt > d.def_flick_cnt and 50 or 54)
+        conf   = _max(conf, 0.80)
+        d.method = d.method .. (d.def_snap_cnt > d.def_flick_cnt and '+def_snap' or '+def_flick')
     end
-    if d.dt_active and _M.ui_exploits:get() then desync=_max(desync,54); conf=_max(conf,0.72); d.method=d.method..'+dt' end
-    if d.fd_active and _M.ui_exploits:get() then desync=_min(desync,20); conf=_max(conf,0.68); d.method=d.method..'+fd' end
-    -- per-state
-    local ss=d.state_stats[state]
-    if ss and ss.hits>=3 and ss.hits>ss.misses then side=ss.best_side; desync=ss.best_desync; conf=_max(conf,0.85); d.method=d.method..'+state' end
-    -- OS prediction
-    if #d.os_side_hist>=3 then
-        local cnt={[1]=0,[2]=0}; for _,s in ipairs(d.os_side_hist) do cnt[s]=cnt[s]+1 end
-        local os=cnt[1]>cnt[2] and 1 or 2
-        if os~=side and cnt[os]>cnt[side]*1.5 then side=os; conf=_max(conf,0.65); d.method=d.method..'+os' end
+
+    -- ── exploit overrides ───────────────────────────────────────────────
+    if d.dt_active and _M.ui_exploits:get() then
+        desync = _max(desync, 52); conf = _max(conf, 0.74)
+        d.method = d.method .. '+dt'
     end
-    -- adaptive desync
-    if d.adaptive_desync and d.fail_streak>=2 then desync=_fl(_lerp(desync,d.adaptive_desync,0.45)); d.method=d.method..'+adapt' end
-    -- side confirmation
-    local sh=d.side_hits
-    if sh[1]+sh[2]>=4 then
-        local hs=sh[2]>sh[1] and 2 or 1
-        if hs==side then conf=_min(1,conf+0.05)
-        elseif sh[hs]>sh[side]*1.5 then side=hs; conf=_max(conf,0.65); d.method=d.method..'+confirm' end
+    if d.fd_active and _M.ui_exploits:get() then
+        desync = _min(desync, 18); conf = _max(conf, 0.70)
+        d.method = d.method .. '+fd'
     end
-    -- state adjustments
-    if state==ST.AIR or state==ST.AIR_CROUCH then
-        local as2,ad2,ac2=_air_vel(ent,d,ast)
-        if as2 and ac2 and ac2>conf then side=as2; desync=ad2; conf=ac2; d.method='air_vel'
-        else desync=_fl(desync*0.58); conf=conf*0.82 end
-    elseif state==ST.MOVE then desync=_fl(desync*0.80)
-    elseif state==ST.SNAKING then
-        side=d.jitter_freq>0 and (d.jitter_phase<0.5 and 1 or 2) or (globals.tickcount()%3==0 and 1 or 2)
-        desync=_fl(desync*0.62); conf=conf*0.70
-    elseif state==ST.SLOWWALK then desync=_fl(desync*0.88)
-    elseif state==ST.CROUCH   then desync=_fl(desync*0.85) end
-    if ld.aim_w>0.75 then local ls2=ld.aim_w>0 and 2 or 1; if ls2~=side then side=ls2; conf=_max(conf,0.65); d.method=d.method..'+layer' end end
-    return side,_clamp(_fl(desync),0,60),_clamp(conf,0,1)
+
+    -- ── per-state memory ────────────────────────────────────────────────
+    local ss = d.state_stats[state]
+    if ss and ss.hits >= 2 and ss.hits > ss.misses * 0.6 then
+        side   = ss.best_side
+        desync = ss.best_desync
+        conf   = _max(conf, 0.88)
+        d.method = d.method .. '+mem'
+    end
+
+    -- ── on-shot side history ─────────────────────────────────────────────
+    if #d.os_side_hist >= 4 then
+        local cnt = {[1]=0,[2]=0}
+        for _, s in ipairs(d.os_side_hist) do cnt[s] = cnt[s] + 1 end
+        local os = cnt[2] >= cnt[1] and 2 or 1
+        if cnt[os] > cnt[3 - os] * 1.4 and os ~= side then
+            side = os; conf = _max(conf, 0.70)
+            d.method = d.method .. '+os'
+        end
+    end
+
+    -- ── adaptive desync correction ───────────────────────────────────────
+    if d.adaptive_desync and d.fail_streak >= 2 then
+        desync = _fl(_lerp(desync, d.adaptive_desync, 0.50))
+        d.method = d.method .. '+adapt'
+    end
+
+    -- ── confirmed side bias ──────────────────────────────────────────────
+    local sh = d.side_hits
+    if sh[1] + sh[2] >= 3 then
+        local confirmed = sh[2] > sh[1] and 2 or 1
+        if confirmed == side then
+            conf = _min(1.0, conf + 0.06)
+        elseif sh[confirmed] > sh[3 - confirmed] * 1.6 then
+            side = confirmed; conf = _max(conf, 0.72)
+            d.method = d.method .. '+confirm'
+        end
+    end
+
+    -- ── state-based desync tuning ────────────────────────────────────────
+    if state == ST.AIR or state == ST.AIR_CROUCH then
+        -- air: try velocity-based first
+        local av_s, av_d, av_c = _air_vel(ent, d, ast)
+        if av_s and av_c and av_c > conf then
+            side = av_s; desync = av_d; conf = av_c
+            d.method = 'air_vel'
+        else
+            -- in air desync is less reliable, reduce slightly
+            desync = _fl(desync * 0.70)
+            conf   = conf * 0.85
+            d.method = d.method .. '+air'
+        end
+    elseif state == ST.MOVE then
+        -- moving: they can desync less
+        desync = _fl(desync * 0.82)
+    elseif state == ST.SNAKING then
+        -- snaking = fast jitter, use jitter predictor
+        local js, jc = _jitter_predict(d)
+        side = js; conf = jc * 0.80
+        desync = _fl(desync * 0.65)
+        d.method = 'snaking'
+    elseif state == ST.SLOWWALK then
+        desync = _fl(desync * 0.90)
+    elseif state == ST.CROUCH then
+        desync = _fl(desync * 0.88)
+    end
+
+    return side, _clamp(_fl(desync), 0, 62), _clamp(conf, 0.0, 1.0)
 end
 
-local _BRUTE={[0]=58,[1]=-58,[2]=48,[3]=-48,[4]=38,[5]=-38,[6]=28,[7]=-28,[8]=18,[9]=-18,[10]=10,[11]=-10,[12]=0}
+-- ── adaptive desync estimator ────────────────────────────────────────────
+local function _upd_adapt(d, missed_side, missed_desync)
+    table.insert(d.miss_pattern, {side=missed_side, desync=missed_desync})
+    if #d.miss_pattern > 24 then table.remove(d.miss_pattern, 1) end
+    if #d.miss_pattern >= 4 then
+        local sum = 0
+        for _, mp in ipairs(d.miss_pattern) do sum = sum + mp.desync end
+        local avg = sum / #d.miss_pattern
+        -- if missing at avg desync, try the mirror value
+        d.adaptive_desync = avg > 35 and _max(0, 62 - avg) or _min(62, avg + 28)
+    end
+end
+
+-- ── brute force (smarter ordering) ───────────────────────────────────────
+local _BRUTE = {58,-58,48,-48,38,-38,28,-28,18,-18,10,-10,0}
 local function _brute(d)
-    local v=_BRUTE[d.brute_stage%13] or 0
-    if d.adaptive_desync and d.fail_streak>=3 then
-        local tgt=d.adaptive_desync; local bv=v; local bd=_abs(v-tgt)
-        for _,bv2 in pairs(_BRUTE) do if _abs(_abs(bv2)-tgt)<bd then bd=_abs(_abs(bv2)-tgt); bv=bv2 end end
-        v=bv; d.method=_f('brute_adapt@%.0f',tgt)
-    else d.method='brute@'..(d.brute_stage%13) end
-    return v>=0 and 2 or 1,_abs(v),1.0
-end
-
-local function _nn_inp(ent,d,state,ld)
-    local ast=_astate(ent)
-    local vx=entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy=entity.get_prop(ent,'m_vecVelocity[1]') or 0
-    local spd=_sqrt(vx*vx+vy*vy)
-    local ld2=d.deltas[#d.deltas] or 0
-    local pd=d.deltas[#d.deltas-1] or 0
-    local p2=d.deltas[#d.deltas-2] or 0
-    local duck=entity.get_prop(ent,'m_flDuckAmount') or 0
-    return {state==ST.STAND and 1 or 0,state==ST.MOVE and 1 or 0,state==ST.AIR and 1 or 0,
-            state==ST.CROUCH and 1 or 0,state==ST.SLOWWALK and 1 or 0,
-            state==ST.AIR_CROUCH and 1 or 0,state==ST.SNAKING and 1 or 0,
-            _clamp(spd/260,0,1),duck,ld2/180,pd/180,p2/180,ld.aim_w,ld.desync_cycle,
-            ld.lean_w,d.lby_updating and 1 or 0,_clamp(d.fail_streak/14,0,1),
-            d.def_active and 1 or 0,d.dt_active and 1 or 0,d.fd_active and 1 or 0}
-end
-
-local function _hybrid(ent,d,state,ld,jt,decay)
-    local ps,pd2,pc=_pattern(ent,d,state,ld,jt,decay)
-    local inp=_nn_inp(ent,d,state,ld)
-    local NN=_M.NN3; local nout={}
-    do
-        local h={}; for i=1,48 do local s=0; for j=1,20 do s=s+(inp[j] or 0)*NN.wh[j][i] end; h[i]=s>0 and s or 0.018*s end
-        for i=1,3 do local s=0; for j=1,48 do s=s+h[j]*NN.wo[j][i] end; nout[i]=1/(1+_exp(-_clamp(s,-14,14))) end
+    -- if we have a locked winning offset, use it
+    if d.brute_locked and d.brute_best_off then
+        d.method = 'brute_locked'
+        local v = d.brute_best_off
+        return v >= 0 and 2 or 1, _abs(v), 1.0
     end
-    local ns=nout[1]>0.52 and 2 or 1; local nd=_fl(nout[2]*60); local nc=nout[3]
-    d.last_nn_inp=inp
-    local trust=_clamp((NN.trained_samples or 0)/20,0,1)
-    if d.lby_updating or pc>0.90 or trust<0.3 then return ps,pd2,pc end
-    if (d.aa_type=='Jitter' or d.aa_type=='Chaotic') and trust>0.6 and nc*trust>pc then
-        d.method='neural+'..d.method; return ns,nd,_min(nc,0.92) end
-    local pw,nw=pc,nc*trust; local tot=pw+nw; if tot<=0 then return ps,pd2,pc end
-    local bd=_fl((pd2*pw+nd*nw)/tot); local fs=pw>=nw and ps or ns
-    d.method='hybrid+'..d.method; return fs,bd,_max(pc,nc*trust)
+
+    local idx = (d.brute_stage % #_BRUTE) + 1
+    local v   = _BRUTE[idx]
+
+    -- adaptive: jump toward estimated real desync
+    if d.adaptive_desync and d.fail_streak >= 3 then
+        local tgt = d.adaptive_desync
+        local best_v = v; local best_d = _abs(_abs(v) - tgt)
+        for _, bv in ipairs(_BRUTE) do
+            local dist = _abs(_abs(bv) - tgt)
+            if dist < best_d then best_d = dist; best_v = bv end
+        end
+        v = best_v
+        d.method = _f('brute@%+d(adapt)', v)
+    else
+        d.method = _f('brute@%+d', v)
+    end
+
+    return v >= 0 and 2 or 1, _abs(v), 1.0
 end
 
-local function _pitch(d)
-    if not _M.ui_pitch:get() or #d.pitch_hist<8 then return end
-    local w=_exp_weights(#d.pitch_hist,0.85); local sw,wt=0,0
-    for i,v in ipairs(d.pitch_hist) do sw=sw+v*w[i]; wt=wt+w[i] end
-    local avg=wt>0 and sw/wt or 0
-    d.pitch_res=avg<-55 and 89 or avg>55 and -89 or 0
+-- ── NN forward pass ───────────────────────────────────────────────────────
+local function _nn_fwd(inp)
+    local NN = _M.NN3
+    local h  = {}
+    for i = 1, 48 do
+        local s = 0
+        for j = 1, 20 do s = s + (inp[j] or 0) * NN.wh[j][i] end
+        h[i] = s > 0 and s or 0.02 * s  -- leaky relu
+    end
+    local o = {}
+    for i = 1, 3 do
+        local s = 0
+        for j = 1, 48 do s = s + h[j] * NN.wo[j][i] end
+        o[i] = 1 / (1 + _exp(-_clamp(s, -12, 12)))
+    end
+    return o, h
 end
 
-local function _suppress(ent)
-    if not _M.ui_suppress:get() then return false end
-    local me=entity.get_local_player(); if not me then return false end
-    local mx,my=entity.get_origin(me); local ex,ey=entity.get_origin(ent)
-    if not mx or not ex then return false end
-    return _sqrt((ex-mx)^2+(ey-my)^2) < _M.ui_sup_rng:get()
+local function _nn_inp(ent, d, state, ld)
+    local ast  = _astate(ent)
+    local vx   = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+    local vy   = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local spd  = _sqrt(vx*vx + vy*vy)
+    local duck = entity.get_prop(ent,'m_flDuckAmount') or 0
+    local rd   = ast and _real_desync(ast) or 0
+    local d1   = d.deltas[#d.deltas]     or 0
+    local d2   = d.deltas[#d.deltas-1]   or 0
+    local d3   = d.deltas[#d.deltas-2]   or 0
+    return {
+        state==ST.STAND     and 1 or 0,
+        state==ST.MOVE      and 1 or 0,
+        state==ST.AIR       and 1 or 0,
+        state==ST.CROUCH    and 1 or 0,
+        state==ST.SLOWWALK  and 1 or 0,
+        state==ST.AIR_CROUCH and 1 or 0,
+        state==ST.SNAKING   and 1 or 0,
+        _clamp(spd/260, 0, 1),
+        duck,
+        d1/180, d2/180, d3/180,
+        rd/180,             -- real-time desync signal
+        ld.aim_w,
+        ld.desync_cycle,
+        ld.lean_w,
+        d.lby_updating and 1 or 0,
+        _clamp(d.fail_streak/12, 0, 1),
+        d.def_active and 1 or 0,
+        d.dt_active  and 1 or 0,
+    }
+end
+
+local function _hybrid(ent, d, state, ld, jt, decay)
+    local ps, pd, pc = _pattern(ent, d, state, ld, jt, decay)
+    local inp = _nn_inp(ent, d, state, ld)
+    local nout, _ = _nn_fwd(inp)
+    local ns = nout[1] > 0.52 and 2 or 1
+    local nd = _fl(nout[2] * 62)
+    local nc = nout[3]
+    d.last_nn_inp = inp
+
+    local trust = _clamp(((_M.NN3.trained_samples or 0)) / 15, 0, 1)
+
+    -- always trust pattern for LBY or very high confidence
+    if d.lby_updating or pc > 0.88 or trust < 0.25 then
+        return ps, pd, pc
+    end
+
+    -- NN takes over for jitter/chaotic when well trained
+    if (d.aa_type == 'Jitter' or d.aa_type == 'Chaotic') and trust > 0.5 then
+        local eff_nc = nc * trust
+        if eff_nc > pc then
+            d.method = 'neural+' .. d.method
+            return ns, nd, _min(eff_nc, 0.93)
+        end
+    end
+
+    -- weighted blend
+    local pw = pc; local nw = nc * trust; local tot = pw + nw
+    if tot <= 0 then return ps, pd, pc end
+    local bd  = _fl((pd*pw + nd*nw) / tot)
+    local fs  = pw >= nw and ps or ns
+    d.method  = 'hybrid+' .. d.method
+    return fs, bd, _max(pc, nc * trust)
+end
+
+-- ── NN training ────────────────────────────────────────────────────────
+local function _nn_train()
+    local NN = _M.NN3
+    if #NN.mem < 24 then return end
+    for _ = 1, 14 do
+        local s = NN.mem[math.random(1, #NN.mem)]
+        local o, h = _nn_fwd(s.inp)
+        local sw = s.w or 1
+        -- output deltas
+        local do3 = {}
+        for i = 1, 3 do
+            do3[i] = (s.tgt[i] - o[i]) * o[i] * (1 - o[i]) * sw
+        end
+        -- output weights
+        for i = 1, 3 do
+            for j = 1, 48 do
+                local g = NN.cfg.lr * do3[i] * h[j]
+                NN.vo[j][i] = NN.cfg.mom * NN.vo[j][i] + g
+                NN.wo[j][i] = NN.wo[j][i] + NN.vo[j][i]
+            end
+        end
+        -- hidden deltas
+        for j = 1, 48 do
+            local dh = 0
+            for i = 1, 3 do dh = dh + do3[i] * NN.wo[j][i] end
+            dh = dh * (h[j] > 0 and 1 or 0.02)
+            for k = 1, 20 do
+                local g = NN.cfg.lr * dh * (s.inp[k] or 0)
+                NN.vh[k][j] = NN.cfg.mom * NN.vh[k][j] + g
+                NN.wh[k][j] = NN.wh[k][j] + NN.vh[k][j]
+            end
+        end
+    end
+    NN.trained_samples = (NN.trained_samples or 0) + 1
+end
+
+local function _nn_add(d, hit, hs)
+    local NN = _M.NN3
+    if not d.last_nn_inp then return end
+    local w = hs and 3.0 or hit and 1.2 or 1.8
+    table.insert(NN.mem, {
+        inp = d.last_nn_inp,
+        tgt = { d.side==2 and 1.0 or 0.0, _min(d.desync/62,1), hit and 1.0 or 0.0 },
+        w   = w
+    })
+    if #NN.mem > 2000 then table.remove(NN.mem, 1) end
+end
+
+-- ── state stats ─────────────────────────────────────────────────────────
+local function _upd_ss(d, state, hit, side, desync)
+    local ss = d.state_stats[state]
+    if not ss then
+        d.state_stats[state] = {hits=0,misses=0,best_side=side,best_desync=desync}
+        ss = d.state_stats[state]
+    end
+    if hit then
+        ss.hits = ss.hits + 1
+        -- update best with exponential decay toward new value
+        ss.best_side   = side
+        ss.best_desync = _fl(ss.best_desync * 0.7 + desync * 0.3)
+    else
+        ss.misses = ss.misses + 1
+    end
 end
 
 -- ── screen log ──────────────────────────────────────────────────────────
@@ -8931,7 +9264,7 @@ local function _upd_adapt(d,ms2,md)
     end
 end
 
-local function _upd_state_stats(d,state,hit,side,desync)
+local function _upd_ss(d,state,hit,side,desync)
     local ss=d.state_stats[state]
     if not ss then d.state_stats[state]={hits=0,misses=0,best_side=1,best_desync=40}; ss=d.state_stats[state] end
     if hit then ss.hits=ss.hits+1; ss.best_side=side; ss.best_desync=desync
@@ -8977,26 +9310,7 @@ client.set_event_callback('paint',function()
         if _M.ui_pitch:get() and d.pitch_res~=0 then pcall(plist.set,ent,'Pitch override',d.pitch_res) end
         ::_rsk::
     end
-    if mode=='Hybrid Engine' then
-        local NN=_M.NN3; if #NN.mem>=24 then
-            for _=1,12 do
-                local s=NN.mem[math.random(1,#NN.mem)]; local o,h={},{}
-                for i=1,48 do local sv=0; for j=1,20 do sv=sv+(s.inp[j] or 0)*NN.wh[j][i] end; h[i]=sv>0 and sv or 0.018*sv end
-                for i=1,3 do local sv=0; for j=1,48 do sv=sv+h[j]*NN.wo[j][i] end; o[i]=1/(1+_exp(-_clamp(sv,-14,14))) end
-                local sw=s.w or 1
-                for i=1,3 do
-                    local err=(s.tgt[i]-o[i])*o[i]*(1-o[i])*sw
-                    for j=1,48 do local g=NN.cfg.lr*err*h[j]; NN.vo[j][i]=NN.cfg.mom*NN.vo[j][i]+g; NN.wo[j][i]=NN.wo[j][i]+NN.vo[j][i] end
-                end
-                for j=1,48 do
-                    local dh=0; for i=1,3 do dh=dh+(o[i]>0.5 and 1 or 0)*(s.tgt[i]-(o[i]>0.5 and 1 or 0))*NN.wo[j][i] end
-                    dh=dh*(h[j]>0 and 1 or 0.018)
-                    for k=1,20 do local g=NN.cfg.lr*dh*(s.inp[k] or 0); NN.vh[k][j]=NN.cfg.mom*NN.vh[k][j]+g; NN.wh[k][j]=NN.wh[k][j]+NN.vh[k][j] end
-                end
-            end
-            NN.trained_samples=(NN.trained_samples or 0)+1
-        end
-    end
+    if mode=='Hybrid Engine' then _nn_train() end
     if globals.tickcount()%10==0 then
         local ok,thr=pcall(client.current_threat)
         if ok and thr and thr>0 and _M.DB[thr] then
@@ -9030,12 +9344,13 @@ client.set_event_callback('aim_hit',function(e)
     else d.fail_streak=_max(0,d.fail_streak-1); if d.brute_stage>0 then d.brute_stage=_max(0,d.brute_stage-1) end end
     d.hit_count=d.hit_count+1; d.hit_streak=d.hit_streak+1
     d.side_hits[d.side]=(d.side_hits[d.side] or 0)+(hs and 2 or 1)
-    _upd_state_stats(d,state,true,d.side,d.desync)
-    local NN=_M.NN3
-    if _M.ui_mode:get()=='Hybrid Engine' and d.last_nn_inp then
-        local w=hs and 2.5 or 1.0
-        table.insert(NN.mem,{inp=d.last_nn_inp,tgt={d.side==2 and 1.0 or 0.0,_min(d.desync/60,1),1.0},w=w})
-        if #NN.mem>1500 then table.remove(NN.mem,1) end
+    _upd_ss(d,state,true,d.side,d.desync)
+    -- NN training on hit
+    if _M.ui_mode:get()=='Hybrid Engine' then _nn_add(d, true, hs) end
+    -- lock brute on headshot
+    if hs and d.brute_stage > 0 then
+        d.brute_locked = true
+        d.brute_best_off = d.desync * (d.side==2 and 1 or -1)
     end
     local main=hs and _f('Killed %s with a head shot for %d damage',name,dmg) or _f('Hit %s in the %s for %d damage',name,hg,dmg)
     local sub=_f('reso: %s @ %d%%  \xc2\xb7  bt:%dt',ms,conf,bt)
@@ -9052,13 +9367,12 @@ client.set_event_callback('aim_miss',function(e)
     local state=_gstate(ent)
     d.miss_count=d.miss_count+1; d.fail_streak=d.fail_streak+1; d.hit_streak=0
     d.brute_stage=(d.brute_stage+1)%13; d.side=d.side==1 and 2 or 1
-    _upd_adapt(d,d.side,d.desync); _upd_state_stats(d,state,false,d.side,d.desync)
+    _upd_adapt(d,d.side,d.desync); _upd_ss(d,state,false,d.side,d.desync)
     if d.aa_type=='Jitter' then d.jitter_phase=(d.jitter_phase+0.5)%1.0 end
-    local NN=_M.NN3
-    if _M.ui_mode:get()=='Hybrid Engine' and d.last_nn_inp then
-        table.insert(NN.mem,{inp=d.last_nn_inp,tgt={d.side==2 and 1.0 or 0.0,_min((60-d.desync)/60,1),0.0},w=1.7})
-        if #NN.mem>1500 then table.remove(NN.mem,1) end
-    end
+    -- NN training on miss
+    if _M.ui_mode:get()=='Hybrid Engine' then _nn_add(d, false, false) end
+    -- unlock brute on miss so it can search again
+    d.brute_locked = false
     local reason=e.reason or '?'
     if _M.ui_log_scr:get() then _log_add(_f('Missed %s (%s)',name,reason),205,75,75,_f('reso: %s  streak:%d  next:%s',ms,d.fail_streak,d.side==2 and 'R' or 'L')) end
     if _M.ui_log_con:get() then client.color_log(255,100,100,_f('[ZRes] MISS %s  reason:%s  streak:%d  next:%s\0',name,reason,d.fail_streak,d.side==2 and 'R' or 'L')) end
