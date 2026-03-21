@@ -9041,7 +9041,6 @@ client.set_event_callback('aim_hit',function(e)
     local sub=_f('reso: %s @ %d%%  \xc2\xb7  bt:%dt',ms,conf,bt)
     if _M.ui_log_scr:get() then local r,g,b=hs and 110 or 170,hs and 215 or 175,hs and 85 or 85; _log_add(main,r,g,b,sub) end
     if _M.ui_log_con:get() then local cr,cg,cb=hs and 100 or 180,hs and 255 or 220,100; client.color_log(cr,cg,cb,main..'  \xc2\xb7  '..sub..'\0') end
-    _vlog(_f('HIT %s [%s] %ddmg hs=%s reso=%s conf=%d%%',name,hg,dmg,tostring(hs),ms,conf))
 end)
 
 -- ── aim_miss ─────────────────────────────────────────────────────────────
@@ -9063,7 +9062,6 @@ client.set_event_callback('aim_miss',function(e)
     local reason=e.reason or '?'
     if _M.ui_log_scr:get() then _log_add(_f('Missed %s (%s)',name,reason),205,75,75,_f('reso: %s  streak:%d  next:%s',ms,d.fail_streak,d.side==2 and 'R' or 'L')) end
     if _M.ui_log_con:get() then client.color_log(255,100,100,_f('[ZRes] MISS %s  reason:%s  streak:%d  next:%s\0',name,reason,d.fail_streak,d.side==2 and 'R' or 'L')) end
-    _vlog(_f('MISS %s reason=%s streak=%d flip->%s',name,reason,d.fail_streak,d.side==2 and 'R' or 'L'))
 end)
 
 -- ── round_start ──────────────────────────────────────────────────────────
