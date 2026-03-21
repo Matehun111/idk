@@ -2595,8 +2595,18 @@ do
     : record("aa", "defensive::pitch")
     : save()
 
-    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random" })
-    : record("aa", "defensive::pitch")
+    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random", "Snap", "Snap Jitter" })
+    : record("aa", "defensive::yaw")
+    : save()
+
+    defensive.snap_range = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Snap Range", "\n", "defensive::snap_range" }, 45, 180, 120, true, "deg", 1)
+    : record("aa", "defensive::snap_range")
+    : save()
+
+    defensive.snap_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Snap Offset", "\n", "defensive::snap_offset" }, -180, 180, 90, true, "deg", 1)
+    : record("aa", "defensive::snap_offset")
     : save()
 
     local modes = {
@@ -2614,6 +2624,9 @@ do
     local defensive_5_way = { 90, 135, 180, 225, 270 }
     local defensive_7_way = { 0, 51, 102, 154, 205, 257, 308 }
     local _chaos_seed      = 0
+    local _snap_last_tick   = -999
+    local _snap_last_offset = 0
+    local _snap_jitter_side = 1
 
     function defensive.handle(cmd, ctx)
         if not defensive.enabled:get() then
@@ -2733,6 +2746,30 @@ do
                 yaw_value   = utils.normalize(_chaos_seed - 180, -180, 180)
             elseif val == 'Random' then
                 yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
+            elseif val == 'Snap' then
+                local tc = globals.tickcount()
+                if tc ~= _snap_last_tick then
+                    local range  = defensive.snap_range:get()
+                    local offset = defensive.snap_offset:get()
+                    local snap_dir = (localplayer.packets % 2 == 0) and 1 or -1
+                    _snap_last_offset = utils.normalize(
+                        offset + snap_dir * (range * 0.5 + client.random_float(0, range * 0.5)),
+                        -180, 180)
+                    _snap_last_tick = tc
+                end
+                yaw_value = _snap_last_offset
+            elseif val == 'Snap Jitter' then
+                local tc = globals.tickcount()
+                local range  = defensive.snap_range:get()
+                local offset = defensive.snap_offset:get()
+                if tc ~= _snap_last_tick then
+                    _snap_jitter_side = (_snap_jitter_side == 1) and -1 or 1
+                    _snap_last_tick = tc
+                end
+                local flip = (localplayer.packets % 2 == 0) and 1 or -1
+                yaw_value = utils.normalize(
+                    offset * _snap_jitter_side * flip + client.random_float(-15, 15),
+                    -180, 180)
             end
 
             if manual_yaw ~= nil and should_flick then
@@ -7327,6 +7364,10 @@ menu.set_callback(function()
             _safe_display(defensive.state)
             _safe_display(defensive.pitch)
             _safe_display(defensive.yaw)
+        if defensive.yaw and (defensive.yaw:get() == "Snap" or defensive.yaw:get() == "Snap Jitter") then
+            _safe_display(defensive.snap_range)
+            _safe_display(defensive.snap_offset)
+        end
         end
     end
 
