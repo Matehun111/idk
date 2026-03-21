@@ -9179,6 +9179,162 @@ local function _multipoint_sample(ent, base_side, base_desync, me)
 end
 
 -- ── confidence decay ─────────────────────────────────────────────────────
+-- export shared state to part2
+rawset(_G,"_ZR",{
+    DB=DB,
+    NN3=NN3,
+    ST=ST,
+    ST_STR=ST_STR,
+    _abs=_abs,
+    _analyze_jitter_freq=_analyze_jitter_freq,
+    _animstate3=_animstate3,
+    _atan=_atan,
+    _clamp=_clamp,
+    _db=_db,
+    _exp_weights=_exp_weights,
+    _f=_f,
+    _fingerprint_layers=_fingerprint_layers,
+    _fl=_fl,
+    _get_state3=_get_state3,
+    _lbl_aa=_lbl_aa,
+    _lbl_conf=_lbl_conf,
+    _lbl_desync=_lbl_desync,
+    _lbl_exploit=_lbl_exploit,
+    _lbl_layers=_lbl_layers,
+    _lbl_lby=_lbl_lby,
+    _lbl_method=_lbl_method,
+    _lbl_state=_lbl_state,
+    _lbl_streak=_lbl_streak,
+    _ld3=_ld3,
+    _lerp=_lerp,
+    _log_add=_log_add,
+    _log_draw=_log_draw,
+    _log_entries=_log_entries,
+    _max=_max,
+    _min=_min,
+    _mshort=_mshort,
+    _multipoint_sample=_multipoint_sample,
+    _nn3_fwd=_nn3_fwd,
+    _nn3_inp=_nn3_inp,
+    _nn3_sample=_nn3_sample,
+    _nn3_train=_nn3_train,
+    _predict_os_side=_predict_os_side,
+    _rad2deg=_rad2deg,
+    _resolve_air_vel=_resolve_air_vel,
+    _resolve_brute3=_resolve_brute3,
+    _resolve_hybrid3=_resolve_hybrid3,
+    _resolve_lean=_resolve_lean,
+    _resolve_pattern3=_resolve_pattern3,
+    _resolve_pitch3=_resolve_pitch3,
+    _should_suppress=_should_suppress,
+    _sign=_sign,
+    _sqrt=_sqrt,
+    _track_bt=_track_bt,
+    _track_defensive=_track_defensive,
+    _track_exploit=_track_exploit,
+    _track_fakeduck=_track_fakeduck,
+    _track_lby=_track_lby,
+    _track_lean=_track_lean,
+    _track_os=_track_os,
+    _track_vel=_track_vel,
+    _ui_conf_w=_ui_conf_w,
+    _ui_debug=_ui_debug,
+    _ui_en=_ui_en,
+    _ui_exploits=_ui_exploits,
+    _ui_hist_w=_ui_hist_w,
+    _ui_log_con=_ui_log_con,
+    _ui_log_scr=_ui_log_scr,
+    _ui_mode=_ui_mode,
+    _ui_multipt=_ui_multipt,
+    _ui_pitch=_ui_pitch,
+    _ui_sup_rng=_ui_sup_rng,
+    _ui_suppress=_ui_suppress,
+    _ui_verbose=_ui_verbose,
+    _update_adaptive_desync=_update_adaptive_desync,
+    _update_state_stats=_update_state_stats,
+    _vlog=_vlog,
+    _ydelta=_ydelta,
+})
+end)()
+-- Resolver part 2
+-- Resolver part 2a
+;(function()
+-- import shared state from part1
+local _ZR=rawget(_G,"_ZR") or {}
+local DB=_ZR.DB
+local NN3=_ZR.NN3
+local ST=_ZR.ST
+local ST_STR=_ZR.ST_STR
+local _abs=_ZR._abs
+local _analyze_jitter_freq=_ZR._analyze_jitter_freq
+local _animstate3=_ZR._animstate3
+local _atan=_ZR._atan
+local _clamp=_ZR._clamp
+local _db=_ZR._db
+local _exp_weights=_ZR._exp_weights
+local _f=_ZR._f
+local _fingerprint_layers=_ZR._fingerprint_layers
+local _fl=_ZR._fl
+local _get_state3=_ZR._get_state3
+local _lbl_aa=_ZR._lbl_aa
+local _lbl_conf=_ZR._lbl_conf
+local _lbl_desync=_ZR._lbl_desync
+local _lbl_exploit=_ZR._lbl_exploit
+local _lbl_layers=_ZR._lbl_layers
+local _lbl_lby=_ZR._lbl_lby
+local _lbl_method=_ZR._lbl_method
+local _lbl_state=_ZR._lbl_state
+local _lbl_streak=_ZR._lbl_streak
+local _ld3=_ZR._ld3
+local _lerp=_ZR._lerp
+local _log_add=_ZR._log_add
+local _log_draw=_ZR._log_draw
+local _log_entries=_ZR._log_entries
+local _max=_ZR._max
+local _min=_ZR._min
+local _mshort=_ZR._mshort
+local _multipoint_sample=_ZR._multipoint_sample
+local _nn3_fwd=_ZR._nn3_fwd
+local _nn3_inp=_ZR._nn3_inp
+local _nn3_sample=_ZR._nn3_sample
+local _nn3_train=_ZR._nn3_train
+local _predict_os_side=_ZR._predict_os_side
+local _rad2deg=_ZR._rad2deg
+local _resolve_air_vel=_ZR._resolve_air_vel
+local _resolve_brute3=_ZR._resolve_brute3
+local _resolve_hybrid3=_ZR._resolve_hybrid3
+local _resolve_lean=_ZR._resolve_lean
+local _resolve_pattern3=_ZR._resolve_pattern3
+local _resolve_pitch3=_ZR._resolve_pitch3
+local _should_suppress=_ZR._should_suppress
+local _sign=_ZR._sign
+local _sqrt=_ZR._sqrt
+local _track_bt=_ZR._track_bt
+local _track_defensive=_ZR._track_defensive
+local _track_exploit=_ZR._track_exploit
+local _track_fakeduck=_ZR._track_fakeduck
+local _track_lby=_ZR._track_lby
+local _track_lean=_ZR._track_lean
+local _track_os=_ZR._track_os
+local _track_vel=_ZR._track_vel
+local _ui_conf_w=_ZR._ui_conf_w
+local _ui_debug=_ZR._ui_debug
+local _ui_en=_ZR._ui_en
+local _ui_exploits=_ZR._ui_exploits
+local _ui_hist_w=_ZR._ui_hist_w
+local _ui_log_con=_ZR._ui_log_con
+local _ui_log_scr=_ZR._ui_log_scr
+local _ui_mode=_ZR._ui_mode
+local _ui_multipt=_ZR._ui_multipt
+local _ui_pitch=_ZR._ui_pitch
+local _ui_sup_rng=_ZR._ui_sup_rng
+local _ui_suppress=_ZR._ui_suppress
+local _ui_verbose=_ZR._ui_verbose
+local _update_adaptive_desync=_ZR._update_adaptive_desync
+local _update_state_stats=_ZR._update_state_stats
+local _vlog=_ZR._vlog
+local _ydelta=_ZR._ydelta
+rawset(_G,"_ZR",nil)  -- clean up
 local function _apply_conf_decay(d)
     local now = globals.curtime()
     -- confidence decays if no fresh data in 2 seconds
@@ -9748,6 +9904,43 @@ local function _should_suppress(ent)
     return dist < _ui_sup_rng:get()
 end
 
+
+-- export for part2b
+rawset(_G,"_ZR2",{
+  _apply_conf_decay=_apply_conf_decay,
+  aa_type=aa_type,
+  conf=conf,
+  desync=desync,
+  fr=fr,
+  freq=freq,
+  idx=idx,
+  me=me,
+  sh=sh,
+  side=side,
+  sigs=sigs,
+  sw=sw,
+  target=target,
+})
+end)()
+-- Resolver part 2b
+;(function()
+-- import from part1 and part2a
+local _ZR =rawget(_G,"_ZR")  or {}
+local _ZR2=rawget(_G,"_ZR2") or {}
+rawset(_G,"_ZR2",nil)
+local _apply_conf_decay=_ZR2._apply_conf_decay or _ZR._apply_conf_decay
+local aa_type=_ZR2.aa_type or _ZR.aa_type
+local conf=_ZR2.conf or _ZR.conf
+local desync=_ZR2.desync or _ZR.desync
+local fr=_ZR2.fr or _ZR.fr
+local freq=_ZR2.freq or _ZR.freq
+local idx=_ZR2.idx or _ZR.idx
+local me=_ZR2.me or _ZR.me
+local sh=_ZR2.sh or _ZR.sh
+local side=_ZR2.side or _ZR.side
+local sigs=_ZR2.sigs or _ZR.sigs
+local sw=_ZR2.sw or _ZR.sw
+local target=_ZR2.target or _ZR.target
 -- ── screen hit/miss log ──────────────────────────────────────────────────
 local _log_entries = {}
 
