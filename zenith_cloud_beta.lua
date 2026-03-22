@@ -1005,14 +1005,6 @@ shared.online_label = {
 
 -- ── LOAD COUNTER + ONLINE ───────────────────────────────────────────
 do
-    -- Times Loaded: increment local counter each load
-    local _loads_key = 'zenith_total_loads_v1'
-    local ok_l, cur_loads = pcall(database.read, _loads_key)
-    cur_loads = (ok_l and type(cur_loads)=='number') and cur_loads or 0
-    cur_loads = cur_loads + 1
-    pcall(database.write, _loads_key, cur_loads)
-    -- value stored, will be applied when label is created below
-    rawset(_G, "_zenith_load_count", cur_loads)
 
     -- Online users: increment on load, decrement on shutdown
     -- Uses counterapi.dev (free, reliable)
@@ -1068,12 +1060,6 @@ end
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
 do
-    vars.statistics = {}
-
-    vars.statistics.label_info  = group_other:label('\f<dot>Information')
-    vars.statistics.user        = group_other:label('\f<dot>User: \v'..USERNAME)
-    vars.statistics.loaded      = group_other:label(string.format('\f<dot>Times Loaded: \v%d', _G._zenith_load_count or 0))
-    vars.statistics.time_in_game= group_other:label('\f<dot>Session: ')
 end
 
 -- ── HELPERS (Zenith helpers table) ───────────────────────────────────
@@ -1204,20 +1190,6 @@ helpers['functions'] = {
         self.prev_side=self.side
         return self.side
     end,
-    update_session = function(self)
-        local rt = globals.realtime()
-        local h = math.floor(rt/3600)
-        local m = math.floor(rt/60)
-        local s = math.floor(rt)
-        local text
-        if s==1 and h<1 and m<1 then text=s.." Second"
-        elseif s>=2 and h<1 and m<1 then text=s.." Seconds"
-        elseif m>=2 and h<1 then text=m.." Minutes"
-        elseif m==1 and h<1 then text=m.." Minute"
-        elseif h<2 then text=h.." Hour"
-        else text=h.." Hours" end
-        vars.statistics.time_in_game:set('\f<dot>Session: \v'..text)
-    end,
     animations = (function()
         local a={data={}}
         function a:clamp(v,mn,mx) return math.min(mx,math.max(mn,v)) end
@@ -1289,7 +1261,6 @@ client.set_event_callback('paint_ui', function()
     if entity.get_local_player() == nil then helpers['functions'].defensive_ticks = 0 end
     if not ui.is_menu_open() then return end
 
-    helpers['functions']:update_session()
     hide_menu(false)
 
     local ref = software.misc.settings.menu_color
@@ -6585,7 +6556,7 @@ do
 
             shared.online_label:set(string.format('👤Current Online: %d', online))
             if shared.fl_online then
-                shared.fl_online:set(string.format('👤Online: \affd700ff%d', online))
+                shared.fl_online:set(string.format('\a444444ffonline  \affd700ff%d\affffffff', online))
             end
             -- leaderboard from data if available
             if shared.fl_leaderboard and shared.data then
@@ -8906,12 +8877,12 @@ do
     local home = {}
     _G.__home = home
 
-    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a71bc78ff\xe2\x96\xb6 Statistics')
-    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x96\xb6 Total time: \a71bc78ff0.0 Hours')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session time: \a71bc78ff0 Minutes')
-    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Headshots: \a71bc78ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Enemy killed: \a71bc78ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Misses: \a71bc78ff0')
+    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff──  \aaaaaaaff S T A T S  \a555555ff──')
+    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '⏱  total  \a555555ff...')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '⏸  session  \a555555ff...')
+    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '◎  headshots  \a555555ff0%')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '✦  kills  \a555555ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '✕  misses at me  \a555555ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -8949,11 +8920,11 @@ do
         end
         local tot = _get_total()
         local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
-        home.lbl_total:set(string.format('\xe2\x96\xb6 Total time: \a71bc78ff%.1f Hours', tot))
-        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session time: \a71bc78ff%d Minutes', mins))
-        home.lbl_hs:set(string.format('Headshots: \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('Enemy killed: \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('X Misses at me: \a71bc78ff%d', _s_misses))
+        home.lbl_total:set(string.format('⏱  total  \a71bc78ff%.1f hrs', tot))
+        home.lbl_session:set(string.format('⏸  session  \a71bc78ff%d min', mins))
+        home.lbl_hs:set(string.format('◎  headshots  \a71bc78ff%d%%', hs_pct))
+        home.lbl_kills:set(string.format('✦  kills  \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('✕  misses at me  \a71bc78ff%d', _s_misses))
     end
 
     function home.show()
