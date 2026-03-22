@@ -1165,7 +1165,8 @@ helpers['functions'] = {
     end,
     fade_handle2 = function(self, time, str, r, g, b, a)
         a = a or 255
-        local c1,c2,c3 = 32, 32, 32
+        -- animate between accent blue and deep blue
+        local c1,c2,c3 = 20, 50, 120
         local t_out, t_iter = {}, 1
         local ra=(c1-r); local ga=(c2-g); local ba=(c3-b)
         for i=1,#str do
@@ -1264,7 +1265,9 @@ client.set_event_callback('paint_ui', function()
     hide_menu(false)
 
     local ref = software.misc.settings.menu_color
-    local r, g, b, a = ui.get(ref)
+    -- force menu color to Zenith blue
+    pcall(ui.set, ref, 71, 152, 255, 255)
+    local r, g, b, a = 71, 152, 255, 255
     local water_ui = helpers['functions']:fade_handle2(-globals.curtime(), '  Z  E  N  I  T  H', r, g, b)
     vars.selection.label:set("                    "..table.concat(water_ui))
 end)
@@ -2620,7 +2623,7 @@ do
     : record("visuals", "widgets::enabled")
     : save()
 
-    widgets.color_picker = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", merge { "- Color", "\n", "widgets::color_picker" }, 113, 152, 255, 255)
+    widgets.color_picker = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", merge { "- Color", "\n", "widgets::color_picker" }, 71, 152, 255, 255)
     : record("visuals", "keybinds::color_picker")
     : save()
 
@@ -4699,7 +4702,7 @@ LPH_NO_VIRTUALIZE(function ()
             graphics.text(
                 pos.x + left_padding + offset.x - 1,
                 pos.y + (rect_size.y - text_size.y) * 0.5,
-                255, 255, 255, 255 * alpha,
+                71, 152, 255, 255 * alpha,
                 flags, 0, text
             )
         end
