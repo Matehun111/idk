@@ -3,7 +3,7 @@
 --  Real license backend: API key verification + HWID lock + expiry
 -- ======================================================================
 
-local API_URL    = "https://YOUR-SERVER-URL.com"   -- << change this
+local API_URL    = "https://idk-production-9969.up.railway.app"   -- << change this
 local CLOUD_URL  = "https://raw.githubusercontent.com/Matehun111/idk/main/zenith_cloud_beta.lua"
 local TIER       = "beta"
 local AUTH_VER   = 3
