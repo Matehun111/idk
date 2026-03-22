@@ -1,0 +1,13 @@
+{
+  "ZEN-NIGHTLY-LIFETIME-D436FE": {
+    "plan": "nightly",
+    "expires_at": null,
+    "hwid": null,
+    "note": "matehun111",
+    "created_at": 0,
+    "revoked": false,
+    "last_ticket": null,
+    "last_ticket_exp": null,
+    "last_nonce": null
+  }
+}
