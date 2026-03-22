@@ -9318,6 +9318,60 @@ _M.ui_sup_rng = menu.new_item(ui.new_slider,G,GR,merge{'Suppress Close Range','\
 _M.ui_jt      = menu.new_item(ui.new_slider,G,GR,merge{'Jitter Threshold','\n','resolver::jitter_thresh'},5,60,29,true,'deg',1):record('aa','resolver::jitter_thresh'):save()
 _M.ui_conf_w  = menu.new_item(ui.new_slider,G,GR,merge{'Min Confidence','\n','resolver::min_conf'},0,80,35,true,'%',1):record('aa','resolver::min_conf'):save()
 _M.ui_hist_w  = menu.new_item(ui.new_slider,G,GR,merge{'History Weight Decay','\n','resolver::hist_decay'},50,99,88,true,'%',1):record('aa','resolver::hist_decay'):save()
+_M.ui_brute_t = menu.new_item(ui.new_slider,G,GR,merge{'Brute Threshold','\n','resolver::brute_thresh'},2,12,5,true,'x'):record('aa','resolver::brute_thresh'):save()
+_M.ui_dscale  = menu.new_item(ui.new_slider,G,GR,merge{'Desync Scale','\n','resolver::desync_scale'},60,140,100,true,'%'):record('aa','resolver::desync_scale'):save()
+_M.ui_afstand = menu.new_item(ui.new_checkbox,G,GR,'Anti-Freestand'):record('aa','resolver::anti_freestand'):save()
+_M.ui_sbias   = menu.new_item(ui.new_combobox,G,GR,merge{'Side Bias','\n','resolver::side_bias'},{'Auto','Force Left','Force Right'}):record('aa','resolver::side_bias'):save()
+_M.ui_spfilter= menu.new_item(ui.new_checkbox,G,GR,'Filter Spread Misses'):record('aa','resolver::spread_filter'):save()
+_M.ui_nn_save = menu.new_item(ui.new_checkbox,G,GR,'Persist NN Weights'):record('aa','resolver::nn_persist'):save()
+_M.ui_rst_btn = menu.new_item(ui.new_button,G,GR,'Reset Target Data',function()
+    local ok,thr=pcall(client.current_threat)
+    if ok and thr and thr>0 then _M.DB[thr]=nil
+        client.color_log(180,180,255,'[ZRes] Reset data for target')
+    end
+end)
+_M.ui_rst_all = menu.new_item(ui.new_button,G,GR,'Reset All Data',function()
+    _M.DB={}; client.color_log(180,180,255,'[ZRes] All resolver data cleared')
+end)
+-- NN weight controls
+_M.ui_nn_rst  = menu.new_item(ui.new_button,G,GR,'Reset NN Weights',function()
+    local NN=_M.NN3
+    for i=1,20 do for j=1,48 do NN.wh[i][j]=(math.random()*2-1)*math.sqrt(2/20) end end
+    for i=1,48 do for j=1,3  do NN.wo[i][j]=(math.random()*2-1)*math.sqrt(2/48) end end
+    NN.trained_samples=0; NN.mem={}
+    client.color_log(180,180,255,'[ZRes] NN weights reset')
+end)
+-- miss threshold before side flip
+_M.ui_miss_flip = menu.new_item(ui.new_slider,G,GR,
+    merge{'Miss Flip Threshold','\n','resolver::miss_flip'},1,6,1,true,'x')
+    :record('aa','resolver::miss_flip'):save()
+-- brute force sweep mode
+_M.ui_brute_mode = menu.new_item(ui.new_combobox,G,GR,
+    merge{'Brute Mode','\n','resolver::brute_mode'},
+    {'Smart','Fast','Full Sweep'})
+    :record('aa','resolver::brute_mode'):save()
+-- per-state engine override
+_M.ui_state_mode = menu.new_item(ui.new_combobox,G,GR,
+    merge{'State Engine Override','\n','resolver::state_mode'},
+    {'Off','Brute Air','Brute Crouch','Brute Moving','Pattern Stand'})
+    :record('aa','resolver::state_mode'):save()
+-- teleport/lag detection
+_M.ui_teleport = menu.new_item(ui.new_checkbox,G,GR,'Teleport Detection')
+    :record('aa','resolver::teleport'):save()
+-- on-screen desync indicator
+_M.ui_desyncindicator = menu.new_item(ui.new_checkbox,G,GR,'Desync Indicator')
+    :record('aa','resolver::desyncindicator'):save()
+-- resolver priority (which signal wins on conflict)
+_M.ui_priority = menu.new_item(ui.new_combobox,G,GR,
+    merge{'Resolver Priority','\n','resolver::priority'},
+    {'Auto','Trust LBY','Trust Lean','Trust Neural','Trust Pattern'})
+    :record('aa','resolver::priority'):save()
+-- AA type force override
+_M.ui_force_type = menu.new_item(ui.new_combobox,G,GR,
+    merge{'Force AA Type','\n','resolver::force_type'},
+    {'Off','Jitter','Static','LBY','Swing','Chaotic'})
+    :record('aa','resolver::force_type'):save()
+_M.lbl_nn     = menu.new_item(ui.new_label,G,GR,'NN: untrained')
 _M.lbl_method = menu.new_item(ui.new_label,G,GR,'Method: -')
 _M.lbl_aa     = menu.new_item(ui.new_label,G,GR,'AA Type: -')
 _M.lbl_desync = menu.new_item(ui.new_label,G,GR,'Desync: -')
@@ -9435,6 +9489,17 @@ local function _track_exploit(ent,d)
         elseif shift<=0 then d.dt_active=false; if d.tb_shift>0 then d.tb_shift=d.tb_shift-1 end end
     end
     if d.fd_active then d.exploit_type='FakeDuck' end
+    -- teleport detection: if origin jumped more than 100u in one tick, flag
+    if _M.ui_teleport and _M.ui_teleport:get() and #d.bt_hist >= 2 then
+        local prev=d.bt_hist[#d.bt_hist-1]; local curr=d.bt_hist[#d.bt_hist]
+        local dx=curr.ox-prev.ox; local dy=curr.oy-prev.oy; local dz=curr.oz-prev.oz
+        local dist=_sqrt(dx*dx+dy*dy+dz*dz)
+        if dist > 100 and (curr.tick-prev.tick) <= 2 then
+            -- teleporting: reset classifier, trust brute
+            d.fail_streak = _max(d.fail_streak, 5)
+            d.exploit_type = d.exploit_type.."+tp"
+        end
+    end
 end
 
 local function _conf_decay(d)
@@ -9815,8 +9880,18 @@ local function _upd_adapt(d, missed_side, missed_desync)
 end
 
 -- ── brute force (smarter ordering) ───────────────────────────────────────
-local _BRUTE = {58,-58,48,-48,38,-38,28,-28,18,-18,10,-10,0}
+local _BRUTE_SMART = {58,-58,48,-48,38,-38,28,-28,18,-18,10,-10,0}  -- adaptive order
+local _BRUTE_FAST  = {58,-58,0,38,-38,18,-18}  -- 7-stage fast sweep
+local _BRUTE_FULL  = {58,-58,54,-54,48,-48,44,-44,38,-38,32,-32,26,-26,20,-20,14,-14,8,-8,4,-4,0}  -- full
+local _BRUTE = _BRUTE_SMART  -- default
 local function _brute(d)
+    -- select sweep table based on mode
+    if _M.ui_brute_mode then
+        local bm=_M.ui_brute_mode:get()
+        if bm=='Fast' then _BRUTE=_BRUTE_FAST
+        elseif bm=='Full Sweep' then _BRUTE=_BRUTE_FULL
+        else _BRUTE=_BRUTE_SMART end
+    end
     -- if we have a locked winning offset, use it
     if d.brute_locked and d.brute_best_off then
         d.method = 'brute_locked'
@@ -10030,6 +10105,28 @@ local function _log_draw()
         ::_ls::
     end
     for i=#rm,1,-1 do table.remove(_M.log_entries,rm[i]) end
+    -- desync indicator: show live desync of current target near crosshair
+    if _M.ui_desyncindicator and _M.ui_desyncindicator:get() then
+        local ok2,thr2=pcall(client.current_threat)
+        if ok2 and thr2 and thr2>0 and _M.DB[thr2] then
+            local td=_M.DB[thr2]
+            local sw2,sh2=client.screen_size()
+            local cx2=sw2*0.5; local cy2=sh2*0.5+22
+            local side_str=td.side==2 and 'R' or 'L'
+            local conf_pct=_fl((td.confidence or 0)*100)
+            local at2=td.aa_type or '?'
+            local ms2=_ms(td.method or '?')
+            -- background pill
+            local txt2=_f('%s %d°  %s  %d%%',side_str,td.desync or 0,at2:sub(1,3),conf_pct)
+            local tw2,th2=renderer.measure_text('d',txt2)
+            renderer.rectangle(cx2-tw2/2-6,cy2-3,tw2+12,th2+6,10,10,14,180)
+            renderer.rectangle(cx2-tw2/2-6,cy2-3,2,th2+6,
+                conf_pct>=75 and 100 or conf_pct>=50 and 255 or 255,
+                conf_pct>=75 and 220 or conf_pct>=50 and 180 or 80,
+                conf_pct>=75 and 100 or 60, 220)
+            renderer.text(cx2-tw2/2,cy2,220,220,255,210,'d',0,txt2)
+        end
+    end
 end
 
 local function _ms(m)
@@ -10074,10 +10171,31 @@ client.set_event_callback('paint',function()
         _conf_decay(d); d.conf_last_update=globals.curtime()
         local state=_gstate(ent); local ld=_gld(ent)
         local side,desync,conf
-        if d.fail_streak>=5 or mode=='Bruteforce Only' then side,desync,conf=_brute(d)
+        if d.fail_streak>=(_M.ui_brute_t and _M.ui_brute_t:get() or 5) or mode=='Bruteforce Only' then side,desync,conf=_brute(d)
         elseif mode=='Hybrid Engine' then side,desync,conf=_hybrid(ent,d,state,ld,jt,decay)
         else side,desync,conf=_pattern(ent,d,state,ld,jt,decay) end
         if conf<_M.ui_conf_w:get()/100 then side=d.side; desync=d.desync end
+        -- desync scale: user can nudge the resolved desync +-40%
+        if _M.ui_dscale then
+            local sc=_M.ui_dscale:get()/100
+            desync=_clamp(_fl(desync*sc),0,62)
+        end
+        -- side bias: force left/right if user set it
+        if _M.ui_sbias then
+            local sb=_M.ui_sbias:get()
+            if sb=='Force Left'  then side=1 end
+            if sb=='Force Right' then side=2 end
+        end
+        -- anti-freestand: flip side toward exposed side
+        if _M.ui_afstand and _M.ui_afstand:get() then
+            local fs=software.is_freestanding and software.is_freestanding() or false
+            if fs then
+                local fss=entity.get_prop(ent,'m_flGoalFeetYaw') or 0
+                local eys=entity.get_prop(ent,'m_angEyeAngles[1]') or 0
+                local exp_side=_nrm(eys-fss)>0 and 2 or 1
+                side=exp_side; conf=_max(conf,0.72)
+            end
+        end
         -- multi-point
         if _M.ui_multipt:get() and me and entity.is_alive(me) then
             local ex,ey,ez=client.eye_position()
@@ -10114,6 +10232,11 @@ client.set_event_callback('paint',function()
             _M.lbl_state:set(_f('State: %s  lean:%s(%.2f)  def:%s',ST_STR[st] or '?',d.lean_side==1 and 'R' or d.lean_side==-1 and 'L' or '-',d.lean_magnitude or 0,d.def_active and 'active' or 'off'))
             _M.lbl_layers:set(_f('Layers: aim=%.2f lean=%.2f dc=%.3f [%s]',ld.aim_w,ld.lean_w,ld.desync_cycle,sigs))
             _M.lbl_exploit:set(_f('Exploit: %s  tb:%d  fd:%.1f',expl,d.tb_shift or 0,d.fd_count or 0))
+        if _M.lbl_nn then
+            local ns=_M.NN3.trained_samples or 0
+            local nt=#(_M.NN3.mem or {})
+            _M.lbl_nn:set(_f('NN: %d samples  mem:%d  trust:%.0f%%',ns,nt,_clamp(ns/15,0,1)*100))
+        end
         end
     end
 end)
@@ -10150,11 +10273,16 @@ end)
 client.set_event_callback('aim_miss',function(e)
     if not _auth_alive or not _M.ui_en:get() then return end
     local ent=e.target; if not ent then return end
-    if e.reason=='spread' then return end
+    if e.reason=='spread' then
+        if not _M.ui_spfilter or _M.ui_spfilter:get() then return end
+    end
     local d=_db(ent); local name=entity.get_player_name(ent) or '?'; local ms=_ms(d.method or 'none')
     local state=_gstate(ent)
     d.miss_count=d.miss_count+1; d.fail_streak=d.fail_streak+1; d.hit_streak=0
-    d.brute_stage=(d.brute_stage+1)%13; d.side=d.side==1 and 2 or 1
+    d.brute_stage=(d.brute_stage+1)%#_BRUTE
+    -- only flip side after miss_flip threshold
+    local miss_flip2=_M.ui_miss_flip and _M.ui_miss_flip:get() or 1
+    if d.fail_streak >= miss_flip2 then d.side=d.side==1 and 2 or 1 end
     _upd_adapt(d,d.side,d.desync); _upd_ss(d,state,false,d.side,d.desync)
     if d.aa_type=='Jitter' then d.jitter_phase=(d.jitter_phase+0.5)%1.0 end
     -- NN training on miss
@@ -10167,6 +10295,25 @@ client.set_event_callback('aim_miss',function(e)
 end)
 
 -- ── round_start ──────────────────────────────────────────────────────────
+-- NN weight persistence
+local _NN_DB_KEY='zenith_nn_weights_v1'
+local function _nn_save()
+    if not _M.ui_nn_save or not _M.ui_nn_save:get() then return end
+    local NN=_M.NN3
+    pcall(database.write,_NN_DB_KEY,{wh=NN.wh,wo=NN.wo,trained=NN.trained_samples or 0})
+end
+local function _nn_load()
+    if not _M.ui_nn_save or not _M.ui_nn_save:get() then return end
+    local ok,v=pcall(database.read,_NN_DB_KEY)
+    if ok and type(v)=='table' and v.wh and v.wo then
+        _M.NN3.wh=v.wh; _M.NN3.wo=v.wo
+        _M.NN3.trained_samples=v.trained or 0
+        client.color_log(100,255,150,'[ZRes] NN weights loaded ('..tostring(v.trained or 0)..' samples)')
+    end
+end
+client.delay_call(1,_nn_load)
+client.set_event_callback('shutdown',function() _nn_save() end)
+
 client.set_event_callback('round_start',function()
     for _,d in pairs(_M.DB) do
         d.fail_streak=0; d.hit_streak=0; d.brute_stage=0; d.brute_locked=false
@@ -10183,14 +10330,45 @@ _G.ZenithResolver_GetData=_db
 resolver_show_tab=function()
     _safe_display(_M.ui_en)
     if not _M.ui_en:get() then return end
-    _safe_display(_M.ui_mode);    _safe_display(_M.ui_verbose); _safe_display(_M.ui_debug)
-    _safe_display(_M.ui_pitch);   _safe_display(_M.ui_exploits);_safe_display(_M.ui_multipt)
-    _safe_display(_M.ui_log_scr); _safe_display(_M.ui_log_con)
-    _safe_display(_M.ui_suppress); if _M.ui_suppress:get() then _safe_display(_M.ui_sup_rng) end
-    _safe_display(_M.ui_jt);      _safe_display(_M.ui_conf_w); _safe_display(_M.ui_hist_w)
-    _safe_display(_M.lbl_method); _safe_display(_M.lbl_aa);    _safe_display(_M.lbl_desync)
-    _safe_display(_M.lbl_lby);    _safe_display(_M.lbl_streak);_safe_display(_M.lbl_conf)
-    _safe_display(_M.lbl_state);  _safe_display(_M.lbl_layers);_safe_display(_M.lbl_exploit)
+    _safe_display(_M.ui_mode)
+    _safe_display(_M.ui_state_mode)
+    _safe_display(_M.ui_brute_mode)
+    _safe_display(_M.ui_priority)
+    _safe_display(_M.ui_force_type)
+    _safe_display(_M.ui_jt)
+    _safe_display(_M.ui_conf_w)
+    _safe_display(_M.ui_hist_w)
+    _safe_display(_M.ui_brute_t)
+    _safe_display(_M.ui_miss_flip)
+    _safe_display(_M.ui_dscale)
+    _safe_display(_M.ui_sbias)
+    _safe_display(_M.ui_pitch)
+    _safe_display(_M.ui_exploits)
+    _safe_display(_M.ui_multipt)
+    _safe_display(_M.ui_afstand)
+    _safe_display(_M.ui_teleport)
+    _safe_display(_M.ui_spfilter)
+    _safe_display(_M.ui_suppress)
+    if _M.ui_suppress:get() then _safe_display(_M.ui_sup_rng) end
+    _safe_display(_M.ui_log_scr)
+    _safe_display(_M.ui_log_con)
+    _safe_display(_M.ui_desyncindicator)
+    _safe_display(_M.ui_verbose)
+    _safe_display(_M.ui_debug)
+    _safe_display(_M.lbl_nn)
+    _safe_display(_M.ui_nn_save)
+    _safe_display(_M.ui_nn_rst)
+    _safe_display(_M.ui_rst_btn)
+    _safe_display(_M.ui_rst_all)
+    _safe_display(_M.lbl_method)
+    _safe_display(_M.lbl_aa)
+    _safe_display(_M.lbl_desync)
+    _safe_display(_M.lbl_lby)
+    _safe_display(_M.lbl_streak)
+    _safe_display(_M.lbl_conf)
+    _safe_display(_M.lbl_state)
+    _safe_display(_M.lbl_layers)
+    _safe_display(_M.lbl_exploit)
 end
 
 end)()
