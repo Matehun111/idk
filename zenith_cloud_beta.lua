@@ -2794,7 +2794,9 @@ do
         end
 
         local double_tap = exploit.get()
-        if not work_on_mode or not double_tap.shift then
+        -- fire if any mode is active, or if we are choking (packets being held)
+        local is_choking = localplayer.choking_bool or localplayer.choking > 0
+        if not work_on_mode and not is_choking then
             return
         end
 
@@ -2941,10 +2943,6 @@ do
             if manual_yaw ~= nil and should_flick then
                 yaw_value = manual_bebra[ manual_yaw ] + client.random_float(0, 10)
             end
-        end
-
-        if globals.tickcount() > double_tap.defensive_tk - 2 then
-            return
         end
 
         if avoid_backstab.get() or should_ignore then
@@ -8829,12 +8827,12 @@ do
     local home = {}
     _G.__home = home
 
-    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff──  \aaaaaaaff S T A T S  \a555555ff──')
-    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '⏱  total  \a555555ff...')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '⏸  session  \a555555ff...')
-    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '◎  headshots  \a555555ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '✦  kills  \a555555ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '✕  misses at me  \a555555ff0')
+    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff--  \aaaaaaaff S T A T S  \a555555ff--')
+    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[T]  \a777777fftotal  \a555555ff...')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[S]  \a777777ffsession  \a555555ff...')
+    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[H]  \a777777ffheadshots  \a555555ff0%')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[K]  \a777777ffkills  \a555555ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[M]  \a777777ffmisses at me  \a555555ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -8872,11 +8870,11 @@ do
         end
         local tot = _get_total()
         local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
-        home.lbl_total:set(string.format('⏱  total  \a71bc78ff%.1f hrs', tot))
-        home.lbl_session:set(string.format('⏸  session  \a71bc78ff%d min', mins))
-        home.lbl_hs:set(string.format('◎  headshots  \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('✦  kills  \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('✕  misses at me  \a71bc78ff%d', _s_misses))
+        home.lbl_total:set(string.format('\a4799ffff[T]  \a777777fftotal  \a71bc78ff%.1f hrs', tot))
+        home.lbl_session:set(string.format('\a4799ffff[S]  \a777777ffsession  \a71bc78ff%d min', mins))
+        home.lbl_hs:set(string.format('\a4799ffff[H]  \a777777ffheadshots  \a71bc78ff%d%%', hs_pct))
+        home.lbl_kills:set(string.format('\a4799ffff[K]  \a777777ffkills  \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('\a4799ffff[M]  \a777777ffmisses at me  \a71bc78ff%d', _s_misses))
     end
 
     function home.show()

@@ -2815,7 +2815,9 @@ do
         end
 
         local double_tap = exploit.get()
-        if not work_on_mode or not double_tap.shift then
+        -- fire if any mode is active, or if we are choking (packets being held)
+        local is_choking = localplayer.choking_bool or localplayer.choking > 0
+        if not work_on_mode and not is_choking then
             return
         end
 
@@ -2962,10 +2964,6 @@ do
             if manual_yaw ~= nil and should_flick then
                 yaw_value = manual_bebra[ manual_yaw ] + client.random_float(0, 10)
             end
-        end
-
-        if globals.tickcount() > double_tap.defensive_tk - 2 then
-            return
         end
 
         if avoid_backstab.get() or should_ignore then
@@ -8855,12 +8853,12 @@ do
     local home = {}
     _G.__home = home
 
-    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff──  \aaaaaaaff S T A T S  \a555555ff──')
-    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '⏱  total  \a555555ff...')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '⏸  session  \a555555ff...')
-    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '◎  headshots  \a555555ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '✦  kills  \a555555ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '✕  misses at me  \a555555ff0')
+    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff--  \aaaaaaaff S T A T S  \a555555ff--')
+    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[T]  \a777777fftotal  \a555555ff...')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[S]  \a777777ffsession  \a555555ff...')
+    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[H]  \a777777ffheadshots  \a555555ff0%')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[K]  \a777777ffkills  \a555555ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[M]  \a777777ffmisses at me  \a555555ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -8898,11 +8896,11 @@ do
         end
         local tot = _get_total()
         local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
-        home.lbl_total:set(string.format('⏱  total  \a71bc78ff%.1f hrs', tot))
-        home.lbl_session:set(string.format('⏸  session  \a71bc78ff%d min', mins))
-        home.lbl_hs:set(string.format('◎  headshots  \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('✦  kills  \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('✕  misses at me  \a71bc78ff%d', _s_misses))
+        home.lbl_total:set(string.format('\a4799ffff[T]  \a777777fftotal  \a71bc78ff%.1f hrs', tot))
+        home.lbl_session:set(string.format('\a4799ffff[S]  \a777777ffsession  \a71bc78ff%d min', mins))
+        home.lbl_hs:set(string.format('\a4799ffff[H]  \a777777ffheadshots  \a71bc78ff%d%%', hs_pct))
+        home.lbl_kills:set(string.format('\a4799ffff[K]  \a777777ffkills  \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('\a4799ffff[M]  \a777777ffmisses at me  \a71bc78ff%d', _s_misses))
     end
 
     function home.show()
@@ -9833,13 +9831,8 @@ local _BRUTE_FAST  = {58,-58,0,38,-38,18,-18}  -- 7-stage fast sweep
 local _BRUTE_FULL  = {58,-58,54,-54,48,-48,44,-44,38,-38,32,-32,26,-26,20,-20,14,-14,8,-8,4,-4,0}  -- full
 local _BRUTE = _BRUTE_SMART  -- default
 local function _brute(d)
-    -- select sweep table based on mode
-    if _M.ui_brute_mode then
-        local bm=_M.ui_brute_mode:get()
-        if bm=='Fast' then _BRUTE=_BRUTE_FAST
-        elseif bm=='Full Sweep' then _BRUTE=_BRUTE_FULL
-        else _BRUTE=_BRUTE_SMART end
-    end
+    -- auto brute: always use smart adaptive ordering
+    _BRUTE=_BRUTE_SMART
     -- if we have a locked winning offset, use it
     if d.brute_locked and d.brute_best_off then
         d.method = 'brute_locked'
@@ -10119,21 +10112,20 @@ client.set_event_callback('paint',function()
         _conf_decay(d); d.conf_last_update=globals.curtime()
         local state=_gstate(ent); local ld=_gld(ent)
         local side,desync,conf
-        if d.fail_streak>=(_M.ui_brute_t and _M.ui_brute_t:get() or 5) or mode=='Bruteforce Only' then side,desync,conf=_brute(d)
+        -- auto brute threshold
+        local _auto_bt = d.aa_type=="Jitter" and 3
+            or d.aa_type=="Chaotic" and 2
+            or d.aa_type=="Static" and 6
+            or d.aa_type=="LBY" and 4
+            or 4
+        if d.fail_streak >= _auto_bt or eff_mode=='Brute Force' then side,desync,conf=_brute(d)
         elseif mode=='Hybrid Engine' then side,desync,conf=_hybrid(ent,d,state,ld,jt,decay)
         else side,desync,conf=_pattern(ent,d,state,ld,jt,decay) end
-        if conf<_M.ui_conf_w:get()/100 then side=d.side; desync=d.desync end
-        -- desync scale: user can nudge the resolved desync +-40%
-        if _M.ui_dscale then
-            local sc=_M.ui_dscale:get()/100
-            desync=_clamp(_fl(desync*sc),0,62)
-        end
-        -- side bias: force left/right if user set it
-        if _M.ui_sbias then
-            local sb=_M.ui_sbias:get()
-            if sb=='Force Left'  then side=1 end
-            if sb=='Force Right' then side=2 end
-        end
+        -- auto min confidence: higher for fresh targets, lower after misses
+        local auto_min_conf = d.fail_streak >= 3 and 0.30
+            or d.hit_count == 0 and 0.50
+            or 0.40
+        if conf < auto_min_conf then side=d.side; desync=d.desync end
         -- anti-freestand: flip side toward exposed side
         if _M.ui_afstand and _M.ui_afstand:get() then
             local fs=software.is_freestanding and software.is_freestanding() or false
@@ -10228,9 +10220,8 @@ client.set_event_callback('aim_miss',function(e)
     local state=_gstate(ent)
     d.miss_count=d.miss_count+1; d.fail_streak=d.fail_streak+1; d.hit_streak=0
     d.brute_stage=(d.brute_stage+1)%#_BRUTE
-    -- only flip side after miss_flip threshold
-    local miss_flip2=_M.ui_miss_flip and _M.ui_miss_flip:get() or 1
-    if d.fail_streak >= miss_flip2 then d.side=d.side==1 and 2 or 1 end
+    -- auto: always flip side immediately on miss
+    d.side=d.side==1 and 2 or 1
     _upd_adapt(d,d.side,d.desync); _upd_ss(d,state,false,d.side,d.desync)
     if d.aa_type=='Jitter' then d.jitter_phase=(d.jitter_phase+0.5)%1.0 end
     -- NN training on miss
@@ -10278,18 +10269,9 @@ _G.ZenithResolver_GetData=_db
 resolver_show_tab=function()
     _safe_display(_M.ui_en)
     if not _M.ui_en:get() then return end
+    -- mode selector only (jitter/hist/brute thresholds are auto)
     _safe_display(_M.ui_mode)
-    _safe_display(_M.ui_state_mode)
-    _safe_display(_M.ui_brute_mode)
-    _safe_display(_M.ui_priority)
-    _safe_display(_M.ui_force_type)
-    _safe_display(_M.ui_jt)
-    _safe_display(_M.ui_conf_w)
-    _safe_display(_M.ui_hist_w)
-    _safe_display(_M.ui_brute_t)
-    _safe_display(_M.ui_miss_flip)
-    _safe_display(_M.ui_dscale)
-    _safe_display(_M.ui_sbias)
+    -- feature toggles
     _safe_display(_M.ui_pitch)
     _safe_display(_M.ui_exploits)
     _safe_display(_M.ui_multipt)
@@ -10298,16 +10280,18 @@ resolver_show_tab=function()
     _safe_display(_M.ui_spfilter)
     _safe_display(_M.ui_suppress)
     if _M.ui_suppress:get() then _safe_display(_M.ui_sup_rng) end
+    -- logging
     _safe_display(_M.ui_log_scr)
     _safe_display(_M.ui_log_con)
     _safe_display(_M.ui_desyncindicator)
-    _safe_display(_M.ui_verbose)
-    _safe_display(_M.ui_debug)
+    -- nn
     _safe_display(_M.lbl_nn)
     _safe_display(_M.ui_nn_save)
     _safe_display(_M.ui_nn_rst)
+    -- tools
     _safe_display(_M.ui_rst_btn)
     _safe_display(_M.ui_rst_all)
+    -- live info (read-only)
     _safe_display(_M.lbl_method)
     _safe_display(_M.lbl_aa)
     _safe_display(_M.lbl_desync)
