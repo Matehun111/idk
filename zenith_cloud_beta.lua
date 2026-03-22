@@ -1008,7 +1008,7 @@ do
 
     -- Online users: increment on load, decrement on shutdown
     -- Uses counterapi.dev (free, reliable)
-    local _ns  = 'zenith-hvh-v2'
+    local _ns  = 'zenith-hvh-v3'
     local _key = 'online_users'
 
     local function _set_online(n)
