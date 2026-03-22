@@ -2646,7 +2646,7 @@ do
         end
 
         local double_tap = exploit.get()
-        if not work_on_mode or not double_tap.shift then
+        if not work_on_mode then
             return
         end
 

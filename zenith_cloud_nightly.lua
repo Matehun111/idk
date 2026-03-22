@@ -2828,9 +2828,8 @@ do
         end
 
         local double_tap = exploit.get()
-        -- fire if any mode is active, or if we are choking (packets being held)
-        local is_choking = localplayer.choking_bool or localplayer.choking > 0
-        if not work_on_mode and not is_choking then
+        -- only fire when an active mode (DT or OSAA) is currently triggered
+        if not work_on_mode then
             return
         end
 
