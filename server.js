@@ -83,7 +83,7 @@ function sign_ticket(key, hwid, plan, ticket_exp, nonce) {
 }
 
 app.use(cors())
-app.use(express.json())
+app.use(express.json({ limit: "10mb" }))
 
 // ── POST /admin/create ────────────────────────────────────────────────────
 app.post('/admin/create', async (req, res) => {
