@@ -1,3 +1,16 @@
+-- ======================================================================
+--  AUTH GUARD
+-- ======================================================================
+if not rawget(_G, "_auth_ok")      then error("auth missing")   end
+if not rawget(_G, "_auth_ticket")  then error("ticket missing") end
+if not rawget(_G, "_auth_nonce")   then error("nonce missing")  end
+if not rawget(_G, "BUILD_VERSION") then error("build missing")  end
+do
+    local exp = rawget(_G, "_auth_ticket_exp")
+    if type(exp) ~= "number" then error("ticket invalid") end
+end
+-- ======================================================================
+
 -- ZENITH | BETA | Cloud Build
 
 local function _safe_display(obj)
@@ -14,6 +27,7 @@ local function _safe_set_visible(obj, val)
     end
 end
 
+
 if not LPH_OBFUSCATED then
     LPH_NO_VIRTUALIZE = function(...) return ... end
 end
@@ -21,12 +35,15 @@ end
 local USERNAME = _auth_user or 'user'
 local BUILD    = BUILD_VERSION
 
+-- version gates
 local _HAS_AIMBOT   = (BUILD == 'beta' or BUILD == 'nightly')
 local _HAS_RESOLVER = (BUILD == 'nightly')
 
+--- declarations
 local f = string.format
 local merge = table.concat
 
+--- modules
 local ffi = require "ffi"
 local vector = require "vector"
 local http = require "gamesense/http"
@@ -74,6 +91,7 @@ local clipboard do
     clipboard.get = get
 end
 
+
 local oprint = print
 local function print(...)
     local res = ""
@@ -91,6 +109,7 @@ local function print_raw(r, g, b, ...)
     client.color_log(255, 255, 255, f(...))
 end
 
+--- defines
 local function contains(list, value)
     for i = 1, #list do
         if list[i] == value then
@@ -196,6 +215,7 @@ local hit_marker = { }
 local unmute = { }
 local shared = { }
 
+--- region utils
 do
     local escape = {
         ["="] = true,
@@ -416,6 +436,8 @@ local memory do
     end
 end
 
+--- region software
+
 LPH_NO_VIRTUALIZE(function ()
     do
         software.rage = {
@@ -556,6 +578,7 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
+--- region override
 do
     local data = { }
 
@@ -598,6 +621,7 @@ do
     end
 end
 
+--- region iengineclient
 do
     local native_GetNetChannelInfo = vtable_bind("engine.dll", "VEngineClient014", 78, "void*(__thiscall*)(void*)")
 
@@ -606,6 +630,7 @@ do
     end
 end
 
+--- region inetchannel
 do
     local native_IsLoopback = vtable_thunk(6, "bool(__thiscall*)(void*)")
     local native_IsTimingOut = vtable_thunk(7, "bool(__thiscall*)(void*)")
@@ -658,6 +683,7 @@ do
     end
 end
 
+--- region ceaser
 do
     local function ascii_base(s)
         if string.lower(s) == s then
@@ -682,6 +708,8 @@ do
         return ceasar.cipher(s, -key)
     end
 end
+
+--- region menu
 
 LPH_NO_VIRTUALIZE(function ()
     do
@@ -937,9 +965,12 @@ local zenith_config_system do
     end
 end
 
+
+-- ======================================================================
 --  ZENITH UI  -  Zenith pui tabs
 --  Pages: Home | Builder | Defensive | Visual | Misc | Configs
 --  (replaces the original gui.selection combobox approach)
+-- ======================================================================
 
 local required = require
 local pui = required 'gamesense/pui' or error('failed to load pui')
@@ -961,7 +992,7 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label   = group_fakelag:label('\a888888ff────  \affffffff Z E N I T H  \a888888ff────')
+    vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -989,10 +1020,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup     = group_fakelag:label(string.format('\a666666ff►  \affffffff%s', USERNAME))
-shared.fl_build       = group_fakelag:label(string.format('\a444444ffbuild  \a5599ffff%s', BUILD))
-shared.fl_online      = group_fakelag:label('\a444444ffonline  \affd700ff…')
-shared.fl_leaderboard = group_fakelag:label('\a444444ffkills  \a888888ff…')
+shared.fl_whatsup     = group_fakelag:label(string.format('\a77ff99ffWelcome, \aff9955ff%s\affffffff!', USERNAME))
+shared.fl_build       = group_fakelag:label(string.format('Build: \a77ccffff%s', BUILD))
+shared.fl_online      = group_fakelag:label('Online: \affd700ff...')
+shared.fl_leaderboard = group_fakelag:label('Leaderboard: ...')
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1005,16 +1036,24 @@ shared.online_label = {
 
 -- ── LOAD COUNTER + ONLINE ───────────────────────────────────────────
 do
+    -- Times Loaded: increment local counter each load
+    local _loads_key = 'zenith_total_loads_v1'
+    local ok_l, cur_loads = pcall(database.read, _loads_key)
+    cur_loads = (ok_l and type(cur_loads)=='number') and cur_loads or 0
+    cur_loads = cur_loads + 1
+    pcall(database.write, _loads_key, cur_loads)
+    -- value stored, will be applied when label is created below
+    rawset(_G, "_zenith_load_count", cur_loads)
 
     -- Online users: increment on load, decrement on shutdown
     -- Uses counterapi.dev (free, reliable)
-    local _ns  = 'zenith-hvh-v3'
+    local _ns  = 'zenith-hvh-v2'
     local _key = 'online_users'
 
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('\a444444ffonline  %s%d\affffffff', col, n))
+            shared.fl_online:set(string.format('Online: %s%d\affffffff', col, n))
         end
     end
 
@@ -1058,8 +1097,20 @@ do
     client.delay_call(2, _increment)
 end
 
+
+
+
+
+
+
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
 do
+    vars.statistics = {}
+
+    vars.statistics.label_info  = group_other:label('\f<dot>Information')
+    vars.statistics.user        = group_other:label('\f<dot>User: \v'..USERNAME)
+    vars.statistics.loaded      = group_other:label(string.format('\f<dot>Times Loaded: \v%d', _G._zenith_load_count or 0))
+    vars.statistics.time_in_game= group_other:label('\f<dot>Session: ')
 end
 
 -- ── HELPERS (Zenith helpers table) ───────────────────────────────────
@@ -1165,8 +1216,7 @@ helpers['functions'] = {
     end,
     fade_handle2 = function(self, time, str, r, g, b, a)
         a = a or 255
-        -- animate between accent blue and deep blue
-        local c1,c2,c3 = 20, 50, 120
+        local c1,c2,c3 = 32, 32, 32
         local t_out, t_iter = {}, 1
         local ra=(c1-r); local ga=(c2-g); local ba=(c3-b)
         for i=1,#str do
@@ -1190,6 +1240,20 @@ helpers['functions'] = {
         end
         self.prev_side=self.side
         return self.side
+    end,
+    update_session = function(self)
+        local rt = globals.realtime()
+        local h = math.floor(rt/3600)
+        local m = math.floor(rt/60)
+        local s = math.floor(rt)
+        local text
+        if s==1 and h<1 and m<1 then text=s.." Second"
+        elseif s>=2 and h<1 and m<1 then text=s.." Seconds"
+        elseif m>=2 and h<1 then text=m.." Minutes"
+        elseif m==1 and h<1 then text=m.." Minute"
+        elseif h<2 then text=h.." Hour"
+        else text=h.." Hours" end
+        vars.statistics.time_in_game:set('\f<dot>Session: \v'..text)
     end,
     animations = (function()
         local a={data={}}
@@ -1223,6 +1287,9 @@ helpers['functions'] = {
             and math.abs(entity.get_prop(index,'m_nTickBase')-self.defensive_ticks)<14
     end,
 }
+
+
+
 
 -- ── HIDE NATIVE AA CONTROLS (mirrors Zenith hide_menu) ───────────────
 hide_menu = function(state)
@@ -1262,12 +1329,11 @@ client.set_event_callback('paint_ui', function()
     if entity.get_local_player() == nil then helpers['functions'].defensive_ticks = 0 end
     if not ui.is_menu_open() then return end
 
+    helpers['functions']:update_session()
     hide_menu(false)
 
     local ref = software.misc.settings.menu_color
-    -- force menu color to Zenith blue
-    pcall(ui.set, ref, 71, 152, 255, 255)
-    local r, g, b, a = 71, 152, 255, 255
+    local r, g, b, a = ui.get(ref)
     local water_ui = helpers['functions']:fade_handle2(-globals.curtime(), '  Z  E  N  I  T  H', r, g, b)
     vars.selection.label:set("                    "..table.concat(water_ui))
 end)
@@ -1291,8 +1357,8 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"⌂  Home", "◆  Builder", "❈  Defensive", "◉  Visual", "☰  Misc", "⚙  Configs"}
-    if _HAS_AIMBOT then table.insert(pages, 4, "◎  Aimbot") end
+    local pages = {"Home", "Builder", "Defensive", "Visual", "Misc", "Configs"}
+    if _HAS_AIMBOT then table.insert(pages, 4, "Aimbot") end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -1328,6 +1394,7 @@ if not _HAS_AIMBOT then
     end)
 end
 
+--- region motion
 do
     local function linear(t, b, c, d)
         return c * t / d + b
@@ -1374,6 +1441,7 @@ do
 end
 
 LPH_NO_VIRTUALIZE(function ()
+    --- region windows
     do
         local data = { }
         local queue = { }
@@ -1603,6 +1671,7 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
+--- region graphics
 do
     local alpha_unit = 1 / 255
 
@@ -1730,6 +1799,7 @@ do
     end
 end
 
+--- region decorations
 do
     local function u8(s)
         return string.gsub(s, "[\128-\191]", "")
@@ -1765,6 +1835,7 @@ do
     end
 end
 
+--- region exploit
 do
     local LAG_COMPENSATION_TELEPORTED_DISTANCE_SQR = 64 * 64
 
@@ -1880,6 +1951,7 @@ do
     end
 end
 
+--- region localplayer
 do
     local MOVING_LIMIT = 1.1 * 3.3
     local DUCK_PEEK_LIMIT = 0.79
@@ -1960,6 +2032,7 @@ do
     end
 end
 
+--- region statement
 do
     local list = { }
 
@@ -2039,17 +2112,15 @@ do
     end
 end
 
+--- region antiaim
 do
     local ctx = { }
 
     local zenithyaw_ways = {
-    ["2-Way"] = { -0.5, 0.5 },
-    ["3-Way"] = { -0.5, 0, 0.5 },
-    ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 },
-    ["7-Way"] = { -1, -0.57, -0.28, 0, 0.28, 0.57, 1 },
-    ["Chaos"] = { -1, -0.72, -0.44, -0.16, 0.16, 0.44, 0.72, 1 }
-}
-local _chaos_jitter_seed = 0
+        ["2-Way"] = { -0.5, 0.5 },
+        ["3-Way"] = { -0.5, 0, 0.5 },
+        ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 }
+    }
 
     local function calculate_jitter_way(n, offset)
         local fmod = localplayer.packets % n
@@ -2123,23 +2194,6 @@ local _chaos_jitter_seed = 0
         end
     end
 
-        -- velocity jitter bias: lean jitter toward strafe direction
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off' then
-            local lp = entity.get_local_player()
-            if lp then
-                local vx = entity.get_prop(lp, 'm_vecVelocity[0]') or 0
-                local vy = entity.get_prop(lp, 'm_vecVelocity[1]') or 0
-                local spd = math.sqrt(vx*vx + vy*vy)
-                if spd > 20 then
-                    local eye_yaw = localplayer.angles and localplayer.angles.y or 0
-                    local vel_yaw = math.deg(math.atan2(vy, vx))
-                    local rel = ((vel_yaw - eye_yaw + 180) % 360) - 180
-                    local bias = rel > 0 and math.min(spd * 0.04, 8) or -math.min(spd * 0.04, 8)
-                    ctx.yaw_offset = (ctx.yaw_offset or 0) + bias
-                end
-            end
-        end
-
     local safe_head_presets = {
         [1] = {
             [3] = {
@@ -2166,54 +2220,6 @@ local _chaos_jitter_seed = 0
     local randomized
     local val = 180
     local function modify_jitter()
-        -- micro-jitter: add tiny noise every tick to prevent stable tracking
-        -- suppressed during auto-peek so the shot goes exactly where aimed
-        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off'
-        and not ctx._suppress_micro_jitter then
-            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
-        end
-
-        -- desync shift: flip jitter_offset sign every 18-26 ticks
-        -- makes the desync amount itself cycle, not just the direction
-        -- resolvers that pattern-match offset magnitude will mispredict
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
-        and ctx.jitter_offset ~= nil then
-            local shift_cycle = 22
-            local phase = globals.tickcount() % shift_cycle
-            if phase < shift_cycle * 0.45 then
-                -- normal phase: use jitter_offset as-is
-            elseif phase < shift_cycle * 0.55 then
-                -- transition zone: briefly reduce to confuse pattern analysis
-                ctx.jitter_offset = ctx.jitter_offset * 0.35
-            else
-                -- shifted phase: mirror the offset
-                ctx.jitter_offset = -ctx.jitter_offset
-            end
-        end
-
-        -- micro-jitter: add tiny noise every tick to prevent stable tracking
-        -- suppressed during auto-peek so the shot goes exactly where aimed
-        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off'
-        and not ctx._suppress_micro_jitter then
-            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
-        end
-
-        -- desync shift: flip jitter_offset sign every 22 ticks
-        -- makes the desync amount itself cycle, not just the direction
-        -- resolvers that pattern-match offset magnitude will mispredict
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
-        and ctx.jitter_offset ~= nil then
-            local shift_cycle = 22
-            local phase = globals.tickcount() % shift_cycle
-            if phase < shift_cycle * 0.45 then
-                -- normal phase: use jitter_offset as-is
-            elseif phase < shift_cycle * 0.55 then
-                ctx.jitter_offset = ctx.jitter_offset * 0.35
-            else
-                ctx.jitter_offset = -ctx.jitter_offset
-            end
-        end
-
         if ctx.jitter_randomization ~= nil then
             if localplayer.packets % 2 == 0 or randomized == nil then
                 randomized = client.random_int(0, (ctx.jitter_offset > 0 and 1 or -1) * ctx.jitter_randomization)
@@ -2224,18 +2230,13 @@ local _chaos_jitter_seed = 0
 
         if ctx.body_yaw == 'Randomize Jitter' then
             ctx.body_yaw = 'Static'
+
             if localplayer.choking_bool then
                 local rand = client.random_int(0, 1)
                 val = rand == 1 and 180 or -180
             end
+
             ctx.body_yaw_offset = val
-        elseif ctx.body_yaw == 'Ghost' then
-            -- Ghost: body yaw goes OPPOSITE to the current yaw offset
-            -- makes body-based resolvers predict the wrong real side
-            ctx.body_yaw = 'Static'
-            local cur_off = ctx.yaw_offset or 0
-            -- if we're offset right, body yaw says left and vice versa
-            ctx.body_yaw_offset = cur_off > 0 and -180 or 180
         end
 
         if ctx.yaw_jitter == "Zenith" then
@@ -2250,19 +2251,10 @@ local _chaos_jitter_seed = 0
             local zenith_delay = ctx.zenith_delay
 
             local ways = zenithyaw_ways[zenith_mode]
-            local way
-            if zenith_mode == 'Chaos' then
-                -- Chaos: seed mixes tick + packets + body yaw for non-repeating pattern
-                _chaos_jitter_seed = (_chaos_jitter_seed
-                    + globals.tickcount() * 7
-                    + localplayer.packets * 13
-                    + math.floor(math.abs(localplayer.body_yaw or 0))) % #ways
-                way = ways[_chaos_jitter_seed + 1]
-            else
-                way = ways[(localplayer.packets % #ways) + 1]
-            end
+            local way = ways[(localplayer.packets % #ways) + 1]
 
             -- god ( qhose ) forgive me for the piece of code below
+            --- region lulz diagnostics disable@
 
             local byaw = localplayer.body_yaw
 
@@ -2301,6 +2293,7 @@ local _chaos_jitter_seed = 0
                 else
                     angle = utils.normalize_yaw(yaw + ctx.jitter_offset * way)
                 end
+
 
                 delay_data.previous_angle = angle
             end
@@ -2457,136 +2450,7 @@ local _chaos_jitter_seed = 0
     end
 end
 
-do
-    local _last_hurt_tick = 0
-    local _flip_body_next = false
-
-    client.set_event_callback('player_hurt', function(e)
-        local lp = entity.get_local_player()
-        if not lp then return end
-        local lp_uid = entity.get_prop(lp, 'm_iUserId')
-        if e.userid == lp_uid then
-            -- WE got hurt: schedule a body yaw flip for next 4 ticks
-            -- breaks enemy resolver side-confirmation
-            if angles and angles.type and angles.type:get() ~= 'Off' then
-                _flip_body_next = true
-                _last_hurt_tick = globals.tickcount()
-            end
-        end
-    end)
-
-    client.set_event_callback('setup_command', function()
-        if not _flip_body_next then return end
-        if globals.tickcount() - _last_hurt_tick > 4 then
-            _flip_body_next = false
-            return
-        end
-        -- flip body yaw for these ticks so their resolver loses confidence
-        local ok, cur = pcall(ui.get, software.aa.angles.body_yaw[1])
-        if ok and cur and cur ~= 'Off' then
-            local ok2, cur_off = pcall(ui.get, software.aa.angles.body_yaw[2])
-            if ok2 and cur_off then
-                pcall(override.set, software.aa.angles.body_yaw[2],
-                    cur_off > 0 and -180 or 180)
-            end
-        end
-    end)
-end
-
-do
-    -- Lag Peak: when you fire a shot, spike the fake lag to maximum for 1 tick
-    -- The shot arrives during a different lagcomp window than the enemy expects,
-    -- making it harder for their aimbot to compensate for your real position.
-    -- Works best combined with Double Tap.
-
-    local lp_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Lag Peak")
-        :record("aa", "lagpeak::enabled"):save()
-
-    local lp_amount  = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Peak Amount", "\n", "lagpeak::amount" }, 1, 14, 14, true, "t")
-        :record("aa", "lagpeak::amount"):save()
-
-    local lp_recover = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Recover Ticks", "\n", "lagpeak::recover" }, 1, 6, 2, true, "t")
-        :record("aa", "lagpeak::recover"):save()
-
-    local lp_on_dt   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "- Only on DT")
-        :record("aa", "lagpeak::on_dt"):save()
-
-    local lp_on_miss = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Only on Miss")
-        :record("aa", "lagpeak::on_miss"):save()
-
-    -- update show function to include on_miss
-
-    _G.__lagpeak_show = function()
-        _safe_display(lp_enabled)
-        if lp_enabled:get() then
-            _safe_display(lp_amount)
-            _safe_display(lp_recover)
-            _safe_display(lp_on_dt)
-            _safe_display(lp_on_miss)
-        end
-    end
-
-    local _lp_fire_tick  = -999
-    local _lp_orig_limit = nil
-    local _lp_orig_var   = nil
-    local _lp_spiking    = false
-    local _lp_spike_end  = -1
-
-    -- trigger lag peak on miss too
-    client.set_event_callback("aim_miss", function(e)
-        if not lp_enabled:get() then return end
-        if not (lp_on_miss and lp_on_miss:get()) then return end
-        local fl = software and software.aa and software.aa.fakelag
-        if not fl then return end
-        pcall(function()
-            _lp_orig_limit = ui.get(fl.limit)
-            _lp_orig_var   = ui.get(fl.variance)
-        end)
-        pcall(ui.set, fl.limit,    lp_amount:get())
-        pcall(ui.set, fl.variance, 0)
-        _lp_spiking   = true
-        _lp_fire_tick = globals.tickcount()
-        _lp_spike_end = _lp_fire_tick + lp_recover:get()
-    end)
-
-    client.set_event_callback("aim_fire", function(e)
-        if not lp_enabled:get() then return end
-        if lp_on_dt:get() and not software.is_double_tap() then return end
-        local fl = software and software.aa and software.aa.fakelag
-        if not fl then return end
-        -- save current limit before spike
-        pcall(function()
-            _lp_orig_limit = ui.get(fl.limit)
-            _lp_orig_var   = ui.get(fl.variance)
-        end)
-        -- spike: set fake lag to peak amount
-        pcall(ui.set, fl.limit,    lp_amount:get())
-        pcall(ui.set, fl.variance, 0)  -- no variance during spike
-        _lp_spiking   = true
-        _lp_fire_tick = globals.tickcount()
-        _lp_spike_end = _lp_fire_tick + lp_recover:get()
-    end)
-
-    client.set_event_callback("setup_command", function()
-        if not lp_enabled:get() then return end
-        if not _lp_spiking then return end
-        local fl = software and software.aa and software.aa.fakelag
-        if not fl then return end
-        -- restore original limit after recover ticks
-        if globals.tickcount() >= _lp_spike_end then
-            if _lp_orig_limit ~= nil then
-                pcall(ui.set, fl.limit,    _lp_orig_limit)
-                pcall(ui.set, fl.variance, _lp_orig_var or 0)
-            end
-            _lp_spiking   = false
-            _lp_orig_limit = nil
-            _lp_orig_var   = nil
-        end
-    end)
-end
-
+---region settings tweaks
 do
     settings.tweaks_enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Features")
     : record("settings", "settings::tweaks_enable")
@@ -2597,12 +2461,13 @@ do
     : save()
 end
 
+--- region widgets
 do
     widgets.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Widgets")
     : record("visuals", "widgets::enabled")
     : save()
 
-    widgets.color_picker = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", merge { "- Color", "\n", "widgets::color_picker" }, 71, 152, 255, 255)
+    widgets.color_picker = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", merge { "- Color", "\n", "widgets::color_picker" }, 113, 152, 255, 255)
     : record("visuals", "keybinds::color_picker")
     : save()
 
@@ -2623,6 +2488,7 @@ do
     : save()
 end
 
+--- region fast ladder
 do
     aa_tweaks.enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Tweaks")
     : record("settings", "aa_tweaks::enable")
@@ -2703,6 +2569,7 @@ do
     end)
 end
 
+--- region defensive
 do
     local function get_statement()
         if localplayer.is_airborne then
@@ -2736,22 +2603,12 @@ do
     : record("aa", "defensive::state")
     : save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Snap Pitch", "Fake Up" })
+    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch" })
     : record("aa", "defensive::pitch")
     : save()
 
-    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random", "Snap", "Snap Jitter" })
-    : record("aa", "defensive::yaw")
-    : save()
-
-    defensive.snap_range = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Snap Range", "\n", "defensive::snap_range" }, 45, 180, 120, true, "deg", 1)
-    : record("aa", "defensive::snap_range")
-    : save()
-
-    defensive.snap_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Snap Offset", "\n", "defensive::snap_offset" }, -180, 180, 90, true, "deg", 1)
-    : record("aa", "defensive::snap_offset")
+    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random" })
+    : record("aa", "defensive::pitch")
     : save()
 
     local modes = {
@@ -2769,11 +2626,6 @@ do
     local defensive_5_way = { 90, 135, 180, 225, 270 }
     local defensive_7_way = { 0, 51, 102, 154, 205, 257, 308 }
     local _chaos_seed      = 0
-    local _snap_last_tick   = -999
-    local _snap_pitch_val   = 0
-    local _snap_pitch_tick  = -999
-    local _snap_last_offset = 0
-    local _snap_jitter_side = 1
 
     function defensive.handle(cmd, ctx)
         if not defensive.enabled:get() then
@@ -2794,9 +2646,7 @@ do
         end
 
         local double_tap = exploit.get()
-        -- fire if any mode is active, or if we are choking (packets being held)
-        local is_choking = localplayer.choking_bool or localplayer.choking > 0
-        if not work_on_mode and not is_choking then
+        if not work_on_mode or not double_tap.shift then
             return
         end
 
@@ -2867,25 +2717,6 @@ do
                 local tick = globals.tickcount()
                 pitch_value = (tick % 2 == 0) and client.random_float(-75, -55) or client.random_float(55, 75)
                 pitch_mode  = 'Custom'
-            elseif val == 'Snap Pitch' then
-                -- picks a completely new random extreme pitch on each defensive tick
-                -- and locks it for that choke window - makes head snap to unexpected height
-                local tc = globals.tickcount()
-                if tc ~= _snap_pitch_tick then
-                    -- snap to either far up or far down, randomly chosen each tick
-                    -- this makes it impossible to predict which height to aim at
-                    local extremes = { -89, -75, -60, 60, 75, 89 }
-                    _snap_pitch_val  = extremes[math.random(1, #extremes)]
-                    _snap_pitch_tick = tc
-                end
-                pitch_value = _snap_pitch_val
-                pitch_mode  = 'Custom'
-            elseif val == 'Fake Up' then
-                -- pitch slightly up (not full 89) to move head out of easy shot placement
-                -- without being so extreme it looks obvious
-                -- combines well with Snap yaw since the head moves both axes
-                pitch_value = client.random_float(-58, -42)
-                pitch_mode  = 'Custom'
             end
 
             if manual_yaw ~= nil and should_flick then
@@ -2914,35 +2745,17 @@ do
                 yaw_value   = utils.normalize(_chaos_seed - 180, -180, 180)
             elseif val == 'Random' then
                 yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
-            elseif val == 'Snap' then
-                local tc = globals.tickcount()
-                if tc ~= _snap_last_tick then
-                    local range  = defensive.snap_range:get()
-                    local offset = defensive.snap_offset:get()
-                    local snap_dir = (localplayer.packets % 2 == 0) and 1 or -1
-                    _snap_last_offset = utils.normalize(
-                        offset + snap_dir * (range * 0.5 + client.random_float(0, range * 0.5)),
-                        -180, 180)
-                    _snap_last_tick = tc
-                end
-                yaw_value = _snap_last_offset
-            elseif val == 'Snap Jitter' then
-                local tc = globals.tickcount()
-                local range  = defensive.snap_range:get()
-                local offset = defensive.snap_offset:get()
-                if tc ~= _snap_last_tick then
-                    _snap_jitter_side = (_snap_jitter_side == 1) and -1 or 1
-                    _snap_last_tick = tc
-                end
-                local flip = (localplayer.packets % 2 == 0) and 1 or -1
-                yaw_value = utils.normalize(
-                    offset * _snap_jitter_side * flip + client.random_float(-15, 15),
-                    -180, 180)
             end
 
             if manual_yaw ~= nil and should_flick then
                 yaw_value = manual_bebra[ manual_yaw ] + client.random_float(0, 10)
             end
+        end
+
+        -- client.color_log(255, 255, 255, f('\nDefensive: %s\nShould Ignore: %s\nAvoid Backstab: %s\nForce Defensive: %s\nFreestanding: %s', globals.tickcount() > double_tap.defensive_tk - 2, should_ignore, avoid_backstab.get(), cmd.force_defensive, software.is_freestanding()))
+
+        if globals.tickcount() > double_tap.defensive_tk - 2 then
+            return
         end
 
         if avoid_backstab.get() or should_ignore then
@@ -2956,6 +2769,7 @@ do
     end
 end
 
+---region disable on warmup
 do
 
     function disablers.count_alive()
@@ -2976,6 +2790,7 @@ do
 
         return alive
     end
+
 
     function disablers.update(cmd, ctx)
         local lp = entity.get_local_player()
@@ -3012,11 +2827,10 @@ do
     end
 end
 
+--- region avoid_backstab
 do
     local is_active = false
-    -- configurable range: 180 (tight) to 350 (paranoid)
-    -- 220 is default CS:GO knife range + small buffer
-    local AVOID_BACKSTAB_MAX_DISTANCE_SQR = 260 * 260
+    local AVOID_BACKSTAB_MAX_DISTANCE_SQR = 220 * 220
 
     local function get_enemies_with_knife()
         local enemies = entity.get_players(true)
@@ -3034,19 +2848,7 @@ do
 
             local wpn_class = entity.get_classname(wpn)
 
-            -- detect all melee + taser threats
-            local is_melee = wpn_class == "CKnife"
-                or wpn_class == "CKnifeGG"
-                or wpn_class == "CKnifeCT"
-                or wpn_class == "CKnifeT"
-                or wpn_class == "CKnifeGhost"
-                or wpn_class == "CKnifeFalchion"
-                or wpn_class == "CKnifeButterfly"
-                or wpn_class == "CKnifeKarambit"
-                or wpn_class == "CKnifeBowie"
-                or wpn_class == "CKnifeBayonet"
-                or wpn_class == "CEliteWeapon"
-            if is_melee then
+            if wpn_class == "CKnife" then
                 list[#list + 1] = enemy
             end
 
@@ -3123,64 +2925,40 @@ do
     end
 end
 
+--- region safe_head
 do
     local is_active = false
 
     local presets = {
         ["Standing"] = {
             [2] = function(e, ctx, me)
-                -- lean slightly left, body says right = harder to trace
-                ctx.yaw_offset = -18
+                ctx.yaw_offset = -6
+
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
+                ctx.body_yaw_offset = 0
             end,
 
             [3] = function(e, ctx, me)
-                ctx.yaw_offset = 22
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
-            end
-        },
+                ctx.yaw_offset = 8
 
-        ["Moving"] = {
-            [2] = function(e, ctx, me)
-                ctx.yaw_offset = -14
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
-            end,
-
-            [3] = function(e, ctx, me)
-                ctx.yaw_offset = 14
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
-            end
-        },
-
-        ["Slow Walk"] = {
-            [2] = function(e, ctx, me)
-                ctx.yaw_offset = -20
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
-            end,
-
-            [3] = function(e, ctx, me)
-                ctx.yaw_offset = 20
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
+                ctx.body_yaw_offset = 0
             end
         },
 
         ["Crouched"] = {
             [2] = function(e, ctx, me)
-                ctx.yaw_offset = -10
+                ctx.yaw_offset = 0
+
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
+                ctx.body_yaw_offset = 0
             end,
 
             [3] = function(e, ctx, me)
-                ctx.yaw_offset = 45
+                ctx.yaw_offset = 40
+
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
+                ctx.body_yaw_offset = 180
             end
         },
 
@@ -3386,6 +3164,7 @@ do
     end
 end
 
+--- region manual_yaw
 do
     local LEFT    = 0
     local RIGHT   = 1
@@ -3540,6 +3319,7 @@ do
     end
 end
 
+--- region log_aimbot_shots
 do
     local DURATION = 7.0
 
@@ -3782,6 +3562,7 @@ do
     end
 end
 
+--- region eventlogs [fancy]
 do
     local ALPHA_UNIT   = 1 / 255
 
@@ -4155,6 +3936,7 @@ local print_dev do
     })
 end
 
+---region log aim 4ots
 do
     local hitgroup_str = {
         [0] = 'generic',
@@ -4423,6 +4205,7 @@ end
 --     end)
 -- end
 
+---region неопознан
 do
     local shots do
         shots = {
@@ -4470,13 +4253,15 @@ do
 
 end
 
+
+---region autopeek
 do
     function auto_peek.perform(ctx)
         if not aa_tweaks.enable:get() then
             return
         end
 
-        if not aa_tweaks.items:have_key('Auto Peek Improvements') then
+        if not aa_tweaks.items:have_key('Auto Peek Improvements')  then
             return
         end
 
@@ -4484,19 +4269,15 @@ do
             return
         end
 
-        -- clean shot position: zero all jitter so bullet goes exactly where aimed
-        ctx.yaw_offset       = 0
-        ctx.yaw_jitter       = 'Off'
-        ctx.body_yaw         = 'Static'
-        ctx.body_yaw_offset  = 0
-        ctx.freestanding     = true
-        ctx.pitch            = 'Default'
-        -- disable micro-jitter during peek shot
-        ctx._suppress_micro_jitter = true
+        ctx.yaw_offset = 0
+        ctx.yaw_jitter = 'Off'
+        ctx.body_yaw = 'Off'
+        ctx.freestanding = true
     end
 end
 
 LPH_NO_VIRTUALIZE(function ()
+        --- region watermark
     do
         local FRAMERATE_AVG_FRAC = 0.9
 
@@ -4679,12 +4460,13 @@ LPH_NO_VIRTUALIZE(function ()
             graphics.text(
                 pos.x + left_padding + offset.x - 1,
                 pos.y + (rect_size.y - text_size.y) * 0.5,
-                71, 152, 255, 255 * alpha,
+                255, 255, 255, 255 * alpha,
                 flags, 0, text
             )
         end
     end
 
+        --- region keybinds
     do
         local alpha = 0.0
         local width = 0.0
@@ -5023,6 +4805,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
+        --- region indicators
     do
         local alpha = 0.0
         local align = 0.0
@@ -5258,6 +5041,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
+        ---region arrows
     do
         local alpha = 0
         local left_alpha = 0
@@ -5302,6 +5086,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
+        --- region velocity_warning
     do
         local alpha = 0.0
         local holding = 0.0
@@ -5408,6 +5193,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
+        --- region custom scope
     do
         custom_scope.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Scope Overlay")
         : record("aa", "custom_scope::enabled")
@@ -5502,12 +5288,15 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
+--- region console filter
 do
+
 
     defer(function ()
     end)
 end
 
+---region
 do
     anim_breakers.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Animation Breakers")
     : record("aa", "anim_breakers::enabled")
@@ -5585,6 +5374,7 @@ do
     end)
 end
 
+--- region angles
 do
     local function set_custom_list(ctx, list)
         if list.pitch ~= nil then
@@ -5702,7 +5492,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "yaw_jitter" })
             : save()
 
-            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way", "7-Way", "Chaos" })
+            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way" })
             : record("aa", merge { "custom", "::", state, "::", "jitter_mode" })
             : save()
 
@@ -5726,7 +5516,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "zenith_safe" })
             : save()
 
-            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", "Randomize Jitter", "Ghost", "Ghost", 'Randomize Jitter' })
+            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", 'Randomize Jitter' })
             : record("aa", merge { "custom", "::", state, "::", "body_yaw" })
             : save()
 
@@ -5737,6 +5527,7 @@ do
             list.freestanding_body_yaw = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Freestanding body yaw", "\n", "custom_", "freestanding_body_yaw_", state })
             : record("aa", merge { "custom", "::", state, "::", "freestanding_body_yaw" })
             : save()
+
 
             list.zenith_safe:set_callback(reset_delay)
             list.zenith_delay:set_callback(reset_delay)
@@ -5751,16 +5542,16 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 14
+            ctx.yaw_offset = 12
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '7-Way'  -- 7-way is harder to resolve than 3-way
-            ctx.jitter_offset = 48
-            ctx.jitter_randomization = 32
-            ctx.zenith_cycle = 20
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 45
+            ctx.jitter_randomization = 28
+            ctx.zenith_cycle = 22
             ctx.zenith_delay = 14
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'  -- body yaw lies about real side
-            ctx.body_yaw_offset = -180
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -50
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5787,14 +5578,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 5
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = 'Chaos'  -- Chaos = non-repeating pattern
-            ctx.jitter_offset = 72
-            ctx.jitter_randomization = 38
-            ctx.zenith_cycle = 12
-            ctx.zenith_delay = 8
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 70
+            ctx.jitter_randomization = 35
+            ctx.zenith_cycle = 14
+            ctx.zenith_delay = 10
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -55
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5802,16 +5593,16 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 10
+            ctx.yaw_offset = 8
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '7-Way'
-            ctx.jitter_offset = 68
-            ctx.jitter_randomization = 34
-            ctx.zenith_cycle = 18
-            ctx.zenith_delay = 14
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 65
+            ctx.jitter_randomization = 30
+            ctx.zenith_cycle = 20
+            ctx.zenith_delay = 16
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -50
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5821,14 +5612,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 6
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = 'Chaos'
-            ctx.jitter_offset = 60
-            ctx.jitter_randomization = 28
-            ctx.zenith_cycle = 14
-            ctx.zenith_delay = 10
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 58
+            ctx.jitter_randomization = 24
+            ctx.zenith_cycle = 16
+            ctx.zenith_delay = 12
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -45
         end,
 
         ['Air'] = function (ctx)
@@ -5838,11 +5629,11 @@ do
             ctx.yaw_180lr_mode = 'Switch delay'
             ctx.yaw_offset = 4
             ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '5-Way'
-            ctx.jitter_offset = 44
-            ctx.jitter_randomization = 24
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 38
+            ctx.jitter_randomization = 20
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -40
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5853,11 +5644,11 @@ do
             ctx.yaw_180lr_mode = 'Switch delay'
             ctx.yaw_offset = 4
             ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '5-Way'
-            ctx.jitter_offset = 44
-            ctx.jitter_randomization = 24
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
+            ctx.jitter_mode = '3-Way'
+            ctx.jitter_offset = 38
+            ctx.jitter_randomization = 20
+            ctx.body_yaw = 'Randomize Jitter'
+            ctx.body_yaw_offset = -40
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5867,14 +5658,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 0
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '7-Way'
-            ctx.jitter_offset = 38
-            ctx.jitter_randomization = 22
+            ctx.jitter_mode = '2-Way'
+            ctx.jitter_offset = 30
+            ctx.jitter_randomization = 18
             ctx.zenith_cycle = 10
             ctx.zenith_delay = 8
             ctx.zenith_safe = false
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
+            ctx.body_yaw = 'Opposite'
+            ctx.body_yaw_offset = 0
             ctx.freestanding_body_yaw = true
         end
     }
@@ -5927,6 +5718,7 @@ do
     end
 end
 
+--- region yaw_direction
 do
 
     yaw_direction.edge_yaw = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", merge { "Edge Yaw", "\n", "yaw_direction::edge_yaw" })
@@ -5954,6 +5746,7 @@ do
     end
 end
 
+--- region freestqand disaskdfkskd
 do
     local function get_statement()
         if localplayer.is_airborne then
@@ -6299,6 +6092,8 @@ do
     end
 end
 
+
+--- region killsay
 do
     -- ── default line pool ─────────────────────────────────────────────
     local _ks_default = {
@@ -6307,24 +6102,7 @@ do
         'outplayed', 'cry about it', 'too easy', 'go next',
         'rekt', 'kys', 'mad?', 'sit', 'done', 'bye',
         'no shot', 'clean', 'diff', 'pack it up',
-        'u good?', 'next', 'lmao', 'terrible', 'W',
-        'bro really tried', 'stay down', 'touch grass',
     }
-
-    local _ks_awp = {
-        'awp diff', 'big green W', 'one shot wonder',
-        'did u even see that coming', 'click click dead',
-        'scoped in on ur soul', 'bolt action diff',
-    }
-
-    local _ks_multi = {
-        'double', 'two for one', 'double tap diff',
-        'cluttered', 'they came in pairs', 'buy better positions',
-        'RAMPAGE', 'stop feeding', 'ace incoming',
-    }
-
-    local _ks_rapid_kills = 0
-    local _ks_last_kill_t = 0
 
     -- ── headshot-specific pool ────────────────────────────────────────
     local _ks_headshot = {
@@ -6368,24 +6146,12 @@ do
     local _ks_kill_queue = {}   -- { is_headshot, is_knife }
 
     -- ── pick a line ───────────────────────────────────────────────────
-    local function _ks_pick(is_headshot, is_knife, is_awp, mode)
+    local function _ks_pick(is_headshot, is_knife, mode)
         -- custom line overrides everything if enabled
         local custom_en = ks_custom_en and ks_custom_en:get()
         if custom_en then
             local ok, txt = pcall(ui.get, ks_custom.ref)
             if ok and txt and txt ~= '' then return txt end
-        end
-
-        -- multi-kill pool: 3+ kills in 8 seconds
-        local now = globals.realtime()
-        if now - _ks_last_kill_t < 8 then
-            _ks_rapid_kills = _ks_rapid_kills + 1
-        else
-            _ks_rapid_kills = 1
-        end
-        _ks_last_kill_t = now
-        if _ks_rapid_kills >= 3 then
-            return _ks_multi[math.random(#_ks_multi)]
         end
 
         local pool = _ks_default
@@ -6396,7 +6162,6 @@ do
         elseif mode == 'All Aware' then
             if is_headshot      then pool = _ks_headshot
             elseif is_knife     then pool = _ks_knife
-            elseif is_awp       then pool = _ks_awp
             end
         end
 
@@ -6415,17 +6180,14 @@ do
         local victim = client.userid_to_entindex(e.userid)
         if victim and not entity.is_enemy(victim) then return end
 
-        -- weapon check
-        local wpn     = entity.get_player_weapon(me)
-        local wpn_id  = wpn and bit.band(entity.get_prop(wpn,'m_iItemDefinitionIndex') or 0, 0xFFFF) or 0
-        local cls     = wpn and entity.get_classname(wpn) or ''
+        -- weapon check for knife
+        local wpn    = entity.get_player_weapon(me)
+        local cls    = wpn and entity.get_classname(wpn) or ''
         local is_knife = cls:find('knife') ~= nil
-        local is_awp   = wpn_id == 9 or wpn_id == 11 or wpn_id == 38  -- awp/auto
 
         table.insert(_ks_kill_queue, {
             is_headshot = e.headshot == true,
             is_knife    = is_knife,
-            is_awp      = is_awp,
         })
     end)
 
@@ -6448,7 +6210,7 @@ do
 
         local kill  = table.remove(_ks_kill_queue, 1)
         local mode  = ks_mode:get()
-        local line  = _ks_pick(kill.is_headshot, kill.is_knife, kill.is_awp, mode)
+        local line  = _ks_pick(kill.is_headshot, kill.is_knife, mode)
 
         if line and line ~= '' then
             client.exec('say ' .. line)
@@ -6467,6 +6229,7 @@ do
     }
 end
 
+--- region shared
 do
     shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
     :record('settings', 'shared::enabled')
@@ -6557,7 +6320,7 @@ do
 
             shared.online_label:set(string.format('👤Current Online: %d', online))
             if shared.fl_online then
-                shared.fl_online:set(string.format('\a444444ffonline  \affd700ff%d\affffffff', online))
+                shared.fl_online:set(string.format('👤Online: \affd700ff%d', online))
             end
             -- leaderboard from data if available
             if shared.fl_leaderboard and shared.data then
@@ -6567,7 +6330,7 @@ do
                         rank = i; pts = obj.points or 0
                     end
                 end
-                shared.fl_leaderboard:set(string.format('\a444444ffonline  \affd700ff%d\affffffff players', online))
+                shared.fl_leaderboard:set(string.format('Leaderboard: \affd700ff%d\affffffff place, \affd700ff%d\affffffff pts', rank, pts))
             end
 
             shared.data = data
@@ -6641,6 +6404,7 @@ do
     shared.init()
 end
 
+--- region buy bot
 do
     local primary_console = {
         ["Autosnipers"] = "scar20",
@@ -6696,53 +6460,35 @@ do
     : record("settings", "buy_bot::utility")
     : save()
 
-    local function _do_buy()
-        local lp = entity.get_local_player()
-        if not lp then return end
-        local money = entity.get_prop(lp, "m_iAccount") or 0
+    client.set_event_callback("round_end_upload_stats", function ()
+        local money = entity.get_prop(entity.get_local_player(), "m_iAccount")
 
-        if not buy_bot.enabled:get() or money <= 800 then return end
-
-        local primary   = buy_bot.primary:get()
-        local secondary = buy_bot.secondary:get()
-        local util      = buy_bot.utility:get()
-        local armor     = entity.get_prop(lp, "m_ArmorValue") or 0
-        local has_helm  = entity.get_prop(lp, "m_bHasHelmet") == 1
-        local buy = ""
-
-        buy = primary   == 'None' and buy or buy .. 'buy ' .. (primary_console[primary]   or '') .. '; '
-        buy = secondary == 'None' and buy or buy .. 'buy ' .. (secondary_console[secondary] or '') .. '; '
-
-        for i = 1, #util do
-            local item_key = util[i]
-            local item_cmd = utility_console[item_key]
-            if item_cmd then
-                -- skip vesthelm if already have helmet
-                if item_key == "Helmet" and has_helm then
-                    -- already have helmet, buy vest instead if no armor
-                    if armor < 50 then buy = buy .. "buy vest; " end
-                -- skip vest/helmet if already have enough armor
-                elseif (item_key == "Kevlar") and armor >= 95 then
-                    -- already full armor, skip
-                else
-                    buy = buy .. "buy " .. item_cmd .. "; "
-                end
-            end
+        if not buy_bot.enabled:get() or money <= 800 then
+            return
         end
 
-        if buy == "" then return end
+        local buy = ''
+        local primary = buy_bot.primary:get()
+        local secondary = buy_bot.secondary:get()
+        local util = buy_bot.utility:get()
+
+        buy = primary == 'None' and buy or buy .. 'buy ' .. primary_console[primary] .. '; '
+        buy = secondary == 'None' and buy or buy .. 'buy ' .. secondary_console[secondary] .. '; '
+
+        for i = 1, #util do
+            local item = utility_console[ util[i] ]
+            buy = buy .. "buy " .. item .. "; "
+        end
+
+        if buy == '' then
+            return
+        end
+
         client.exec(buy)
-    end
-
-    -- fire on both events for reliability
-    client.set_event_callback("round_end_upload_stats", _do_buy)
-    client.set_event_callback("round_poststart", function()
-        -- small delay so buy menu is available
-        client.delay_call(0.5, _do_buy)
     end)
-
 end
 
+---region reatdfdfsd
 do
     local kills = 0
 
@@ -6778,7 +6524,10 @@ do
     end)
 end
 
+
+-- ======================================================================
 --  PREDICT (shoot enemies earlier via Kalman yaw prediction)
+-- ======================================================================
 do
     local predict = {}
     predict.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "☠Predict")
@@ -6794,7 +6543,9 @@ do
     _G.__predict = predict
 end
 
+-- ======================================================================
 --  UNSAFE CHARGE (allow shooting during doubletap even on low HC)
+-- ======================================================================
 do
     local unsafe_charge = {}
     unsafe_charge.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Unsafe Charge")
@@ -6810,7 +6561,9 @@ do
     _G.__unsafe_charge = unsafe_charge
 end
 
+-- ======================================================================
 --  FAKE DUCK IN AIR (air exploit — rapid duck spam to shift tickbase)
+-- ======================================================================
 do
     local fd_air = {}
 
@@ -6871,7 +6624,9 @@ do
     _G.__fd_air = fd_air
 end
 
+-- ======================================================================
 --  AUTO OS (auto switch DT -> HideShot in bad conditions)
+-- ======================================================================
 do
     -- ── Auto OS ──────────────────────────────────────────────────────────
     -- Suppresses DT shots when not in a valid state (prevents wasted DT)
@@ -6954,12 +6709,14 @@ do
     _G.__auto_os = auto_os
 end
 
+-- ======================================================================
 --  AIR TELEPORT
 --  When DT is on and an enemy is VISIBLE (not behind wall):
 --    1. Disable DT so the server sees us on ground
 --    2. Jump to snap position to ground
 --    3. Re-enable DT on next ground tick
 --  This lets you peek from air, land, and immediately DT shoot.
+-- ======================================================================
 do
     local air_tel = {}
 
@@ -7082,7 +6839,9 @@ do
     _G.__air_tel = air_tel
 end
 
+-- ======================================================================
 --  JUMP SCOUT (SSG08 jump shot)
+-- ======================================================================
 do
     local jump_scout = {}
     jump_scout.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Jump Scout")
@@ -7113,7 +6872,9 @@ do
     _G.__jump_scout = jump_scout
 end
 
+-- ======================================================================
 --  DORMANT AIMBOT (fire at dormant/gray ESP enemies)
+-- ======================================================================
 do
     local dormant_ab = {}
     dormant_ab.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Dormant Aimbot")
@@ -7142,7 +6903,9 @@ do
     _G.__dormant_ab = dormant_ab
 end
 
+-- ======================================================================
 --  DROP NADES (drop grenades to teammates)
+-- ======================================================================
 do
     local drop_nades = {}
     drop_nades.key = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", "Drop Nades Key")
@@ -7161,7 +6924,9 @@ do
     _G.__drop_nades = drop_nades
 end
 
+-- ======================================================================
 --  ENEMY CHAT REVEALER (show enemy chat in console)
+-- ======================================================================
 do
     local chat_reveal = {}
     chat_reveal.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Enemy Chat Revealer")
@@ -7185,7 +6950,10 @@ do
     _G.__chat_reveal = chat_reveal
 end
 
+
+-- ======================================================================
 --  SESSION STATISTICS (shown on Home page)
+-- ======================================================================
 do
     local _stats = {
         session_start = globals.realtime and globals.realtime() or 0,
@@ -7211,7 +6979,10 @@ do
     end)
 end
 
+
+-- ======================================================================
 --  ZENITH LEADERBOARD  (database kill tracking)
+-- ======================================================================
 do
     local _LB_KEY   = 'zenith_leaderboard_v1'
     local _TOT_KEY  = 'zenith_total_users_v1'
@@ -7249,7 +7020,7 @@ do
             if e.u == _my_user then rank = i; break end
         end
         shared.fl_leaderboard:set(string.format(
-            '\a444444ffkills  \affd700ff#%d\a666666ff/%d  \affffffff%d kills',
+            '★Leaderboard: \affd700ff#%d\affffffff of %d (\affd700ff%d kills\affffffff)',
             rank, total, my_k))
     end
 
@@ -7269,6 +7040,7 @@ do
     -- initial label update
     _update_lb_label()
 end
+-- ======================================================================
 client.set_event_callback("net_update_end", exploit.handle_defensive)
 client.set_event_callback("net_update_end", exploit.net_update)
 client.set_event_callback("net_update_end", localplayer.net_update)
@@ -7308,6 +7080,12 @@ client.set_event_callback("player_hurt", log_aimbot_shots.player_hurt)
 client.set_event_callback("round_prestart", hit_marker.round_prestart)
 cvar.developer:set_raw_int(0)
 
+
+
+
+
+
+
 -- resolver_show_tab: removed in beta build
 
 menu.set_callback(function()
@@ -7345,8 +7123,9 @@ menu.set_callback(function()
 
     local page = gui.selection:get()
 
+
     -- ── AIMBOT ──────────────────────────────────────────────────────
-    if page == "◎  Aimbot" then
+    if page == "Aimbot" then
         -- ── Rage Settings ───────────────────────────────────────────
         local rg = _G.__zn_rage
         if rg then
@@ -7442,14 +7221,11 @@ menu.set_callback(function()
             _safe_display(da.enabled)
             if da.enabled:get() then _safe_display(da.damage) end
         end
-
-        -- Lag Peak
-        if _G.__lagpeak_show then _G.__lagpeak_show() end
     end
 
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- AA builder + Manual Yaw + Edge Yaw + Freestanding
-    if page == "◆  Builder" then
+    if page == "Builder" then
         -- Manual Yaw
         _safe_display(manual_direction.enabled)
         if manual_direction.enabled:get() then
@@ -7555,17 +7331,13 @@ menu.set_callback(function()
     end
 
     -- ── DEFENSIVE ────────────────────────────────────────────────────
-    if page == "❈  Defensive" then
+    if page == "Defensive" then
         _safe_display(defensive.enabled)
         if defensive.enabled:get() then
             _safe_display(defensive.mode)
             _safe_display(defensive.state)
             _safe_display(defensive.pitch)
             _safe_display(defensive.yaw)
-        if defensive.yaw and (defensive.yaw:get() == "Snap" or defensive.yaw:get() == "Snap Jitter") then
-            _safe_display(defensive.snap_range)
-            _safe_display(defensive.snap_offset)
-        end
         end
     end
 
@@ -7573,7 +7345,7 @@ menu.set_callback(function()
 
     -- ── VISUAL ───────────────────────────────────────────────────────
     -- Widgets, Custom scope, Clientside nickname
-    if page == "◉  Visual" then
+    if page == "Visual" then
         _safe_display(widgets.enabled)
         if widgets.enabled:get() then
             _safe_display(widgets.items)
@@ -7606,7 +7378,7 @@ menu.set_callback(function()
 
     -- ── MISC ─────────────────────────────────────────────────────────
     -- Features/tweaks, AA tweaks, Safe Head, Buy Bot, Clantag, extras
-    if page == "☰  Misc" then
+    if page == "Misc" then
         -- Features toggle
         _safe_display(settings.tweaks_enable)
         if settings.tweaks_enable:get() then
@@ -7659,71 +7431,55 @@ menu.set_callback(function()
         local cr = _G.__chat_reveal
         if cr then _safe_display(cr.enabled) end
 
-        -- Bullet Impact ESP (smart features)
-        if _show_impacts ~= nil then _safe_display(_show_impacts) end
-
     end
 
     -- HOME PAGE
-    if page == "⌂  Home" then
+    if page == "Home" then
         if _G.__home then _G.__home.show() end
     end
 
-    if page == "⚙  Configs" then
+    if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
     end
 end)
 
-if _HAS_AIMBOT then
---  ZENITH RAGE SETTINGS  v2
+
+-- ======================================================================
+--  ZENITH RAGE SETTINGS  (ported from Valkyrie, adapted to Zenith API)
 --  Auto HC / Min-Dmg / Body-Aim / Safepoint with per-weapon presets
---  Improved: better distance curve, armor detection, prediction quality,
---  lethal-shot detection, miss-driven dmg escalation, smooth HC,
---  my-vel penalty, scoped modifier, true Dynamic blending
+--  Plugs into Zenith's software.rage.aimbot.* refs + override system
+-- ======================================================================
 local _zn_rage = {}
 do
-    -- ── weapon categories ───────────────────────────────────────────────────
+    -- ── weapon categories ─────────────────────────────────────────────
     local WEAPON_CLASS = {
-        -- Snipers
-        [9]  = "AWP",   [40] = "Scout",
+        [9]  = "AWP",
+        [40] = "Scout",
         [11] = "Auto",  [38] = "Auto",
-        -- Rifles
         [7]  = "Rifle", [60] = "Rifle", [16] = "Rifle",
         [39] = "Rifle", [33] = "Rifle", [10] = "Rifle",
         [13] = "Rifle", [19] = "Rifle", [24] = "Rifle",
-        -- Heavy Pistol (Deagle, R8)
-        [64] = "Heavy Pistol", [63] = "Heavy Pistol",
-        -- Pistols
+        [8]  = "Other",
         [2]  = "Pistol", [3]  = "Pistol", [4]  = "Pistol",
         [30] = "Pistol", [32] = "Pistol", [36] = "Pistol",
-        [61] = "Pistol", [1]  = "Pistol",
-        -- SMGs
-        [17] = "SMG", [25] = "SMG", [26] = "SMG",
-        [34] = "SMG", [35] = "SMG", [23] = "SMG",
-        -- Shotguns
-        [27] = "Shotgun", [29] = "Shotgun",
-        [41] = "Shotgun", [43] = "Shotgun",
-        -- Knife/Other
-        [42] = "Other", [59] = "Other",
+        [61] = "Pistol", [63] = "Pistol", [1]  = "Pistol",
+        [64] = "Heavy Pistol",
     }
 
-    -- ── base presets ───────────────────────────────────────────────────
-    -- hc  = base hitchance %
-    -- dmg = minimum damage gamesense must be able to deal
-    -- dmgMax = highest dmg we'll ever require (cap)
+    -- ── base presets ──────────────────────────────────────────────────
+    -- dmg = minimum damage gamesense must be able to deal before firing
+    -- set to values that guarantee meaningful hits — not too low or you spray for free
     local PRESETS = {
-        ["AWP"]          = { Safe={hc=90,dmg=100}, Aggressive={hc=72,dmg=100}, dmgMax=115 },
-        ["Scout"]        = { Safe={hc=84,dmg=82},  Aggressive={hc=65,dmg=82},  dmgMax=92  },
-        ["Auto"]         = { Safe={hc=72,dmg=95},  Aggressive={hc=54,dmg=85},  dmgMax=110 },
-        ["Rifle"]        = { Safe={hc=70,dmg=90},  Aggressive={hc=52,dmg=80},  dmgMax=100 },
-        ["Heavy Pistol"] = { Safe={hc=68,dmg=82},  Aggressive={hc=50,dmg=72},  dmgMax=97  },
-        ["Pistol"]       = { Safe={hc=65,dmg=68},  Aggressive={hc=48,dmg=58},  dmgMax=85  },
-        ["SMG"]          = { Safe={hc=62,dmg=60},  Aggressive={hc=45,dmg=50},  dmgMax=80  },
-        ["Shotgun"]      = { Safe={hc=72,dmg=75},  Aggressive={hc=55,dmg=60},  dmgMax=100 },
-        ["Other"]        = { Safe={hc=65,dmg=78},  Aggressive={hc=48,dmg=68},  dmgMax=95  },
+        ["AWP"]          = { Safe={hc=87,dmg=100}, Aggressive={hc=70,dmg=100}, Dynamic={hc=78,dmg=100}, dmgMax=115 },
+        ["Scout"]        = { Safe={hc=82,dmg=82},  Aggressive={hc=64,dmg=82},  Dynamic={hc=72,dmg=82},  dmgMax=92  },
+        ["Auto"]         = { Safe={hc=70,dmg=95},  Aggressive={hc=52,dmg=85},  Dynamic={hc=60,dmg=90},  dmgMax=110 },
+        ["Rifle"]        = { Safe={hc=68,dmg=90},  Aggressive={hc=50,dmg=80},  Dynamic={hc=58,dmg=85},  dmgMax=100 },
+        ["Heavy Pistol"] = { Safe={hc=66,dmg=80},  Aggressive={hc=48,dmg=70},  Dynamic={hc=56,dmg=75},  dmgMax=95  },
+        ["Pistol"]       = { Safe={hc=64,dmg=70},  Aggressive={hc=48,dmg=60},  Dynamic={hc=55,dmg=65},  dmgMax=85  },
+        ["Other"]        = { Safe={hc=65,dmg=80},  Aggressive={hc=48,dmg=70},  Dynamic={hc=55,dmg=75},  dmgMax=95  },
     }
 
-    -- ── helpers ───────────────────────────────────────────────────
+    -- ── helpers ───────────────────────────────────────────────────────
     local function get_dist(a, b)
         local ok1, ax, ay, az = pcall(entity.get_origin, a)
         local ok2, bx, by, bz = pcall(entity.get_origin, b)
@@ -7738,25 +7494,16 @@ do
         return math.max(lo, math.min(hi, math.floor(v + 0.5)))
     end
 
-    -- smooth lerp for HC (prevent jumpy overrides that cause GS to re-resolve)
-    local _smooth_hc  = -1
-    local _smooth_dmg = -1
-    local function smooth_toward(cur, tgt, rate)
-        if cur < 0 then return tgt end
-        local diff = tgt - cur
-        return cur + diff * rate
-    end
-
-    -- ── per-target tracking ──────────────────────────────────────────────────
-    -- misses, hits, shots, last_origin (for teleport detection)
-    local hit_tracker  = {}
-    local plist_cache  = {}
+    -- ── per-target miss / hit tracking ────────────────────────────────
+    local hit_tracker  = {}   -- [entindex] = { misses, hits, shots }
+    local plist_cache  = {}   -- [entindex] = { baim, safe }
     local rage_ticks   = 0
     local last_weapon  = nil
     local rage_prev    = { hc = -1, dmg = -1 }
 
-    -- ── backup/restore ──────────────────────────────────────────────────
+    -- ── backup/restore native rage values ─────────────────────────────
     local rage_backup  = { saved = false }
+
     local function backup_rage()
         if rage_backup.saved then return end
         pcall(function()
@@ -7765,18 +7512,17 @@ do
             rage_backup.saved = true
         end)
     end
+
     local function restore_rage()
         if not rage_backup.saved then return end
-        pcall(ui.set, software.rage.aimbot.hitchance,      rage_backup.hc)
-        pcall(ui.set, software.rage.aimbot.minimum_damage, rage_backup.dmg)
+        pcall(ui.set, software.rage.aimbot.hitchance,       rage_backup.hc)
+        pcall(ui.set, software.rage.aimbot.minimum_damage,  rage_backup.dmg)
         rage_backup.saved = false
-        rage_prev  = { hc = -1, dmg = -1 }
-        _smooth_hc  = -1
-        _smooth_dmg = -1
+        rage_prev = { hc = -1, dmg = -1 }
     end
 
-    -- ── menu items ──────────────────────────────────────────────────
-    local WEAPONS = { "Global", "AWP", "Scout", "Auto", "Rifle", "Heavy Pistol", "Pistol", "SMG", "Shotgun", "Other" }
+    -- ── menu items ────────────────────────────────────────────────────
+    local WEAPONS = { "Global", "AWP", "Scout", "Auto", "Rifle", "Heavy Pistol", "Pistol", "Other" }
 
     _zn_rage.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Rage Settings")
         :record("aa", "zn_rage::enabled"):save()
@@ -7807,7 +7553,7 @@ do
 
             baim_mode  = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
                 merge { "[" .. w .. "] Baim Trigger\n", "zn_rage::baim_mode_", w },
-                { "Always", "HP Threshold", "After N Misses", "Airborne", "Low Ammo", "Low HP Moving" })
+                { "Always", "HP Threshold", "After N Misses", "Airborne" })
                 :record("aa", "zn_rage::baim_mode_"..w):save(),
 
             baim_hp    = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
@@ -7839,103 +7585,93 @@ do
         _zn_rage.weapons[w] = ws
     end
 
+    -- ── reset on toggle off ───────────────────────────────────────────
     _zn_rage.enabled:set_callback(function()
-        if not _zn_rage.enabled:get() then restore_rage() else rage_backup.saved = false end
+        if not _zn_rage.enabled:get() then
+            restore_rage()
+        else
+            rage_backup.saved = false
+        end
     end)
 
-    -- ── per-target trackers ───────────────────────────────────────────────
+    -- ── per-target trackers ───────────────────────────────────────────
     client.set_event_callback("aim_miss", function(e)
         if not _zn_rage.enabled:get() then return end
-        local t = e and e.target; if not t or t <= 0 then return end
-        hit_tracker[t] = hit_tracker[t] or { misses=0, hits=0, shots=0, consec_miss=0 }
-        local tk = hit_tracker[t]
-        tk.misses      = tk.misses + 1
-        tk.shots       = tk.shots  + 1
-        tk.consec_miss = (tk.consec_miss or 0) + 1
+        local t = e and e.target
+        if not t or t <= 0 then return end
+        hit_tracker[t] = hit_tracker[t] or { misses = 0, hits = 0, shots = 0 }
+        hit_tracker[t].misses = hit_tracker[t].misses + 1
+        hit_tracker[t].shots  = hit_tracker[t].shots  + 1
     end)
 
     client.set_event_callback("aim_hit", function(e)
         if not _zn_rage.enabled:get() then return end
-        local t = e and e.target; if not t or t <= 0 then return end
-        hit_tracker[t] = hit_tracker[t] or { misses=0, hits=0, shots=0, consec_miss=0 }
+        local t = e and e.target
+        if not t or t <= 0 then return end
+        hit_tracker[t] = hit_tracker[t] or { misses = 0, hits = 0, shots = 0 }
         local tk = hit_tracker[t]
-        local hs = e.hitgroup == 1
-        tk.hits        = tk.hits  + 1
-        tk.shots       = tk.shots + 1
-        tk.consec_miss = 0
-        -- decay misses faster on headshots
-        if hs then tk.misses = math.max(0, tk.misses - 2)
-        elseif tk.misses > 0 then tk.misses = tk.misses - 1 end
+        tk.hits   = tk.hits  + 1
+        tk.shots  = tk.shots + 1
+        if tk.misses > 0 then tk.misses = tk.misses - 1 end
     end)
 
     client.set_event_callback("round_start", function()
-        hit_tracker = {}; plist_cache = {}
-        _smooth_hc = -1; _smooth_dmg = -1
+        hit_tracker = {}
+        plist_cache = {}
     end)
 
     client.set_event_callback("player_death", function(e)
         local ent = client.userid_to_entindex(e.userid)
-        if ent then hit_tracker[ent] = nil; plist_cache[ent] = nil end
+        if ent then
+            hit_tracker[ent] = nil
+            plist_cache[ent] = nil
+        end
     end)
 
-    -- ── main setup_command tick ────────────────────────────────────────────────
+    -- ── main setup_command tick ───────────────────────────────────────
     client.set_event_callback("setup_command", function()
-        if not _zn_rage.enabled:get() then restore_rage(); return end
+        if not _zn_rage.enabled:get() then
+            restore_rage()
+            return
+        end
 
         local me = entity.get_local_player()
         if not me or not entity.is_alive(me) then return end
 
         backup_rage()
 
-        -- detect weapon class
+        -- detect active weapon class
         local active_w = "Other"
-        local wpn_ent  = entity.get_player_weapon(me)
-        local wpn_id   = 0
+        local wpn_ent = entity.get_player_weapon(me)
         if wpn_ent then
-            wpn_id  = bit.band(entity.get_prop(wpn_ent, "m_iItemDefinitionIndex") or 0, 0xFFFF)
+            local wpn_id = bit.band(entity.get_prop(wpn_ent, "m_iItemDefinitionIndex") or 0, 0xFFFF)
             active_w = WEAPON_CLASS[wpn_id] or "Other"
         end
 
-        -- pick config
-        local picker  = _zn_rage.weapon_picker:get()
+        -- pick config: per-weapon if picker matches, else Global
+        local picker = _zn_rage.weapon_picker:get()
         local cfg_key = (picker == "Global") and "Global" or active_w
-        local wcfg    = _zn_rage.weapons[cfg_key] or _zn_rage.weapons["Global"]
+        local wcfg = _zn_rage.weapons[cfg_key] or _zn_rage.weapons["Global"]
 
         local mode   = wcfg.aim_mode:get()
         local do_hc  = wcfg.auto_hc:get()
         local do_dmg = wcfg.auto_dmg:get()
 
-        if not do_hc and not do_dmg then restore_rage(); return end
-
-        local wp_table = PRESETS[active_w] or PRESETS["Other"]
-        local safe_p   = wp_table.Safe
-        local agg_p    = wp_table.Aggressive
-        local dmgMax   = wp_table.dmgMax
-
-        -- Dynamic: true blend between Safe/Aggressive based on real-time factors
-        -- computed after modifiers, so we start with the midpoint
-        local hc_base  = (safe_p.hc  + agg_p.hc)  * 0.5
-        local dmg_base = (safe_p.dmg + agg_p.dmg) * 0.5
-
-        if mode == "Safe" then
-            hc_base  = safe_p.hc
-            dmg_base = safe_p.dmg
-        elseif mode == "Aggressive" then
-            hc_base  = agg_p.hc
-            dmg_base = agg_p.dmg
+        if not do_hc and not do_dmg then
+            restore_rage()
+            return
         end
 
-        local hc  = hc_base
-        local dmg = dmg_base
+        local wp_table = PRESETS[active_w] or PRESETS["Other"]
+        local preset   = wp_table[mode] or wp_table["Dynamic"]
+        local dmgMax   = wp_table.dmgMax
 
-        -- ── find current target ───────────────────────────────────────────────
+        -- ── find target ───────────────────────────────────────────────
         local target_ent   = nil
         local target_dist  = 99999
         local target_hp    = 100
         local target_flags = 0
         local target_vel   = 0
-        local target_armor = 0
-        local target_helmet= false
 
         local ok, threat = pcall(client.current_threat)
         if ok and threat and threat > 0 and entity.is_alive(threat) then
@@ -7943,256 +7679,160 @@ do
         end
 
         if target_ent then
-            target_dist   = get_dist(me, target_ent)
-            target_hp     = entity.get_prop(target_ent, "m_iHealth")   or 100
-            target_flags  = entity.get_prop(target_ent, "m_fFlags")    or 0
-            target_armor  = entity.get_prop(target_ent, "m_ArmorValue") or 0
-            target_helmet = entity.get_prop(target_ent, "m_bHasHelmet") == 1
+            target_dist  = get_dist(me, target_ent)
+            target_hp    = entity.get_prop(target_ent, "m_iHealth") or 100
+            target_flags = entity.get_prop(target_ent, "m_fFlags")  or 0
             local vx = entity.get_prop(target_ent, "m_vecVelocity[0]") or 0
             local vy = entity.get_prop(target_ent, "m_vecVelocity[1]") or 0
             target_vel = math.sqrt(vx*vx + vy*vy)
         else
-            for _, ent in ipairs(entity.get_players(true)) do
+            local enemies = entity.get_players(true)
+            for i = 1, #enemies do
+                local ent = enemies[i]
                 if entity.is_alive(ent) and not entity.is_dormant(ent) then
                     local d = get_dist(me, ent)
                     if d < target_dist then
-                        target_dist   = d
-                        target_ent    = ent
-                        target_hp     = entity.get_prop(ent,"m_iHealth")    or 100
-                        target_flags  = entity.get_prop(ent,"m_fFlags")     or 0
-                        target_armor  = entity.get_prop(ent,"m_ArmorValue") or 0
-                        target_helmet = entity.get_prop(ent,"m_bHasHelmet") == 1
-                        local vx = entity.get_prop(ent,"m_vecVelocity[0]") or 0
-                        local vy = entity.get_prop(ent,"m_vecVelocity[1]") or 0
+                        target_dist  = d
+                        target_ent   = ent
+                        target_hp    = entity.get_prop(ent, "m_iHealth") or 100
+                        target_flags = entity.get_prop(ent, "m_fFlags")  or 0
+                        local vx = entity.get_prop(ent, "m_vecVelocity[0]") or 0
+                        local vy = entity.get_prop(ent, "m_vecVelocity[1]") or 0
                         target_vel = math.sqrt(vx*vx + vy*vy)
                     end
                 end
             end
         end
 
-        local is_airborne = target_ent and (bit.band(target_flags,1) == 0) or false
+        -- ── start from preset ─────────────────────────────────────────
+        local hc  = preset.hc
+        local dmg = preset.dmg
 
-        -- ── my own velocity penalty ──────────────────────────────────────────────
-        -- if I'm also moving, prediction error goes up on both sides
-        local my_vx = entity.get_prop(me, "m_vecVelocity[0]") or 0
-        local my_vy = entity.get_prop(me, "m_vecVelocity[1]") or 0
-        local my_vel = math.sqrt(my_vx*my_vx + my_vy*my_vy)
-
-        if my_vel > 220 then
-            hc = hc + 8   -- both moving fast = high prediction error
-        elseif my_vel > 80 then
-            hc = hc + 4
-        end
-
-        -- ── distance modifier (smooth curve, not hard brackets) ──────────────────────────
-        -- close (<300): easier to hit, relax HC slightly
-        -- mid (300-900): sweet spot, no change
-        -- long (900-1800): harder, tighten HC
-        -- very long (>1800): very hard, max tighten
-        if target_dist < 200 then
-            hc = hc - 12
-        elseif target_dist < 300 then
-            hc = hc - 8
-        elseif target_dist < 500 then
-            hc = hc - 4
-        elseif target_dist < 900 then
-            -- sweet spot, no change
-        elseif target_dist < 1400 then
-            hc = hc + 5
-        elseif target_dist < 2000 then
-            hc = hc + 10
-        else
-            hc = hc + 16
-        end
-
-        -- ── target movement modifier ──────────────────────────────────────────────
-        if is_airborne then
+        -- ── distance modifier ─────────────────────────────────────────
+        if target_dist < 250 then
+            hc = hc - 10
+        elseif target_dist < 450 then
+            hc = hc - 5
+        elseif target_dist > 2200 then
             hc = hc + 12
+        elseif target_dist > 1400 then
+            hc = hc + 6
+        end
+
+        -- ── movement modifier ─────────────────────────────────────────
+        local is_airborne = target_ent and (bit.band(target_flags, 1) == 0)
+        if is_airborne then
+            hc = hc + 10
         elseif target_vel > 260 then
-            hc = hc + 9
-        elseif target_vel > 160 then
-            hc = hc + 5
-        elseif target_vel > 80 then
-            hc = hc + 2
-        elseif target_vel < 8 then
-            hc = hc - 6   -- standing still = easy to hit
+            hc = hc + 8
+        elseif target_vel > 150 then
+            hc = hc + 4
+        elseif target_vel < 10 then
+            hc = math.max(hc - 5, 40)
         end
 
-        -- ── scoped modifier ──────────────────────────────────────────────────
-        -- unscoped sniper = very inaccurate, jack HC way up
-        if active_w == "AWP" or active_w == "Scout" or active_w == "Auto" then
-            local is_scoped = entity.get_prop(me, "m_bIsScoped") == 1
-            if not is_scoped then
-                hc = hc + 35  -- unscoped sniper = basically never shoot
-            end
-        end
-
-        -- ── armor modifier ──────────────────────────────────────────────────
-        -- heavily armored target = need higher dmg to break through reliably
-        -- pistols/SMGs especially affected since armor eats their damage
-        if target_armor > 80 and target_helmet then
-            if active_w == "Pistol" or active_w == "SMG" then
-                dmg = dmg + 10  -- need more to pen
-                hc  = hc  + 4   -- harder to do enough damage
-            end
-        elseif target_armor == 0 then
-            -- no armor: easy to do damage, relax dmg requirement slightly
-            dmg = math.max(dmg - 8, 30)
-        end
-
-        -- ── HP-based modifiers ─────────────────────────────────────────────────
+        -- ── target HP modifier (only when a real target exists) ─────
+        -- never reduce dmg — keep it high so gamesense only fires lethal shots
         if target_ent then
-            if target_hp <= 8 then
-                -- basically dead: fire anything
-                dmg = 1
-                hc  = math.max(hc - 20, 25)
-            elseif target_hp <= 20 then
-                -- low HP: set dmg just below their HP (body shots work)
-                dmg = math.max(target_hp - 3, 1)
-                hc  = math.max(hc - 10, 30)
-            elseif target_hp <= 40 then
-                dmg = math.max(target_hp - 8, 1)
-                hc  = math.max(hc - 5, 35)
-            elseif target_hp >= 100 then
-                -- full HP: always require 100 dmg minimum
-                -- overrides preset values like 82/87/90
-                dmg = math.max(dmg, 100)
+            if target_hp <= 12 then
+                -- near dead: set dmg to exactly their HP so any hit fires
+                dmg = math.max(target_hp, 1)
+            elseif target_hp <= 30 then
+                -- low HP: lower dmg slightly to allow body shots to finish
+                dmg = math.max(target_hp - 5, 1)
             end
-            -- lethal shot detection: if we can 1-shot from here, lower dmg gate
-            -- so GS fires faster rather than waiting for a "perfect" shot
-            local can_one_shot = (active_w == "AWP" or active_w == "Auto") and target_hp <= 100
-            if can_one_shot then
-                dmg = math.min(dmg, target_hp)
-                hc  = math.max(hc - 5, 40)
-            end
+            -- full HP (>= 95): no change, preset dmg is already correct
         end
 
-        -- ── miss streak escalation ────────────────────────────────────────────────
+        -- ── resolver miss tracker modifier (HC only — never lower dmg) ──
         if target_ent then
-            local tk = hit_tracker[target_ent] or { misses=0, hits=0, shots=0, consec_miss=0 }
-            local consec = tk.consec_miss or 0
-
-            -- escalate HC on consecutive misses (they're hard to hit)
-            if consec >= 5 then
-                hc  = math.min(hc  + 25, 97)
-                dmg = math.max(dmg - 12, 1)  -- lower dmg to allow body shots through
-            elseif consec >= 3 then
-                hc  = math.min(hc  + 15, 93)
-                dmg = math.max(dmg - 6, 1)
-            elseif consec >= 2 then
-                hc  = math.min(hc  + 8,  90)
+            local tk = hit_tracker[target_ent] or { misses = 0, hits = 0, shots = 0 }
+            if tk.misses >= 6 then
+                hc = math.min(hc + 22, 97)
+            elseif tk.misses >= 4 then
+                hc = math.min(hc + 14, 93)
+            elseif tk.misses >= 2 then
+                hc = math.min(hc + 7, 90)
             end
-
-            -- hitting well: relax slightly so we shoot more
-            local shots = tk.shots or 0; local hits = tk.hits or 0
-            if shots >= 4 and hits / shots >= 0.75 then
-                hc = math.max(hc - 4, agg_p.hc - 5)
+            -- good accuracy: slightly relax HC
+            local shots = tk.shots or 0
+            local hits  = tk.hits  or 0
+            if shots >= 5 and (hits / shots) >= 0.80 then
+                hc = math.max(hc - 3, 40)
             end
         end
 
-        -- ── Dynamic mode: true blend toward safer/more aggressive based on situation ──
-        if mode == "Dynamic" then
-            -- factors that make us want to be aggressive: low HP, close range, standing target
-            local aggr_score = 0
-            local me_hp = entity.get_prop(me, "m_iHealth") or 100
-            if me_hp < 40       then aggr_score = aggr_score + 2 end  -- low HP = take the shot
-            if target_dist < 350 then aggr_score = aggr_score + 2 end  -- close = easier
-            if target_vel < 5    then aggr_score = aggr_score + 1 end  -- standing = easy
-            if target_hp  < 50   then aggr_score = aggr_score + 1 end  -- low target HP = finish
-            -- factors that push toward safe
-            if is_airborne          then aggr_score = aggr_score - 2 end
-            if target_dist > 1200   then aggr_score = aggr_score - 2 end
-            if target_vel  > 200    then aggr_score = aggr_score - 1 end
-            -- blend: 0=full safe, 4+=full aggressive
-            local t = math.max(0, math.min(1, aggr_score / 4))
-            hc  = safe_p.hc  + (agg_p.hc  - safe_p.hc)  * t
-            dmg = safe_p.dmg + (agg_p.dmg - safe_p.dmg) * t
-            -- re-apply the situation modifiers on top of blend
-            -- (they were applied to hc_base which was overwritten, so just re-add)
-        end
-
-        -- ── our HP panic: take the shot when low ─────────────────────────────
+        -- ── own HP panic mode (only loosen HC — never touch dmg) ──────
         local my_hp = entity.get_prop(me, "m_iHealth") or 100
-        if my_hp <= 12 then
-            hc  = math.max(hc  - 22, 22)
-            dmg = math.max(dmg - 15, 1)
-        elseif my_hp <= 30 then
-            hc  = math.max(hc  - 12, 28)
-            dmg = math.max(dmg - 8,  1)
-        elseif my_hp <= 55 then
-            hc  = math.max(hc  - 5,  35)
+        if my_hp <= 15 then
+            hc = math.max(hc - 15, 30)
+        elseif my_hp <= 40 then
+            hc = math.max(hc - 8, 38)
         end
 
-        -- ── smooth + clamp ──────────────────────────────────────────────────
+        -- ── clamp ─────────────────────────────────────────────────────
         hc  = clamp(hc,  1, 100)
         dmg = clamp(dmg, 1, dmgMax)
 
-        -- smooth HC to prevent rapid flipping that confuses GS resolver
-        -- (smooth toward target at 60% per tick so it tracks fast but doesn't jump)
-        _smooth_hc  = smooth_toward(_smooth_hc,  hc,  0.60)
-        _smooth_dmg = smooth_toward(_smooth_dmg, dmg, 0.55)
-        local final_hc  = clamp(_smooth_hc,  1, 100)
-        local final_dmg = clamp(_smooth_dmg, 1, dmgMax)
-
-        -- ── apply (every 2 ticks or on weapon change) ─────────────────────────────────
+        -- ── throttled apply (every 4 ticks, or on weapon change) ──────
         rage_ticks = rage_ticks + 1
-        local should_apply = (rage_ticks % 2 == 0)
+        local should_apply = (rage_ticks % 4 == 0)
         if active_w ~= last_weapon then
             last_weapon = active_w
             rage_prev   = { hc = -1, dmg = -1 }
-            _smooth_hc  = hc
-            _smooth_dmg = dmg
             should_apply = true
         end
 
         if should_apply then
-            if do_hc  and final_hc  ~= rage_prev.hc  then
-                pcall(ui.set, software.rage.aimbot.hitchance,      final_hc)
-                rage_prev.hc = final_hc
+            if do_hc and hc ~= rage_prev.hc then
+                pcall(ui.set, software.rage.aimbot.hitchance, hc)
+                rage_prev.hc = hc
             end
-            if do_dmg and final_dmg ~= rage_prev.dmg then
-                pcall(ui.set, software.rage.aimbot.minimum_damage, final_dmg)
-                rage_prev.dmg = final_dmg
+            if do_dmg and dmg ~= rage_prev.dmg then
+                pcall(ui.set, software.rage.aimbot.minimum_damage, dmg)
+                rage_prev.dmg = dmg
             end
         end
 
-        -- ── body aim / safepoint per-target ──────────────────────────────────────────────
+        -- ── body aim / safepoint per-target ──────────────────────────
         if target_ent then
-            local tk = hit_tracker[target_ent] or { misses=0 }
-            local wpn = entity.get_player_weapon(me)
-            local ammo = wpn and (entity.get_prop(wpn, "m_iClip1") or 99) or 99
+            local tk = hit_tracker[target_ent] or { misses = 0 }
 
+            -- body aim
             local force_baim = false
             if wcfg.baim_enabled:get() then
-                for _, m in ipairs(wcfg.baim_mode:get()) do
-                    if m == "Always" then force_baim = true; break
-                    elseif m == "HP Threshold" and target_hp <= wcfg.baim_hp:get() then force_baim = true; break
-                    elseif m == "After N Misses" and tk.misses >= wcfg.baim_miss:get() then force_baim = true; break
-                    elseif m == "Airborne" and is_airborne then force_baim = true; break
-                    elseif m == "Low Ammo" and ammo <= 3 then force_baim = true; break
-                    elseif m == "Low HP Moving" and target_hp <= 45
-                        and target_vel > 80 then force_baim = true; break
+                local modes = wcfg.baim_mode:get()
+                for _, m in ipairs(modes) do
+                    if m == "Always" then
+                        force_baim = true; break
+                    elseif m == "HP Threshold" and target_hp <= wcfg.baim_hp:get() then
+                        force_baim = true; break
+                    elseif m == "After N Misses" and tk.misses >= wcfg.baim_miss:get() then
+                        force_baim = true; break
+                    elseif m == "Airborne" and is_airborne then
+                        force_baim = true; break
                     end
                 end
             end
 
-            -- Disable in air: when target is airborne, use plist to disable
-            -- safe point (air targets are easier, safe point wastes time)
-            if is_airborne then
-                pcall(plist.set, target_ent, "Disable in air", false)
-            end
-
+            -- safepoint
             local force_sp = false
             if wcfg.sp_enabled:get() then
-                for _, m in ipairs(wcfg.sp_mode:get()) do
-                    if m == "Always" then force_sp = true; break
-                    elseif m == "HP Threshold" and target_hp <= wcfg.sp_hp:get() then force_sp = true; break
-                    elseif m == "After N Misses" and tk.misses >= wcfg.sp_miss:get() then force_sp = true; break
-                    elseif m == "Airborne" and is_airborne then force_sp = true; break
+                local modes = wcfg.sp_mode:get()
+                for _, m in ipairs(modes) do
+                    if m == "Always" then
+                        force_sp = true; break
+                    elseif m == "HP Threshold" and target_hp <= wcfg.sp_hp:get() then
+                        force_sp = true; break
+                    elseif m == "After N Misses" and tk.misses >= wcfg.sp_miss:get() then
+                        force_sp = true; break
+                    elseif m == "Airborne" and is_airborne then
+                        force_sp = true; break
                     end
                 end
             end
 
+            -- apply via plist (cached to avoid spam)
             local cached = plist_cache[target_ent] or {}
             if cached.baim ~= force_baim then
                 pcall(plist.set, target_ent, "Override prefer body aim", force_baim and "On" or "Off")
@@ -8208,333 +7848,20 @@ do
 
     _G.__zn_rage = _zn_rage
 end
-end -- _HAS_AIMBOT
 
-if _HAS_AIMBOT then
---  ZENITH SMART FEATURES
---  Multipoint / Head Scale / Target Priority / Bullet Impact ESP
---  Bomb awareness / Smoke/Flash reactive AA / Weapon-reload awareness
-do
-
--- ── per-target multipoint + head scale control ───────────────────────────
--- Uses plist to dynamically set multipoint and head scale per enemy
--- based on their HP, distance, and miss streak
--- This gives GS more or fewer hitboxes to choose from per target
-
-local _mp_cache = {}   -- [ent] = { mp, hs }
-local _mp_ticks = 0
-
-local function _mp_update()
-    _mp_ticks = _mp_ticks + 1
-    if _mp_ticks % 3 ~= 0 then return end  -- every 3 ticks
-
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-
-    local my_x, my_y, my_z = entity.get_origin(me)
-    if not my_x then return end
-
-    local rage_data = _G.__zn_rage
-    local hit_tr    = rage_data and rawget(rage_data, '_ht') or nil
-
-    for _, ent in ipairs(entity.get_players(true)) do
-        if not entity.is_alive(ent) or entity.is_dormant(ent) then
-            _mp_cache[ent] = nil
-            goto _mp_skip
-        end
-
-        local ex, ey, ez = entity.get_origin(ent)
-        if not ex then goto _mp_skip end
-
-        local dx, dy, dz = ex-my_x, ey-my_y, ez-my_z
-        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        local hp   = entity.get_prop(ent, 'm_iHealth') or 100
-        local flags= entity.get_prop(ent, 'm_fFlags')  or 0
-        local air  = bit.band(flags, 1) == 0
-
-        -- multipoint: On when close or target has high HP and we need damage
-        -- Off when target is low HP (any hit kills, don't waste on multipoint)
-        local want_mp
-        if hp <= 25 then
-            want_mp = 'Off'   -- near dead: any hit point works
-        elseif dist < 400 then
-            want_mp = 'On'    -- close: multipoint helps guarantee damage
-        elseif dist > 1600 then
-            want_mp = 'Off'   -- far: multipoint hurts accuracy
-        else
-            want_mp = 'On'
-        end
-
-        -- head scale: larger when standing still (gives GS bigger target)
-        -- smaller when airborne (tighter = safer point)
-        local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
-        local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
-        local spd = math.sqrt(vx*vx + vy*vy)
-
-        local want_hs  -- head scale: 1-13 in GS (1=smallest, 13=default full)
-        if air then
-            want_hs = 3    -- airborne: tight head hitbox only
-        elseif spd < 5 then
-            want_hs = 13   -- standing still: full head scale
-        elseif spd < 100 then
-            want_hs = 9
-        else
-            want_hs = 5    -- running: moderate
-        end
-
-        local cached = _mp_cache[ent] or {}
-        if cached.mp ~= want_mp then
-            pcall(plist.set, ent, 'Multipoint', want_mp)
-            cached.mp = want_mp
-        end
-        if cached.hs ~= want_hs then
-            pcall(plist.set, ent, 'Head scale', want_hs)
-            cached.hs = want_hs
-        end
-        _mp_cache[ent] = cached
-
-        ::_mp_skip::
-    end
-end
-
--- ── target priority override ─────────────────────────────────────────────
--- Sets plist Target selection priority based on:
--- who is lowest HP (easiest kill), who is shooting at us, who is closest
--- Priority 0 = normal, higher = prefer this target
-
-local _prio_cache = {}
-local _last_attacker = nil
-local _last_attacker_tick = -999
-
-client.set_event_callback('player_hurt', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    local my_uid = entity.get_prop(me, 'm_iUserId')
-    if e.userid == my_uid then
-        -- we got hurt - track who shot us
-        local attacker = client.userid_to_entindex(e.attacker)
-        if attacker and attacker ~= me then
-            _last_attacker      = attacker
-            _last_attacker_tick = globals.tickcount()
-        end
-    end
-end)
-
-local function _prio_update()
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-    local my_x, my_y, my_z = entity.get_origin(me)
-    if not my_x then return end
-
-    -- attacker priority expires after 3 seconds
-    local attacker_valid = _last_attacker and
-        (globals.tickcount() - _last_attacker_tick) < (3 / globals.tickinterval())
-
-    for _, ent in ipairs(entity.get_players(true)) do
-        if not entity.is_alive(ent) or entity.is_dormant(ent) then
-            _prio_cache[ent] = nil
-            goto _prio_skip
-        end
-
-        local hp   = entity.get_prop(ent,'m_iHealth') or 100
-        local ex,ey,ez = entity.get_origin(ent)
-        if not ex then goto _prio_skip end
-        local dx,dy = ex-my_x, ey-my_y
-        local dist  = math.sqrt(dx*dx + dy*dy)
-
-        local prio = 0
-        -- shooter gets top priority
-        if attacker_valid and ent == _last_attacker then prio = prio + 4 end
-        -- low HP = easy kill
-        if hp <= 30  then prio = prio + 3
-        elseif hp <= 60 then prio = prio + 1 end
-        -- close range
-        if dist < 300 then prio = prio + 2
-        elseif dist < 700 then prio = prio + 1 end
-
-        -- clamp to valid range (0-7 typically)
-        prio = math.min(prio, 7)
-
-        if _prio_cache[ent] ~= prio then
-            pcall(plist.set, ent, 'Target selection priority', prio)
-            _prio_cache[ent] = prio
-        end
-
-        ::_prio_skip::
-    end
-end
-
--- ── bullet impact tracking ───────────────────────────────────────────────
--- Draws where our shots actually landed vs where we aimed
--- Helps debug prediction errors
-
-local _impacts = {}
-local _impact_lifetime = 3.0  -- seconds
-
-client.set_event_callback('bullet_impact', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    -- only track our own bullets
-    local shooter = client.userid_to_entindex(e.userid)
-    if shooter ~= me then return end
-
-    table.insert(_impacts, {
-        x = e.x, y = e.y, z = e.z,
-        t = globals.curtime()
-    })
-    -- keep max 12
-    while #_impacts > 12 do table.remove(_impacts, 1) end
-end)
-
-local _show_impacts = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Bullet Impact ESP')
-    :record('aa', 'smart::bullet_impact'):save()
-
--- ── bomb awareness ───────────────────────────────────────────────────────
-
--- ── smoke/flash reactive AA ──────────────────────────────────────────────
--- When a smoke or flash detonates, temporarily relax HC
--- because prediction in smoke is harder for enemy too
-
-local _smoke_active   = false
-local _smoke_tick     = -999
-local _SMOKE_DURATION = 18  -- seconds smoke lasts
-
-local _flash_active   = false
-local _flash_tick     = -999
-
-client.set_event_callback('smokegrenade_detonate', function(e)
-    -- check if near us
-    local me = entity.get_local_player()
-    if not me then return end
-    local mx, my, mz = entity.get_origin(me)
-    if not mx then return end
-    local dx = (e.x or 0) - mx
-    local dy = (e.y or 0) - my
-    local dz = (e.z or 0) - mz
-    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-    if dist < 800 then
-        _smoke_active = true
-        _smoke_tick   = globals.tickcount()
-    end
-end)
-
-client.set_event_callback('flashbang_detonate', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    local mx, my, mz = entity.get_origin(me)
-    if not mx then return end
-    local dx = (e.x or 0) - mx
-    local dy = (e.y or 0) - my
-    local dz = (e.z or 0) - mz
-    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-    if dist < 1000 then
-        _flash_active = true
-        _flash_tick   = globals.tickcount()
-    end
-end)
-
--- ── weapon reload awareness ──────────────────────────────────────────────
--- During reload: force body aim on all targets (if clip is 0, don't head-seek)
--- After reload: reset to normal
-
-local _reloading = false
-local _reload_tick = -999
-
-client.set_event_callback('weapon_reload', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    if client.userid_to_entindex(e.userid) ~= me then return end
-    _reloading   = true
-    _reload_tick = globals.tickcount()
-end)
-
--- ── setup_command: apply smoke/flash HC modifier and reload baim ─────────
-client.set_event_callback('setup_command', function()
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-
-    -- decay smoke
-    local tc = globals.tickcount()
-    local ti = globals.tickinterval()
-    if _smoke_active and (tc - _smoke_tick) > (_SMOKE_DURATION / ti) then
-        _smoke_active = false
-    end
-    -- decay flash (1.5s)
-    if _flash_active and (tc - _flash_tick) > (1.5 / ti) then
-        _flash_active = false
-    end
-    -- decay reload (3s max)
-    if _reloading and (tc - _reload_tick) > (3.0 / ti) then
-        _reloading = false
-    end
-
-    -- during reload: force body aim on all enemies (safer while vulnerable)
-    if _reloading then
-        for _, ent in ipairs(entity.get_players(true)) do
-            if entity.is_alive(ent) then
-                pcall(plist.set, ent, 'Force body aim', true)
-            end
-        end
-    end
-
-    -- smoke/flash: if near smoke, bump HC slightly through rage system
-    -- we set it via the existing rage prev cache by invalidating it
-    if _smoke_active or _flash_active then
-        local zr = _G.__zn_rage
-        if zr then
-            -- signal smoke via a global flag the rage system can read
-            rawset(zr, '_near_smoke', true)
-        end
-    else
-        local zr = _G.__zn_rage
-        if zr then rawset(zr, '_near_smoke', false) end
-    end
-end)
-
--- ── paint: multipoint/priority updates + impact ESP + bomb timer ─────────
-client.set_event_callback('paint', function()
-    -- multipoint + head scale update
-    _mp_update()
-    -- target priority
-    _prio_update()
-
-    -- bullet impact ESP
-    if _show_impacts:get() then
-        local now = globals.curtime()
-        for i = #_impacts, 1, -1 do
-            local imp = _impacts[i]
-            local age = now - imp.t
-            if age > _impact_lifetime then
-                table.remove(_impacts, i)
-            else
-                local fade = 1 - (age / _impact_lifetime)
-                local a    = math.floor(255 * fade)
-                local sx, sy = renderer.world_to_screen(imp.x, imp.y, imp.z)
-                if sx then
-                    -- red dot with age-based fade
-                    renderer.circle(sx, sy, 255, 80, 80, a, 4, 0, 1)
-                    renderer.circle_outline(sx, sy, 255, 255, 255, math.floor(a*0.4), 4, 0, 1, 1)
-                end
-            end
-        end
-    end
-
-end)
-
--- ── round_prestart cleanup ────────────────────────────────────────────────
-client.set_event_callback('round_prestart', function()
-    _mp_cache   = {}
-    _prio_cache = {}
-    _impacts    = {}
-    _last_attacker = nil
-end)
-
-end -- do
-end -- _HAS_AIMBOT
 
 menu.update()
 
+
+
+
+
+
+
+
+-- ======================================================================
 --  CONFIG SYSTEM (Zenith)
+-- ======================================================================
 do
     local _db_key  = 'zenith_cfgs_v3'
     local _remote  = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
@@ -8822,17 +8149,20 @@ do
     client.delay_call(1, reload)
 end
 
+
+-- ======================================================================
 --  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
+-- ======================================================================
 do
     local home = {}
     _G.__home = home
 
-    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff--  \aaaaaaaff S T A T S  \a555555ff--')
-    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[T]  \a777777fftotal  \a555555ff...')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[S]  \a777777ffsession  \a555555ff...')
-    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[H]  \a777777ffheadshots  \a555555ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[K]  \a777777ffkills  \a555555ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[M]  \a777777ffmisses at me  \a555555ff0')
+    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a71bc78ff\xe2\x96\xb6 Statistics')
+    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x96\xb6 Total time: \a71bc78ff0.0 Hours')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session time: \a71bc78ff0 Minutes')
+    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Headshots: \a71bc78ff0%')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Enemy killed: \a71bc78ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Misses: \a71bc78ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -8870,11 +8200,11 @@ do
         end
         local tot = _get_total()
         local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
-        home.lbl_total:set(string.format('\a4799ffff[T]  \a777777fftotal  \a71bc78ff%.1f hrs', tot))
-        home.lbl_session:set(string.format('\a4799ffff[S]  \a777777ffsession  \a71bc78ff%d min', mins))
-        home.lbl_hs:set(string.format('\a4799ffff[H]  \a777777ffheadshots  \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('\a4799ffff[K]  \a777777ffkills  \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('\a4799ffff[M]  \a777777ffmisses at me  \a71bc78ff%d', _s_misses))
+        home.lbl_total:set(string.format('\xe2\x96\xb6 Total time: \a71bc78ff%.1f Hours', tot))
+        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session time: \a71bc78ff%d Minutes', mins))
+        home.lbl_hs:set(string.format('Headshots: \a71bc78ff%d%%', hs_pct))
+        home.lbl_kills:set(string.format('Enemy killed: \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('X Misses at me: \a71bc78ff%d', _s_misses))
     end
 
     function home.show()
@@ -8889,6 +8219,7 @@ do
 end
 
 --  CLANTAG SYSTEM (zenith.gs)
+-- ======================================================================
 do
     local mp = {}
     _G.__misc_page = mp
@@ -9023,6 +8354,10 @@ do
     end)
 end
 
+client.color_log(113, 152, 255, '[Zenith] Clantag system loaded.')
+
+
+
 local math_abs = math.abs
 local math_sqrt = math.sqrt
 local math_floor = math.floor
@@ -9046,19 +8381,3 @@ local string_format = string.format
 local string_rep    = string.rep
 local bit = require('bit')
 
---  ZENITH RESOLVER  v3  (nightly only)
---  ~2800 lines of pure resolver logic
---  Jitter · LBY · Air-Vel · Def-Snap · Def-Flick · Lean · FakeDuck
---  OS-Timing · Multi-Point · Side-Confirm · Adaptive · FreqAnalysis
---  PerState · BacktrackHistory · LayerFingerprint · ExploitPredictor
-
-local function _lrelu3(x) return x > 0 and x or 0.018*x end
-local function _sig3(x)   return 1/(1+_exp(-_clamp(x,-14,14))) end
-local function _softmax3(o)
-    local m = _max(o[1], o[2], o[3])
-    local s = 0
-    for i=1,3 do s = s + _exp(o[i]-m) end
-    local r = {}
-    for i=1,3 do r[i] = _exp(o[i]-m) / s end
-    return r
-end

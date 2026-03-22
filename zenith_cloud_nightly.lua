@@ -1,3 +1,16 @@
+-- ======================================================================
+--  AUTH GUARD
+-- ======================================================================
+if not rawget(_G, "_auth_ok")      then error("auth missing")   end
+if not rawget(_G, "_auth_ticket")  then error("ticket missing") end
+if not rawget(_G, "_auth_nonce")   then error("nonce missing")  end
+if not rawget(_G, "BUILD_VERSION") then error("build missing")  end
+do
+    local exp = rawget(_G, "_auth_ticket_exp")
+    if type(exp) ~= "number" then error("ticket invalid") end
+end
+-- ======================================================================
+
 -- ZENITH | NIGHTLY | Cloud Build
 
 local function _safe_display(obj)
@@ -10305,3 +10318,4 @@ end
 
 end)()
 ::_resolver_end::
+-- ======================================================================
