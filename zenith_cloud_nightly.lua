@@ -14,7 +14,6 @@ local function _safe_set_visible(obj, val)
     end
 end
 
-
 if not LPH_OBFUSCATED then
     LPH_NO_VIRTUALIZE = function(...) return ... end
 end
@@ -22,15 +21,12 @@ end
 local USERNAME = _auth_user or 'user'
 local BUILD    = BUILD_VERSION
 
--- version gates
 local _HAS_AIMBOT   = (BUILD == 'beta' or BUILD == 'nightly')
 local _HAS_RESOLVER = (BUILD == 'nightly')
 
---- declarations
 local f = string.format
 local merge = table.concat
 
---- modules
 local ffi = require "ffi"
 local vector = require "vector"
 local http = require "gamesense/http"
@@ -78,7 +74,6 @@ local clipboard do
     clipboard.get = get
 end
 
-
 local oprint = print
 local function print(...)
     local res = ""
@@ -96,7 +91,6 @@ local function print_raw(r, g, b, ...)
     client.color_log(255, 255, 255, f(...))
 end
 
---- defines
 local function contains(list, value)
     for i = 1, #list do
         if list[i] == value then
@@ -202,7 +196,6 @@ local hit_marker = { }
 local unmute = { }
 local shared = { }
 
---- region utils
 do
     local escape = {
         ["="] = true,
@@ -423,8 +416,6 @@ local memory do
     end
 end
 
---- region software
-
 LPH_NO_VIRTUALIZE(function ()
     do
         software.rage = {
@@ -565,7 +556,6 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
---- region override
 do
     local data = { }
 
@@ -608,7 +598,6 @@ do
     end
 end
 
---- region iengineclient
 do
     local native_GetNetChannelInfo = vtable_bind("engine.dll", "VEngineClient014", 78, "void*(__thiscall*)(void*)")
 
@@ -617,7 +606,6 @@ do
     end
 end
 
---- region inetchannel
 do
     local native_IsLoopback = vtable_thunk(6, "bool(__thiscall*)(void*)")
     local native_IsTimingOut = vtable_thunk(7, "bool(__thiscall*)(void*)")
@@ -670,7 +658,6 @@ do
     end
 end
 
---- region ceaser
 do
     local function ascii_base(s)
         if string.lower(s) == s then
@@ -695,8 +682,6 @@ do
         return ceasar.cipher(s, -key)
     end
 end
-
---- region menu
 
 LPH_NO_VIRTUALIZE(function ()
     do
@@ -952,12 +937,9 @@ local zenith_config_system do
     end
 end
 
-
--- ======================================================================
 --  ZENITH UI  -  Zenith pui tabs
 --  Pages: Home | Builder | Defensive | Visual | Misc | Configs
 --  (replaces the original gui.selection combobox approach)
--- ======================================================================
 
 local required = require
 local pui = required 'gamesense/pui' or error('failed to load pui')
@@ -979,7 +961,7 @@ local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label   = group_fakelag:label('                      Z  E  N  I  T  H')
+    vars.selection.label   = group_fakelag:label('\a888888ff────  \affffffff Z E N I T H  \a888888ff────')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -1007,10 +989,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup     = group_fakelag:label(string.format('\a77ff99ffWelcome, \aff9955ff%s\affffffff!', USERNAME))
-shared.fl_build       = group_fakelag:label(string.format('Build: \a77ccffff%s', BUILD))
-shared.fl_online      = group_fakelag:label('Online: \affd700ff...')
-shared.fl_leaderboard = group_fakelag:label('Leaderboard: ...')
+shared.fl_whatsup     = group_fakelag:label(string.format('\a666666ff►  \affffffff%s', USERNAME))
+shared.fl_build       = group_fakelag:label(string.format('\a444444ffbuild  \a5599ffff%s', BUILD))
+shared.fl_online      = group_fakelag:label('\a444444ffonline  \affd700ff…')
+shared.fl_leaderboard = group_fakelag:label('\a444444ffkills  \a888888ff…')
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1040,7 +1022,7 @@ do
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('Online: %s%d\affffffff', col, n))
+            shared.fl_online:set(string.format('\a444444ffonline  %s%d\affffffff', col, n))
         end
     end
 
@@ -1083,12 +1065,6 @@ do
 
     client.delay_call(2, _increment)
 end
-
-
-
-
-
-
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
 do
@@ -1275,9 +1251,6 @@ helpers['functions'] = {
     end,
 }
 
-
-
-
 -- ── HIDE NATIVE AA CONTROLS (mirrors Zenith hide_menu) ───────────────
 hide_menu = function(state)
     local aa = software.aa.angles
@@ -1344,9 +1317,9 @@ gui.enabled = gui.enabled or { get=function() return true end, set=function() en
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"Home", "Builder", "Defensive", "Visual", "Misc", "Configs"}
-    if _HAS_AIMBOT then table.insert(pages, 4, "Aimbot") end
-    if _HAS_RESOLVER then table.insert(pages, #pages, "Resolver") end
+    local pages = {"⌂  Home", "◆  Builder", "❈  Defensive", "◉  Visual", "☰  Misc", "⚙  Configs"}
+    if _HAS_AIMBOT then table.insert(pages, 4, "◎  Aimbot") end
+    if _HAS_RESOLVER then table.insert(pages, #pages, "↻  Resolver") end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -1382,7 +1355,6 @@ if not _HAS_AIMBOT then
     end)
 end
 
---- region motion
 do
     local function linear(t, b, c, d)
         return c * t / d + b
@@ -1429,7 +1401,6 @@ do
 end
 
 LPH_NO_VIRTUALIZE(function ()
-    --- region windows
     do
         local data = { }
         local queue = { }
@@ -1659,7 +1630,6 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
---- region graphics
 do
     local alpha_unit = 1 / 255
 
@@ -1787,7 +1757,6 @@ do
     end
 end
 
---- region decorations
 do
     local function u8(s)
         return string.gsub(s, "[\128-\191]", "")
@@ -1823,7 +1792,6 @@ do
     end
 end
 
---- region exploit
 do
     local LAG_COMPENSATION_TELEPORTED_DISTANCE_SQR = 64 * 64
 
@@ -1939,7 +1907,6 @@ do
     end
 end
 
---- region localplayer
 do
     local MOVING_LIMIT = 1.1 * 3.3
     local DUCK_PEEK_LIMIT = 0.79
@@ -2020,7 +1987,6 @@ do
     end
 end
 
---- region statement
 do
     local list = { }
 
@@ -2100,7 +2066,6 @@ do
     end
 end
 
---- region antiaim
 do
     local ctx = { }
 
@@ -2345,7 +2310,6 @@ local _chaos_jitter_seed = 0
             end
 
             -- god ( qhose ) forgive me for the piece of code below
-            --- region lulz diagnostics disable@
 
             local byaw = localplayer.body_yaw
 
@@ -2384,7 +2348,6 @@ local _chaos_jitter_seed = 0
                 else
                     angle = utils.normalize_yaw(yaw + ctx.jitter_offset * way)
                 end
-
 
                 delay_data.previous_angle = angle
             end
@@ -2541,7 +2504,6 @@ local _chaos_jitter_seed = 0
     end
 end
 
---- region aa_reactive
 do
     local _last_hurt_tick = 0
     local _flip_body_next = false
@@ -2578,7 +2540,6 @@ do
     end)
 end
 
---- region lag_peak
 do
     -- Lag Peak: when you fire a shot, spike the fake lag to maximum for 1 tick
     -- The shot arrives during a different lagcomp window than the enemy expects,
@@ -2673,7 +2634,6 @@ do
     end)
 end
 
----region settings tweaks
 do
     settings.tweaks_enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Features")
     : record("settings", "settings::tweaks_enable")
@@ -2684,7 +2644,6 @@ do
     : save()
 end
 
---- region widgets
 do
     widgets.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Widgets")
     : record("visuals", "widgets::enabled")
@@ -2711,7 +2670,6 @@ do
     : save()
 end
 
---- region fast ladder
 do
     aa_tweaks.enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Tweaks")
     : record("settings", "aa_tweaks::enable")
@@ -2792,7 +2750,6 @@ do
     end)
 end
 
---- region defensive
 do
     local function get_statement()
         if localplayer.is_airborne then
@@ -3033,8 +2990,6 @@ do
             end
         end
 
-        -- client.color_log(255, 255, 255, f('\nDefensive: %s\nShould Ignore: %s\nAvoid Backstab: %s\nForce Defensive: %s\nFreestanding: %s', globals.tickcount() > double_tap.defensive_tk - 2, should_ignore, avoid_backstab.get(), cmd.force_defensive, software.is_freestanding()))
-
         if globals.tickcount() > double_tap.defensive_tk - 2 then
             return
         end
@@ -3050,7 +3005,6 @@ do
     end
 end
 
----region disable on warmup
 do
 
     function disablers.count_alive()
@@ -3071,7 +3025,6 @@ do
 
         return alive
     end
-
 
     function disablers.update(cmd, ctx)
         local lp = entity.get_local_player()
@@ -3108,7 +3061,6 @@ do
     end
 end
 
---- region avoid_backstab
 do
     local is_active = false
     -- configurable range: 180 (tight) to 350 (paranoid)
@@ -3220,7 +3172,6 @@ do
     end
 end
 
---- region safe_head
 do
     local is_active = false
 
@@ -3484,7 +3435,6 @@ do
     end
 end
 
---- region manual_yaw
 do
     local LEFT    = 0
     local RIGHT   = 1
@@ -3639,7 +3589,6 @@ do
     end
 end
 
---- region log_aimbot_shots
 do
     local DURATION = 7.0
 
@@ -3882,7 +3831,6 @@ do
     end
 end
 
---- region eventlogs [fancy]
 do
     local ALPHA_UNIT   = 1 / 255
 
@@ -4256,7 +4204,6 @@ local print_dev do
     })
 end
 
----region log aim 4ots
 do
     local hitgroup_str = {
         [0] = 'generic',
@@ -4525,7 +4472,6 @@ end
 --     end)
 -- end
 
----region неопознан
 do
     local shots do
         shots = {
@@ -4573,8 +4519,6 @@ do
 
 end
 
-
----region autopeek
 do
     function auto_peek.perform(ctx)
         if not aa_tweaks.enable:get() then
@@ -4602,7 +4546,6 @@ do
 end
 
 LPH_NO_VIRTUALIZE(function ()
-        --- region watermark
     do
         local FRAMERATE_AVG_FRAC = 0.9
 
@@ -4791,7 +4734,6 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
-        --- region keybinds
     do
         local alpha = 0.0
         local width = 0.0
@@ -5130,7 +5072,6 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
-        --- region indicators
     do
         local alpha = 0.0
         local align = 0.0
@@ -5366,7 +5307,6 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
-        ---region arrows
     do
         local alpha = 0
         local left_alpha = 0
@@ -5411,7 +5351,6 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
-        --- region velocity_warning
     do
         local alpha = 0.0
         local holding = 0.0
@@ -5518,7 +5457,6 @@ LPH_NO_VIRTUALIZE(function ()
         end
     end
 
-        --- region custom scope
     do
         custom_scope.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Scope Overlay")
         : record("aa", "custom_scope::enabled")
@@ -5613,15 +5551,12 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
---- region console filter
 do
-
 
     defer(function ()
     end)
 end
 
----region
 do
     anim_breakers.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Animation Breakers")
     : record("aa", "anim_breakers::enabled")
@@ -5699,7 +5634,6 @@ do
     end)
 end
 
---- region angles
 do
     local function set_custom_list(ctx, list)
         if list.pitch ~= nil then
@@ -5852,7 +5786,6 @@ do
             list.freestanding_body_yaw = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Freestanding body yaw", "\n", "custom_", "freestanding_body_yaw_", state })
             : record("aa", merge { "custom", "::", state, "::", "freestanding_body_yaw" })
             : save()
-
 
             list.zenith_safe:set_callback(reset_delay)
             list.zenith_delay:set_callback(reset_delay)
@@ -6043,7 +5976,6 @@ do
     end
 end
 
---- region yaw_direction
 do
 
     yaw_direction.edge_yaw = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", merge { "Edge Yaw", "\n", "yaw_direction::edge_yaw" })
@@ -6071,7 +6003,6 @@ do
     end
 end
 
---- region freestqand disaskdfkskd
 do
     local function get_statement()
         if localplayer.is_airborne then
@@ -6417,8 +6348,6 @@ do
     end
 end
 
-
---- region killsay
 do
     -- ── default line pool ─────────────────────────────────────────────
     local _ks_default = {
@@ -6587,7 +6516,6 @@ do
     }
 end
 
---- region shared
 do
     shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
     :record('settings', 'shared::enabled')
@@ -6688,7 +6616,7 @@ do
                         rank = i; pts = obj.points or 0
                     end
                 end
-                shared.fl_leaderboard:set(string.format('Leaderboard: \affd700ff%d\affffffff place, \affd700ff%d\affffffff pts', rank, pts))
+                shared.fl_leaderboard:set(string.format('\a444444ffonline  \affd700ff%d\affffffff players', online))
             end
 
             shared.data = data
@@ -6762,7 +6690,6 @@ do
     shared.init()
 end
 
---- region buy bot
 do
     local primary_console = {
         ["Autosnipers"] = "scar20",
@@ -6865,7 +6792,6 @@ do
 
 end
 
----region reatdfdfsd
 do
     local kills = 0
 
@@ -6901,10 +6827,7 @@ do
     end)
 end
 
-
--- ======================================================================
 --  PREDICT (shoot enemies earlier via Kalman yaw prediction)
--- ======================================================================
 do
     local predict = {}
     predict.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "☠Predict")
@@ -6920,9 +6843,7 @@ do
     _G.__predict = predict
 end
 
--- ======================================================================
 --  UNSAFE CHARGE (allow shooting during doubletap even on low HC)
--- ======================================================================
 do
     local unsafe_charge = {}
     unsafe_charge.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Unsafe Charge")
@@ -6938,9 +6859,7 @@ do
     _G.__unsafe_charge = unsafe_charge
 end
 
--- ======================================================================
 --  FAKE DUCK IN AIR (air exploit — rapid duck spam to shift tickbase)
--- ======================================================================
 do
     local fd_air = {}
 
@@ -7001,9 +6920,7 @@ do
     _G.__fd_air = fd_air
 end
 
--- ======================================================================
 --  AUTO OS (auto switch DT -> HideShot in bad conditions)
--- ======================================================================
 do
     -- ── Auto OS ──────────────────────────────────────────────────────────
     -- Suppresses DT shots when not in a valid state (prevents wasted DT)
@@ -7086,14 +7003,12 @@ do
     _G.__auto_os = auto_os
 end
 
--- ======================================================================
 --  AIR TELEPORT
 --  When DT is on and an enemy is VISIBLE (not behind wall):
 --    1. Disable DT so the server sees us on ground
 --    2. Jump to snap position to ground
 --    3. Re-enable DT on next ground tick
 --  This lets you peek from air, land, and immediately DT shoot.
--- ======================================================================
 do
     local air_tel = {}
 
@@ -7216,9 +7131,7 @@ do
     _G.__air_tel = air_tel
 end
 
--- ======================================================================
 --  JUMP SCOUT (SSG08 jump shot)
--- ======================================================================
 do
     local jump_scout = {}
     jump_scout.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Jump Scout")
@@ -7249,9 +7162,7 @@ do
     _G.__jump_scout = jump_scout
 end
 
--- ======================================================================
 --  DORMANT AIMBOT (fire at dormant/gray ESP enemies)
--- ======================================================================
 do
     local dormant_ab = {}
     dormant_ab.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Dormant Aimbot")
@@ -7280,9 +7191,7 @@ do
     _G.__dormant_ab = dormant_ab
 end
 
--- ======================================================================
 --  DROP NADES (drop grenades to teammates)
--- ======================================================================
 do
     local drop_nades = {}
     drop_nades.key = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", "Drop Nades Key")
@@ -7301,9 +7210,7 @@ do
     _G.__drop_nades = drop_nades
 end
 
--- ======================================================================
 --  ENEMY CHAT REVEALER (show enemy chat in console)
--- ======================================================================
 do
     local chat_reveal = {}
     chat_reveal.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Enemy Chat Revealer")
@@ -7327,10 +7234,7 @@ do
     _G.__chat_reveal = chat_reveal
 end
 
-
--- ======================================================================
 --  SESSION STATISTICS (shown on Home page)
--- ======================================================================
 do
     local _stats = {
         session_start = globals.realtime and globals.realtime() or 0,
@@ -7356,10 +7260,7 @@ do
     end)
 end
 
-
--- ======================================================================
 --  ZENITH LEADERBOARD  (database kill tracking)
--- ======================================================================
 do
     local _LB_KEY   = 'zenith_leaderboard_v1'
     local _TOT_KEY  = 'zenith_total_users_v1'
@@ -7397,7 +7298,7 @@ do
             if e.u == _my_user then rank = i; break end
         end
         shared.fl_leaderboard:set(string.format(
-            '★Leaderboard: \affd700ff#%d\affffffff of %d (\affd700ff%d kills\affffffff)',
+            '\a444444ffkills  \affd700ff#%d\a666666ff/%d  \affffffff%d kills',
             rank, total, my_k))
     end
 
@@ -7417,7 +7318,6 @@ do
     -- initial label update
     _update_lb_label()
 end
--- ======================================================================
 client.set_event_callback("net_update_end", exploit.handle_defensive)
 client.set_event_callback("net_update_end", exploit.net_update)
 client.set_event_callback("net_update_end", localplayer.net_update)
@@ -7457,13 +7357,6 @@ client.set_event_callback("player_hurt", log_aimbot_shots.player_hurt)
 client.set_event_callback("round_prestart", hit_marker.round_prestart)
 cvar.developer:set_raw_int(0)
 
-
-
-
-
-
-
-
 local resolver_show_tab  -- defined after resolver is created
 
 menu.set_callback(function()
@@ -7501,9 +7394,8 @@ menu.set_callback(function()
 
     local page = gui.selection:get()
 
-
     -- ── AIMBOT ──────────────────────────────────────────────────────
-    if page == "Aimbot" then
+    if page == "◎  Aimbot" then
         -- ── Rage Settings ───────────────────────────────────────────
         local rg = _G.__zn_rage
         if rg then
@@ -7606,7 +7498,7 @@ menu.set_callback(function()
 
     -- ── BUILDER ──────────────────────────────────────────────────────
     -- AA builder + Manual Yaw + Edge Yaw + Freestanding
-    if page == "Builder" then
+    if page == "◆  Builder" then
         -- Manual Yaw
         _safe_display(manual_direction.enabled)
         if manual_direction.enabled:get() then
@@ -7712,7 +7604,7 @@ menu.set_callback(function()
     end
 
     -- ── DEFENSIVE ────────────────────────────────────────────────────
-    if page == "Defensive" then
+    if page == "❈  Defensive" then
         _safe_display(defensive.enabled)
         if defensive.enabled:get() then
             _safe_display(defensive.mode)
@@ -7731,13 +7623,13 @@ menu.set_callback(function()
     end
 
     -- ── RESOLVER ─────────────────────────────────────────────────────
-    if page == "Resolver" then
+    if page == "↻  Resolver" then
         if resolver_show_tab then resolver_show_tab() end
     end
 
     -- ── VISUAL ───────────────────────────────────────────────────────
     -- Widgets, Custom scope, Clientside nickname
-    if page == "Visual" then
+    if page == "◉  Visual" then
         _safe_display(widgets.enabled)
         if widgets.enabled:get() then
             _safe_display(widgets.items)
@@ -7770,7 +7662,7 @@ menu.set_callback(function()
 
     -- ── MISC ─────────────────────────────────────────────────────────
     -- Features/tweaks, AA tweaks, Safe Head, Buy Bot, Clantag, extras
-    if page == "Misc" then
+    if page == "☰  Misc" then
         -- Features toggle
         _safe_display(settings.tweaks_enable)
         if settings.tweaks_enable:get() then
@@ -7831,24 +7723,21 @@ menu.set_callback(function()
     end
 
     -- HOME PAGE
-    if page == "Home" then
+    if page == "⌂  Home" then
         if _G.__home then _G.__home.show() end
     end
 
-    if page == "Configs" then
+    if page == "⚙  Configs" then
         if _G.__configs_show then _G.__configs_show() end
     end
 end)
 
-
 if _HAS_AIMBOT then
--- ======================================================================
 --  ZENITH RAGE SETTINGS  v2
 --  Auto HC / Min-Dmg / Body-Aim / Safepoint with per-weapon presets
 --  Improved: better distance curve, armor detection, prediction quality,
 --  lethal-shot detection, miss-driven dmg escalation, smooth HC,
 --  my-vel penalty, scoped modifier, true Dynamic blending
--- ======================================================================
 local _zn_rage = {}
 do
     -- ── weapon categories ───────────────────────────────────────────────────
@@ -8375,13 +8264,10 @@ do
 end
 end -- _HAS_AIMBOT
 
-
 if _HAS_AIMBOT then
--- ======================================================================
 --  ZENITH SMART FEATURES
 --  Multipoint / Head Scale / Target Priority / Bullet Impact ESP
 --  Bomb awareness / Smoke/Flash reactive AA / Weapon-reload awareness
--- ======================================================================
 do
 
 -- ── per-target multipoint + head scale control ───────────────────────────
@@ -8757,16 +8643,7 @@ end -- _HAS_AIMBOT
 
 menu.update()
 
-
-
-
-
-
-
-
--- ======================================================================
 --  CONFIG SYSTEM (Zenith)
--- ======================================================================
 do
     local _db_key  = 'zenith_cfgs_v3'
     local _remote  = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
@@ -9054,10 +8931,7 @@ do
     client.delay_call(1, reload)
 end
 
-
--- ======================================================================
 --  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
--- ======================================================================
 do
     local home = {}
     _G.__home = home
@@ -9124,7 +8998,6 @@ do
 end
 
 --  CLANTAG SYSTEM (zenith.gs)
--- ======================================================================
 do
     local mp = {}
     _G.__misc_page = mp
@@ -9259,10 +9132,6 @@ do
     end)
 end
 
-client.color_log(113, 152, 255, '[Zenith] Clantag system loaded.')
-
-
-
 local math_abs = math.abs
 local math_sqrt = math.sqrt
 local math_floor = math.floor
@@ -9286,10 +9155,6 @@ local string_format = string.format
 local string_rep    = string.rep
 local bit = require('bit')
 
--- ======================================================================
-
--- ======================================================================
-
 local NN3 = {
     cfg  = { inp=20, hid=48, out=3, lr=0.038, mom=0.87 },
     wh={}, wo={}, vh={}, vo={}, mem={},
@@ -9303,9 +9168,7 @@ for i=1,48 do NN3.wo[i]={}; NN3.vo[i]={}
     for j=1,3 do NN3.wo[i][j]=_nn3_xavier(48,3); NN3.vo[i][j]=0 end
 end
 
--- ======================================================================
 --  ZENITH RESOLVER  v3  (nightly only)
--- ======================================================================
 if not (_HAS_RESOLVER and _auth_alive) then goto _resolver_end end
 
 -- module table: holds all persistent state to stay under LuaJIT 200-local limit
@@ -9773,7 +9636,6 @@ local function _real_desync(ast)
     local d = _ydelta(ast.m_flEyeYaw, ast.m_flCurrentFeetYaw)
     return d
 end
-
 
 -- air velocity resolver
 local function _air_vel(ent, d, ast)
@@ -10360,8 +10222,5 @@ resolver_show_tab=function()
     _safe_display(_M.lbl_state);  _safe_display(_M.lbl_layers);_safe_display(_M.lbl_exploit)
 end
 
-client.color_log(100,255,150,'[Zenith] Resolver v3 loaded.\0')
-
 end)()
 ::_resolver_end::
-
