@@ -8909,6 +8909,7 @@ do
         _safe_display(m_cloud_upload)
         _safe_display(m_cloud_status)
         _safe_display(m_status)
+        pcall(menu.update)
     end
 
     -- expose for external use
