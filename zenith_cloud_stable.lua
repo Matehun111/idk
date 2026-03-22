@@ -2215,7 +2215,9 @@ local _chaos_jitter_seed = 0
     local val = 180
     local function modify_jitter()
         -- micro-jitter: add tiny noise every tick to prevent stable tracking
-        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off' then
+        -- suppressed during auto-peek so the shot goes exactly where aimed
+        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off'
+        and not ctx._suppress_micro_jitter then
             ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
         end
 
@@ -2238,7 +2240,9 @@ local _chaos_jitter_seed = 0
         end
 
         -- micro-jitter: add tiny noise every tick to prevent stable tracking
-        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off' then
+        -- suppressed during auto-peek so the shot goes exactly where aimed
+        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off'
+        and not ctx._suppress_micro_jitter then
             ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
         end
 
@@ -2561,12 +2565,18 @@ do
     local lp_on_dt   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "- Only on DT")
         :record("aa", "lagpeak::on_dt"):save()
 
+    local lp_on_miss = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Only on Miss")
+        :record("aa", "lagpeak::on_miss"):save()
+
+    -- update show function to include on_miss
+
     _G.__lagpeak_show = function()
         _safe_display(lp_enabled)
         if lp_enabled:get() then
             _safe_display(lp_amount)
             _safe_display(lp_recover)
             _safe_display(lp_on_dt)
+            _safe_display(lp_on_miss)
         end
     end
 
@@ -2575,6 +2585,23 @@ do
     local _lp_orig_var   = nil
     local _lp_spiking    = false
     local _lp_spike_end  = -1
+
+    -- trigger lag peak on miss too
+    client.set_event_callback("aim_miss", function(e)
+        if not lp_enabled:get() then return end
+        if not (lp_on_miss and lp_on_miss:get()) then return end
+        local fl = software and software.aa and software.aa.fakelag
+        if not fl then return end
+        pcall(function()
+            _lp_orig_limit = ui.get(fl.limit)
+            _lp_orig_var   = ui.get(fl.variance)
+        end)
+        pcall(ui.set, fl.limit,    lp_amount:get())
+        pcall(ui.set, fl.variance, 0)
+        _lp_spiking   = true
+        _lp_fire_tick = globals.tickcount()
+        _lp_spike_end = _lp_fire_tick + lp_recover:get()
+    end)
 
     client.set_event_callback("aim_fire", function(e)
         if not lp_enabled:get() then return end
@@ -3050,7 +3077,9 @@ end
 --- region avoid_backstab
 do
     local is_active = false
-    local AVOID_BACKSTAB_MAX_DISTANCE_SQR = 220 * 220
+    -- configurable range: 180 (tight) to 350 (paranoid)
+    -- 220 is default CS:GO knife range + small buffer
+    local AVOID_BACKSTAB_MAX_DISTANCE_SQR = 260 * 260
 
     local function get_enemies_with_knife()
         local enemies = entity.get_players(true)
@@ -3068,7 +3097,19 @@ do
 
             local wpn_class = entity.get_classname(wpn)
 
-            if wpn_class == "CKnife" then
+            -- detect all melee + taser threats
+            local is_melee = wpn_class == "CKnife"
+                or wpn_class == "CKnifeGG"
+                or wpn_class == "CKnifeCT"
+                or wpn_class == "CKnifeT"
+                or wpn_class == "CKnifeGhost"
+                or wpn_class == "CKnifeFalchion"
+                or wpn_class == "CKnifeButterfly"
+                or wpn_class == "CKnifeKarambit"
+                or wpn_class == "CKnifeBowie"
+                or wpn_class == "CKnifeBayonet"
+                or wpn_class == "CEliteWeapon"
+            if is_melee then
                 list[#list + 1] = enemy
             end
 
@@ -3152,33 +3193,58 @@ do
     local presets = {
         ["Standing"] = {
             [2] = function(e, ctx, me)
-                ctx.yaw_offset = -6
-
+                -- lean slightly left, body says right = harder to trace
+                ctx.yaw_offset = -18
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 0
+                ctx.body_yaw_offset = 180
             end,
 
             [3] = function(e, ctx, me)
-                ctx.yaw_offset = 8
-
+                ctx.yaw_offset = 22
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 0
+                ctx.body_yaw_offset = -180
+            end
+        },
+
+        ["Moving"] = {
+            [2] = function(e, ctx, me)
+                ctx.yaw_offset = -14
+                ctx.body_yaw = "Static"
+                ctx.body_yaw_offset = 180
+            end,
+
+            [3] = function(e, ctx, me)
+                ctx.yaw_offset = 14
+                ctx.body_yaw = "Static"
+                ctx.body_yaw_offset = -180
+            end
+        },
+
+        ["Slow Walk"] = {
+            [2] = function(e, ctx, me)
+                ctx.yaw_offset = -20
+                ctx.body_yaw = "Static"
+                ctx.body_yaw_offset = 180
+            end,
+
+            [3] = function(e, ctx, me)
+                ctx.yaw_offset = 20
+                ctx.body_yaw = "Static"
+                ctx.body_yaw_offset = -180
             end
         },
 
         ["Crouched"] = {
             [2] = function(e, ctx, me)
-                ctx.yaw_offset = 0
-
+                ctx.yaw_offset = -10
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 0
+                ctx.body_yaw_offset = 180
             end,
 
             [3] = function(e, ctx, me)
-                ctx.yaw_offset = 40
-
+                ctx.yaw_offset = 45
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
+                ctx.body_yaw_offset = -180
             end
         },
 
@@ -4481,7 +4547,7 @@ do
             return
         end
 
-        if not aa_tweaks.items:have_key('Auto Peek Improvements')  then
+        if not aa_tweaks.items:have_key('Auto Peek Improvements') then
             return
         end
 
@@ -4489,10 +4555,15 @@ do
             return
         end
 
-        ctx.yaw_offset = 0
-        ctx.yaw_jitter = 'Off'
-        ctx.body_yaw = 'Off'
-        ctx.freestanding = true
+        -- clean shot position: zero all jitter so bullet goes exactly where aimed
+        ctx.yaw_offset       = 0
+        ctx.yaw_jitter       = 'Off'
+        ctx.body_yaw         = 'Static'
+        ctx.body_yaw_offset  = 0
+        ctx.freestanding     = true
+        ctx.pitch            = 'Default'
+        -- disable micro-jitter during peek shot
+        ctx._suppress_micro_jitter = true
     end
 end
 
@@ -6315,87 +6386,170 @@ end
 
 --- region killsay
 do
+    -- ── default line pool ─────────────────────────────────────────────
     local _ks_default = {
         'ez', 'L', 'ratio', 'skill issue', 'get recked',
         'not even close', 'uninstall', 'LOL', 'ggez', 'trash',
         'outplayed', 'cry about it', 'too easy', 'go next',
         'rekt', 'kys', 'mad?', 'sit', 'done', 'bye',
         'no shot', 'clean', 'diff', 'pack it up',
+        'u good?', 'next', 'lmao', 'terrible', 'W',
+        'bro really tried', 'stay down', 'touch grass',
     }
+
+    local _ks_awp = {
+        'awp diff', 'big green W', 'one shot wonder',
+        'did u even see that coming', 'click click dead',
+        'scoped in on ur soul', 'bolt action diff',
+    }
+
+    local _ks_multi = {
+        'double', 'two for one', 'double tap diff',
+        'cluttered', 'they came in pairs', 'buy better positions',
+        'RAMPAGE', 'stop feeding', 'ace incoming',
+    }
+
+    local _ks_rapid_kills = 0
+    local _ks_last_kill_t = 0
+
+    -- ── headshot-specific pool ────────────────────────────────────────
     local _ks_headshot = {
         'headshot :)', 'one tap', 'clean hs', 'aim diff',
         'right in the head', 'nailed it', 'boom headshot',
     }
+
+    -- ── knife-specific pool ───────────────────────────────────────────
     local _ks_knife = {
         'knifed lol', 'put the gun away', 'knife diff',
         'too close for bullets', 'get baited',
     }
+
+    -- ── menu items ────────────────────────────────────────────────────
     local ks_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Killsay')
         :record('misc', 'killsay::enabled'):save()
+
     local ks_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles',
         merge { 'Killsay Mode', '\n', 'killsay::mode' },
         { 'Default', 'Headshot Aware', 'Knife Aware', 'All Aware' })
         :record('misc', 'killsay::mode'):save()
+
     local ks_custom_en = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Custom Lines')
         :record('misc', 'killsay::custom_en'):save()
+
     local ks_custom = menu.new_item(ui.new_textbox, 'AA', 'Anti-aimbot angles', 'Custom Line')
         :record('misc', 'killsay::custom'):save()
+
     local ks_cooldown = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
-        merge { 'Cooldown', '\n', 'killsay::cooldown' }, 1, 30, 4, true, 's')
+        merge { 'Cooldown', '\n', 'killsay::cooldown' },
+        1, 30, 4, true, 's')
         :record('misc', 'killsay::cooldown'):save()
+
     local ks_chance = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
-        merge { 'Send Chance', '\n', 'killsay::chance' }, 1, 100, 75, true, '%')
+        merge { 'Send Chance', '\n', 'killsay::chance' },
+        1, 100, 75, true, '%')
         :record('misc', 'killsay::chance'):save()
+
+    -- ── state ─────────────────────────────────────────────────────────
     local _ks_last_time  = 0
-    local _ks_kill_queue = {}
-    local function _ks_pick(is_headshot, is_knife, mode)
+    local _ks_kill_queue = {}   -- { is_headshot, is_knife }
+
+    -- ── pick a line ───────────────────────────────────────────────────
+    local function _ks_pick(is_headshot, is_knife, is_awp, mode)
+        -- custom line overrides everything if enabled
         local custom_en = ks_custom_en and ks_custom_en:get()
         if custom_en then
             local ok, txt = pcall(ui.get, ks_custom.ref)
             if ok and txt and txt ~= '' then return txt end
         end
+
+        -- multi-kill pool: 3+ kills in 8 seconds
+        local now = globals.realtime()
+        if now - _ks_last_kill_t < 8 then
+            _ks_rapid_kills = _ks_rapid_kills + 1
+        else
+            _ks_rapid_kills = 1
+        end
+        _ks_last_kill_t = now
+        if _ks_rapid_kills >= 3 then
+            return _ks_multi[math.random(#_ks_multi)]
+        end
+
         local pool = _ks_default
-        if mode == 'Headshot Aware' and is_headshot then pool = _ks_headshot
-        elseif mode == 'Knife Aware' and is_knife then pool = _ks_knife
+        if mode == 'Headshot Aware' and is_headshot then
+            pool = _ks_headshot
+        elseif mode == 'Knife Aware' and is_knife then
+            pool = _ks_knife
         elseif mode == 'All Aware' then
-            if is_headshot then pool = _ks_headshot
-            elseif is_knife then pool = _ks_knife
+            if is_headshot      then pool = _ks_headshot
+            elseif is_knife     then pool = _ks_knife
+            elseif is_awp       then pool = _ks_awp
             end
         end
+
         return pool[math.random(#pool)]
     end
+
+    -- ── player_death: queue the kill ─────────────────────────────────
     client.set_event_callback('player_death', function(e)
         if not ks_enabled:get() then return end
+
         local me = entity.get_local_player()
         if not me then return end
         if client.userid_to_entindex(e.attacker) ~= me then return end
+
+        -- don't say on own team
         local victim = client.userid_to_entindex(e.userid)
         if victim and not entity.is_enemy(victim) then return end
-        local wpn = entity.get_player_weapon(me)
-        local cls = wpn and entity.get_classname(wpn) or ''
+
+        -- weapon check
+        local wpn     = entity.get_player_weapon(me)
+        local wpn_id  = wpn and bit.band(entity.get_prop(wpn,'m_iItemDefinitionIndex') or 0, 0xFFFF) or 0
+        local cls     = wpn and entity.get_classname(wpn) or ''
+        local is_knife = cls:find('knife') ~= nil
+        local is_awp   = wpn_id == 9 or wpn_id == 11 or wpn_id == 38  -- awp/auto
+
         table.insert(_ks_kill_queue, {
             is_headshot = e.headshot == true,
-            is_knife    = cls:find('knife') ~= nil,
+            is_knife    = is_knife,
+            is_awp      = is_awp,
         })
     end)
+
+    -- ── paint_ui: flush queue with cooldown + chance ─────────────────
     client.set_event_callback('paint_ui', function()
-        if not ks_enabled:get() then _ks_kill_queue = {}; return end
+        if not ks_enabled:get() then
+            _ks_kill_queue = {}
+            return
+        end
         if #_ks_kill_queue == 0 then return end
+
         local now = globals.realtime()
         if now - _ks_last_time < ks_cooldown:get() then return end
+
+        -- chance roll
         if math.random(100) > ks_chance:get() then
-            table.remove(_ks_kill_queue, 1); return
+            table.remove(_ks_kill_queue, 1)
+            return
         end
-        local kill = table.remove(_ks_kill_queue, 1)
-        local line = _ks_pick(kill.is_headshot, kill.is_knife, ks_mode:get())
+
+        local kill  = table.remove(_ks_kill_queue, 1)
+        local mode  = ks_mode:get()
+        local line  = _ks_pick(kill.is_headshot, kill.is_knife, kill.is_awp, mode)
+
         if line and line ~= '' then
             client.exec('say ' .. line)
             _ks_last_time = now
         end
     end)
+
+    -- ── expose show helper for Misc page ─────────────────────────────
     _G.__killsay = {
-        enabled=ks_enabled, mode=ks_mode, custom_en=ks_custom_en,
-        custom=ks_custom, cooldown=ks_cooldown, chance=ks_chance,
+        enabled      = ks_enabled,
+        mode         = ks_mode,
+        custom_en    = ks_custom_en,
+        custom       = ks_custom,
+        cooldown     = ks_cooldown,
+        chance       = ks_chance,
     }
 end
 
@@ -6630,32 +6784,51 @@ do
     : record("settings", "buy_bot::utility")
     : save()
 
-    client.set_event_callback("round_end_upload_stats", function ()
-        local money = entity.get_prop(entity.get_local_player(), "m_iAccount")
+    local function _do_buy()
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local money = entity.get_prop(lp, "m_iAccount") or 0
 
-        if not buy_bot.enabled:get() or money <= 800 then
-            return
-        end
+        if not buy_bot.enabled:get() or money <= 800 then return end
 
-        local buy = ''
-        local primary = buy_bot.primary:get()
+        local primary   = buy_bot.primary:get()
         local secondary = buy_bot.secondary:get()
-        local util = buy_bot.utility:get()
+        local util      = buy_bot.utility:get()
+        local armor     = entity.get_prop(lp, "m_ArmorValue") or 0
+        local has_helm  = entity.get_prop(lp, "m_bHasHelmet") == 1
+        local buy = ""
 
-        buy = primary == 'None' and buy or buy .. 'buy ' .. primary_console[primary] .. '; '
-        buy = secondary == 'None' and buy or buy .. 'buy ' .. secondary_console[secondary] .. '; '
+        buy = primary   == 'None' and buy or buy .. 'buy ' .. (primary_console[primary]   or '') .. '; '
+        buy = secondary == 'None' and buy or buy .. 'buy ' .. (secondary_console[secondary] or '') .. '; '
 
         for i = 1, #util do
-            local item = utility_console[ util[i] ]
-            buy = buy .. "buy " .. item .. "; "
+            local item_key = util[i]
+            local item_cmd = utility_console[item_key]
+            if item_cmd then
+                -- skip vesthelm if already have helmet
+                if item_key == "Helmet" and has_helm then
+                    -- already have helmet, buy vest instead if no armor
+                    if armor < 50 then buy = buy .. "buy vest; " end
+                -- skip vest/helmet if already have enough armor
+                elseif (item_key == "Kevlar") and armor >= 95 then
+                    -- already full armor, skip
+                else
+                    buy = buy .. "buy " .. item_cmd .. "; "
+                end
+            end
         end
 
-        if buy == '' then
-            return
-        end
-
+        if buy == "" then return end
         client.exec(buy)
+    end
+
+    -- fire on both events for reliability
+    client.set_event_callback("round_end_upload_stats", _do_buy)
+    client.set_event_callback("round_poststart", function()
+        -- small delay so buy menu is available
+        client.delay_call(0.5, _do_buy)
     end)
+
 end
 
 ---region reatdfdfsd
@@ -7021,6 +7194,8 @@ menu.set_callback(function()
 
             ::continue::
         end
+        -- Lag Peak
+        if _G.__lagpeak_show then _G.__lagpeak_show() end
     end
 
     -- ── DEFENSIVE ────────────────────────────────────────────────────
@@ -7161,6 +7336,9 @@ menu.set_callback(function()
         if dn then _safe_display(dn.key) end
         local cr = _G.__chat_reveal
         if cr then _safe_display(cr.enabled) end
+
+        -- Bullet Impact ESP (smart features)
+        if _show_impacts ~= nil then _safe_display(_show_impacts) end
 
     end
 
