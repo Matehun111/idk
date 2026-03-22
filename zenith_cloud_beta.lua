@@ -8052,6 +8052,10 @@ do
             elseif target_hp <= 40 then
                 dmg = math.max(target_hp - 8, 1)
                 hc  = math.max(hc - 5, 35)
+            elseif target_hp >= 100 then
+                -- full HP: always require 100 dmg minimum
+                -- overrides preset values like 82/87/90
+                dmg = math.max(dmg, 100)
             end
             -- lethal shot detection: if we can 1-shot from here, lower dmg gate
             -- so GS fires faster rather than waiting for a "perfect" shot
