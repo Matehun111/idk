@@ -7577,6 +7577,9 @@ menu.set_callback(function()
             _safe_display(da.enabled)
             if da.enabled:get() then _safe_display(da.damage) end
         end
+
+        -- Lag Peak
+        if _G.__lagpeak_show then _G.__lagpeak_show() end
     end
 
     -- ── BUILDER ──────────────────────────────────────────────────────
@@ -7684,8 +7687,6 @@ menu.set_callback(function()
 
             ::continue::
         end
-        -- Lag Peak
-        if _G.__lagpeak_show then _G.__lagpeak_show() end
     end
 
     -- ── DEFENSIVE ────────────────────────────────────────────────────
