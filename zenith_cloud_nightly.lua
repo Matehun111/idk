@@ -8415,33 +8415,6 @@ local _show_impacts = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles',
     :record('aa', 'smart::bullet_impact'):save()
 
 -- ── bomb awareness ───────────────────────────────────────────────────────
-local _bomb_planted    = false
-local _bomb_plant_time = 0
-local _bomb_site       = '?'
-local _defuse_started  = false
-local _BOMB_TIMER      = 40  -- c4 fuse default
-
-client.set_event_callback('bomb_planted', function(e)
-    _bomb_planted    = true
-    _bomb_plant_time = globals.curtime()
-    -- site: 0=A, 1=B
-    _bomb_site       = (e.site == 0) and 'A' or 'B'
-    _defuse_started  = false
-end)
-
-client.set_event_callback('bomb_defused', function()
-    _bomb_planted   = false
-    _defuse_started = false
-end)
-
-client.set_event_callback('bomb_begindefuse', function(e)
-    _defuse_started = true
-end)
-
-client.set_event_callback('round_start', function()
-    _bomb_planted   = false
-    _defuse_started = false
-end)
 
 -- ── smoke/flash reactive AA ──────────────────────────────────────────────
 -- When a smoke or flash detonates, temporarily relax HC
@@ -8571,34 +8544,6 @@ client.set_event_callback('paint', function()
         end
     end
 
-    -- bomb timer overlay
-    if _bomb_planted then
-        local elapsed  = globals.curtime() - _bomb_plant_time
-        local remaining= _BOMB_TIMER - elapsed
-        if remaining < 0 then remaining = 0 end
-
-        local sw, sh   = client.screen_size()
-        local cx       = sw * 0.5
-        local cy       = sh * 0.12
-
-        local r = remaining > 10 and 255 or 255
-        local g = remaining > 10 and math.floor(remaining / _BOMB_TIMER * 255) or 60
-        local b = 60
-
-        local bar_w  = 220
-        local bar_h  = 8
-        local filled = math.floor(bar_w * (remaining / _BOMB_TIMER))
-
-        -- background
-        renderer.rectangle(cx - bar_w*0.5 - 2, cy - 2, bar_w + 4, bar_h + 4, 10, 10, 10, 200)
-        -- fill
-        renderer.rectangle(cx - bar_w*0.5, cy, filled, bar_h, r, g, b, 220)
-        -- text
-        local txt = string.format('C4 [%s]  %.1fs%s',
-            _bomb_site, remaining,
-            _defuse_started and '  [DEFUSING]' or '')
-        renderer.text(cx, cy - 14, r, g, b, 220, 'c', 0, txt)
-    end
 end)
 
 -- ── round_prestart cleanup ────────────────────────────────────────────────
