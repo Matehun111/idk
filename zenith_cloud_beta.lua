@@ -2104,10 +2104,13 @@ do
     local ctx = { }
 
     local zenithyaw_ways = {
-        ["2-Way"] = { -0.5, 0.5 },
-        ["3-Way"] = { -0.5, 0, 0.5 },
-        ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 }
-    }
+    ["2-Way"] = { -0.5, 0.5 },
+    ["3-Way"] = { -0.5, 0, 0.5 },
+    ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 },
+    ["7-Way"] = { -1, -0.57, -0.28, 0, 0.28, 0.57, 1 },
+    ["Chaos"] = { -1, -0.72, -0.44, -0.16, 0.16, 0.44, 0.72, 1 }
+}
+local _chaos_jitter_seed = 0
 
     local function calculate_jitter_way(n, offset)
         local fmod = localplayer.packets % n
@@ -2181,6 +2184,23 @@ do
         end
     end
 
+        -- velocity jitter bias: lean jitter toward strafe direction
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off' then
+            local lp = entity.get_local_player()
+            if lp then
+                local vx = entity.get_prop(lp, 'm_vecVelocity[0]') or 0
+                local vy = entity.get_prop(lp, 'm_vecVelocity[1]') or 0
+                local spd = math.sqrt(vx*vx + vy*vy)
+                if spd > 20 then
+                    local eye_yaw = localplayer.angles and localplayer.angles.y or 0
+                    local vel_yaw = math.deg(math.atan2(vy, vx))
+                    local rel = ((vel_yaw - eye_yaw + 180) % 360) - 180
+                    local bias = rel > 0 and math.min(spd * 0.04, 8) or -math.min(spd * 0.04, 8)
+                    ctx.yaw_offset = (ctx.yaw_offset or 0) + bias
+                end
+            end
+        end
+
     local safe_head_presets = {
         [1] = {
             [3] = {
@@ -2207,6 +2227,50 @@ do
     local randomized
     local val = 180
     local function modify_jitter()
+        -- micro-jitter: add tiny noise every tick to prevent stable tracking
+        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off' then
+            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
+        end
+
+        -- desync shift: flip jitter_offset sign every 18-26 ticks
+        -- makes the desync amount itself cycle, not just the direction
+        -- resolvers that pattern-match offset magnitude will mispredict
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
+        and ctx.jitter_offset ~= nil then
+            local shift_cycle = 22
+            local phase = globals.tickcount() % shift_cycle
+            if phase < shift_cycle * 0.45 then
+                -- normal phase: use jitter_offset as-is
+            elseif phase < shift_cycle * 0.55 then
+                -- transition zone: briefly reduce to confuse pattern analysis
+                ctx.jitter_offset = ctx.jitter_offset * 0.35
+            else
+                -- shifted phase: mirror the offset
+                ctx.jitter_offset = -ctx.jitter_offset
+            end
+        end
+
+        -- micro-jitter: add tiny noise every tick to prevent stable tracking
+        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off' then
+            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
+        end
+
+        -- desync shift: flip jitter_offset sign every 22 ticks
+        -- makes the desync amount itself cycle, not just the direction
+        -- resolvers that pattern-match offset magnitude will mispredict
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
+        and ctx.jitter_offset ~= nil then
+            local shift_cycle = 22
+            local phase = globals.tickcount() % shift_cycle
+            if phase < shift_cycle * 0.45 then
+                -- normal phase: use jitter_offset as-is
+            elseif phase < shift_cycle * 0.55 then
+                ctx.jitter_offset = ctx.jitter_offset * 0.35
+            else
+                ctx.jitter_offset = -ctx.jitter_offset
+            end
+        end
+
         if ctx.jitter_randomization ~= nil then
             if localplayer.packets % 2 == 0 or randomized == nil then
                 randomized = client.random_int(0, (ctx.jitter_offset > 0 and 1 or -1) * ctx.jitter_randomization)
@@ -2217,13 +2281,18 @@ do
 
         if ctx.body_yaw == 'Randomize Jitter' then
             ctx.body_yaw = 'Static'
-
             if localplayer.choking_bool then
                 local rand = client.random_int(0, 1)
                 val = rand == 1 and 180 or -180
             end
-
             ctx.body_yaw_offset = val
+        elseif ctx.body_yaw == 'Ghost' then
+            -- Ghost: body yaw goes OPPOSITE to the current yaw offset
+            -- makes body-based resolvers predict the wrong real side
+            ctx.body_yaw = 'Static'
+            local cur_off = ctx.yaw_offset or 0
+            -- if we're offset right, body yaw says left and vice versa
+            ctx.body_yaw_offset = cur_off > 0 and -180 or 180
         end
 
         if ctx.yaw_jitter == "Zenith" then
@@ -2238,7 +2307,17 @@ do
             local zenith_delay = ctx.zenith_delay
 
             local ways = zenithyaw_ways[zenith_mode]
-            local way = ways[(localplayer.packets % #ways) + 1]
+            local way
+            if zenith_mode == 'Chaos' then
+                -- Chaos: seed mixes tick + packets + body yaw for non-repeating pattern
+                _chaos_jitter_seed = (_chaos_jitter_seed
+                    + globals.tickcount() * 7
+                    + localplayer.packets * 13
+                    + math.floor(math.abs(localplayer.body_yaw or 0))) % #ways
+                way = ways[_chaos_jitter_seed + 1]
+            else
+                way = ways[(localplayer.packets % #ways) + 1]
+            end
 
             -- god ( qhose ) forgive me for the piece of code below
             --- region lulz diagnostics disable@
@@ -2437,6 +2516,115 @@ do
     end
 end
 
+--- region aa_reactive
+do
+    local _last_hurt_tick = 0
+    local _flip_body_next = false
+
+    client.set_event_callback('player_hurt', function(e)
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local lp_uid = entity.get_prop(lp, 'm_iUserId')
+        if e.userid == lp_uid then
+            -- WE got hurt: schedule a body yaw flip for next 4 ticks
+            -- breaks enemy resolver side-confirmation
+            if angles and angles.type and angles.type:get() ~= 'Off' then
+                _flip_body_next = true
+                _last_hurt_tick = globals.tickcount()
+            end
+        end
+    end)
+
+    client.set_event_callback('setup_command', function()
+        if not _flip_body_next then return end
+        if globals.tickcount() - _last_hurt_tick > 4 then
+            _flip_body_next = false
+            return
+        end
+        -- flip body yaw for these ticks so their resolver loses confidence
+        local ok, cur = pcall(ui.get, software.aa.angles.body_yaw[1])
+        if ok and cur and cur ~= 'Off' then
+            local ok2, cur_off = pcall(ui.get, software.aa.angles.body_yaw[2])
+            if ok2 and cur_off then
+                pcall(override.set, software.aa.angles.body_yaw[2],
+                    cur_off > 0 and -180 or 180)
+            end
+        end
+    end)
+end
+
+--- region lag_peak
+do
+    -- Lag Peak: when you fire a shot, spike the fake lag to maximum for 1 tick
+    -- The shot arrives during a different lagcomp window than the enemy expects,
+    -- making it harder for their aimbot to compensate for your real position.
+    -- Works best combined with Double Tap.
+
+    local lp_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Lag Peak")
+        :record("aa", "lagpeak::enabled"):save()
+
+    local lp_amount  = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Peak Amount", "\n", "lagpeak::amount" }, 1, 14, 14, true, "t")
+        :record("aa", "lagpeak::amount"):save()
+
+    local lp_recover = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Recover Ticks", "\n", "lagpeak::recover" }, 1, 6, 2, true, "t")
+        :record("aa", "lagpeak::recover"):save()
+
+    local lp_on_dt   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "- Only on DT")
+        :record("aa", "lagpeak::on_dt"):save()
+
+    _G.__lagpeak_show = function()
+        _safe_display(lp_enabled)
+        if lp_enabled:get() then
+            _safe_display(lp_amount)
+            _safe_display(lp_recover)
+            _safe_display(lp_on_dt)
+        end
+    end
+
+    local _lp_fire_tick  = -999
+    local _lp_orig_limit = nil
+    local _lp_orig_var   = nil
+    local _lp_spiking    = false
+    local _lp_spike_end  = -1
+
+    client.set_event_callback("aim_fire", function(e)
+        if not lp_enabled:get() then return end
+        if lp_on_dt:get() and not software.is_double_tap() then return end
+        local fl = software and software.aa and software.aa.fakelag
+        if not fl then return end
+        -- save current limit before spike
+        pcall(function()
+            _lp_orig_limit = ui.get(fl.limit)
+            _lp_orig_var   = ui.get(fl.variance)
+        end)
+        -- spike: set fake lag to peak amount
+        pcall(ui.set, fl.limit,    lp_amount:get())
+        pcall(ui.set, fl.variance, 0)  -- no variance during spike
+        _lp_spiking   = true
+        _lp_fire_tick = globals.tickcount()
+        _lp_spike_end = _lp_fire_tick + lp_recover:get()
+    end)
+
+    client.set_event_callback("setup_command", function()
+        if not lp_enabled:get() then return end
+        if not _lp_spiking then return end
+        local fl = software and software.aa and software.aa.fakelag
+        if not fl then return end
+        -- restore original limit after recover ticks
+        if globals.tickcount() >= _lp_spike_end then
+            if _lp_orig_limit ~= nil then
+                pcall(ui.set, fl.limit,    _lp_orig_limit)
+                pcall(ui.set, fl.variance, _lp_orig_var or 0)
+            end
+            _lp_spiking   = false
+            _lp_orig_limit = nil
+            _lp_orig_var   = nil
+        end
+    end)
+end
+
 ---region settings tweaks
 do
     settings.tweaks_enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Features")
@@ -2590,12 +2778,22 @@ do
     : record("aa", "defensive::state")
     : save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch" })
+    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Snap Pitch", "Fake Up" })
     : record("aa", "defensive::pitch")
     : save()
 
-    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random" })
-    : record("aa", "defensive::pitch")
+    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random", "Snap", "Snap Jitter" })
+    : record("aa", "defensive::yaw")
+    : save()
+
+    defensive.snap_range = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Snap Range", "\n", "defensive::snap_range" }, 45, 180, 120, true, "deg", 1)
+    : record("aa", "defensive::snap_range")
+    : save()
+
+    defensive.snap_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Snap Offset", "\n", "defensive::snap_offset" }, -180, 180, 90, true, "deg", 1)
+    : record("aa", "defensive::snap_offset")
     : save()
 
     local modes = {
@@ -2613,6 +2811,11 @@ do
     local defensive_5_way = { 90, 135, 180, 225, 270 }
     local defensive_7_way = { 0, 51, 102, 154, 205, 257, 308 }
     local _chaos_seed      = 0
+    local _snap_last_tick   = -999
+    local _snap_pitch_val   = 0
+    local _snap_pitch_tick  = -999
+    local _snap_last_offset = 0
+    local _snap_jitter_side = 1
 
     function defensive.handle(cmd, ctx)
         if not defensive.enabled:get() then
@@ -2704,6 +2907,25 @@ do
                 local tick = globals.tickcount()
                 pitch_value = (tick % 2 == 0) and client.random_float(-75, -55) or client.random_float(55, 75)
                 pitch_mode  = 'Custom'
+            elseif val == 'Snap Pitch' then
+                -- picks a completely new random extreme pitch on each defensive tick
+                -- and locks it for that choke window - makes head snap to unexpected height
+                local tc = globals.tickcount()
+                if tc ~= _snap_pitch_tick then
+                    -- snap to either far up or far down, randomly chosen each tick
+                    -- this makes it impossible to predict which height to aim at
+                    local extremes = { -89, -75, -60, 60, 75, 89 }
+                    _snap_pitch_val  = extremes[math.random(1, #extremes)]
+                    _snap_pitch_tick = tc
+                end
+                pitch_value = _snap_pitch_val
+                pitch_mode  = 'Custom'
+            elseif val == 'Fake Up' then
+                -- pitch slightly up (not full 89) to move head out of easy shot placement
+                -- without being so extreme it looks obvious
+                -- combines well with Snap yaw since the head moves both axes
+                pitch_value = client.random_float(-58, -42)
+                pitch_mode  = 'Custom'
             end
 
             if manual_yaw ~= nil and should_flick then
@@ -2732,6 +2954,30 @@ do
                 yaw_value   = utils.normalize(_chaos_seed - 180, -180, 180)
             elseif val == 'Random' then
                 yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
+            elseif val == 'Snap' then
+                local tc = globals.tickcount()
+                if tc ~= _snap_last_tick then
+                    local range  = defensive.snap_range:get()
+                    local offset = defensive.snap_offset:get()
+                    local snap_dir = (localplayer.packets % 2 == 0) and 1 or -1
+                    _snap_last_offset = utils.normalize(
+                        offset + snap_dir * (range * 0.5 + client.random_float(0, range * 0.5)),
+                        -180, 180)
+                    _snap_last_tick = tc
+                end
+                yaw_value = _snap_last_offset
+            elseif val == 'Snap Jitter' then
+                local tc = globals.tickcount()
+                local range  = defensive.snap_range:get()
+                local offset = defensive.snap_offset:get()
+                if tc ~= _snap_last_tick then
+                    _snap_jitter_side = (_snap_jitter_side == 1) and -1 or 1
+                    _snap_last_tick = tc
+                end
+                local flip = (localplayer.packets % 2 == 0) and 1 or -1
+                yaw_value = utils.normalize(
+                    offset * _snap_jitter_side * flip + client.random_float(-15, 15),
+                    -180, 180)
             end
 
             if manual_yaw ~= nil and should_flick then
@@ -5479,7 +5725,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "yaw_jitter" })
             : save()
 
-            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way" })
+            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way", "7-Way", "Chaos" })
             : record("aa", merge { "custom", "::", state, "::", "jitter_mode" })
             : save()
 
@@ -5503,7 +5749,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "zenith_safe" })
             : save()
 
-            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", 'Randomize Jitter' })
+            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", "Randomize Jitter", "Ghost", "Ghost", 'Randomize Jitter' })
             : record("aa", merge { "custom", "::", state, "::", "body_yaw" })
             : save()
 
@@ -5529,16 +5775,16 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 12
+            ctx.yaw_offset = 14
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 45
-            ctx.jitter_randomization = 28
-            ctx.zenith_cycle = 22
+            ctx.jitter_mode = '7-Way'  -- 7-way is harder to resolve than 3-way
+            ctx.jitter_offset = 48
+            ctx.jitter_randomization = 32
+            ctx.zenith_cycle = 20
             ctx.zenith_delay = 14
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -50
+            ctx.body_yaw = 'Ghost'  -- body yaw lies about real side
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5565,14 +5811,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 5
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 70
-            ctx.jitter_randomization = 35
-            ctx.zenith_cycle = 14
-            ctx.zenith_delay = 10
+            ctx.jitter_mode = 'Chaos'  -- Chaos = non-repeating pattern
+            ctx.jitter_offset = 72
+            ctx.jitter_randomization = 38
+            ctx.zenith_cycle = 12
+            ctx.zenith_delay = 8
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -55
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5580,16 +5826,16 @@ do
             ctx.pitch = 'Default'
             ctx.yaw_base = 'At targets'
             ctx.yaw = '180'
-            ctx.yaw_offset = 8
+            ctx.yaw_offset = 10
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 65
-            ctx.jitter_randomization = 30
-            ctx.zenith_cycle = 20
-            ctx.zenith_delay = 16
+            ctx.jitter_mode = '7-Way'
+            ctx.jitter_offset = 68
+            ctx.jitter_randomization = 34
+            ctx.zenith_cycle = 18
+            ctx.zenith_delay = 14
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -50
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5599,14 +5845,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 6
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 58
-            ctx.jitter_randomization = 24
-            ctx.zenith_cycle = 16
-            ctx.zenith_delay = 12
+            ctx.jitter_mode = 'Chaos'
+            ctx.jitter_offset = 60
+            ctx.jitter_randomization = 28
+            ctx.zenith_cycle = 14
+            ctx.zenith_delay = 10
             ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -45
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
         end,
 
         ['Air'] = function (ctx)
@@ -5616,11 +5862,11 @@ do
             ctx.yaw_180lr_mode = 'Switch delay'
             ctx.yaw_offset = 4
             ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 38
-            ctx.jitter_randomization = 20
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.jitter_mode = '5-Way'
+            ctx.jitter_offset = 44
+            ctx.jitter_randomization = 24
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5631,11 +5877,11 @@ do
             ctx.yaw_180lr_mode = 'Switch delay'
             ctx.yaw_offset = 4
             ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '3-Way'
-            ctx.jitter_offset = 38
-            ctx.jitter_randomization = 20
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -40
+            ctx.jitter_mode = '5-Way'
+            ctx.jitter_offset = 44
+            ctx.jitter_randomization = 24
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end,
 
@@ -5645,14 +5891,14 @@ do
             ctx.yaw = '180'
             ctx.yaw_offset = 0
             ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 30
-            ctx.jitter_randomization = 18
+            ctx.jitter_mode = '7-Way'
+            ctx.jitter_offset = 38
+            ctx.jitter_randomization = 22
             ctx.zenith_cycle = 10
             ctx.zenith_delay = 8
             ctx.zenith_safe = false
-            ctx.body_yaw = 'Opposite'
-            ctx.body_yaw_offset = 0
+            ctx.body_yaw = 'Ghost'
+            ctx.body_yaw_offset = -180
             ctx.freestanding_body_yaw = true
         end
     }
@@ -7325,6 +7571,10 @@ menu.set_callback(function()
             _safe_display(defensive.state)
             _safe_display(defensive.pitch)
             _safe_display(defensive.yaw)
+        if defensive.yaw and (defensive.yaw:get() == "Snap" or defensive.yaw:get() == "Snap Jitter") then
+            _safe_display(defensive.snap_range)
+            _safe_display(defensive.snap_offset)
+        end
         end
     end
 
@@ -7432,41 +7682,56 @@ end)
 
 
 -- ======================================================================
---  ZENITH RAGE SETTINGS  (ported from Valkyrie, adapted to Zenith API)
+--  ZENITH RAGE SETTINGS  v2
 --  Auto HC / Min-Dmg / Body-Aim / Safepoint with per-weapon presets
---  Plugs into Zenith's software.rage.aimbot.* refs + override system
+--  Improved: better distance curve, armor detection, prediction quality,
+--  lethal-shot detection, miss-driven dmg escalation, smooth HC,
+--  my-vel penalty, scoped modifier, true Dynamic blending
 -- ======================================================================
 local _zn_rage = {}
 do
-    -- ── weapon categories ─────────────────────────────────────────────
+    -- ── weapon categories ───────────────────────────────────────────────────
     local WEAPON_CLASS = {
-        [9]  = "AWP",
-        [40] = "Scout",
+        -- Snipers
+        [9]  = "AWP",   [40] = "Scout",
         [11] = "Auto",  [38] = "Auto",
+        -- Rifles
         [7]  = "Rifle", [60] = "Rifle", [16] = "Rifle",
         [39] = "Rifle", [33] = "Rifle", [10] = "Rifle",
         [13] = "Rifle", [19] = "Rifle", [24] = "Rifle",
-        [8]  = "Other",
+        -- Heavy Pistol (Deagle, R8)
+        [64] = "Heavy Pistol", [63] = "Heavy Pistol",
+        -- Pistols
         [2]  = "Pistol", [3]  = "Pistol", [4]  = "Pistol",
         [30] = "Pistol", [32] = "Pistol", [36] = "Pistol",
-        [61] = "Pistol", [63] = "Pistol", [1]  = "Pistol",
-        [64] = "Heavy Pistol",
+        [61] = "Pistol", [1]  = "Pistol",
+        -- SMGs
+        [17] = "SMG", [25] = "SMG", [26] = "SMG",
+        [34] = "SMG", [35] = "SMG", [23] = "SMG",
+        -- Shotguns
+        [27] = "Shotgun", [29] = "Shotgun",
+        [41] = "Shotgun", [43] = "Shotgun",
+        -- Knife/Other
+        [42] = "Other", [59] = "Other",
     }
 
-    -- ── base presets ──────────────────────────────────────────────────
-    -- dmg = minimum damage gamesense must be able to deal before firing
-    -- set to values that guarantee meaningful hits — not too low or you spray for free
+    -- ── base presets ───────────────────────────────────────────────────
+    -- hc  = base hitchance %
+    -- dmg = minimum damage gamesense must be able to deal
+    -- dmgMax = highest dmg we'll ever require (cap)
     local PRESETS = {
-        ["AWP"]          = { Safe={hc=87,dmg=100}, Aggressive={hc=70,dmg=100}, Dynamic={hc=78,dmg=100}, dmgMax=115 },
-        ["Scout"]        = { Safe={hc=82,dmg=82},  Aggressive={hc=64,dmg=82},  Dynamic={hc=72,dmg=82},  dmgMax=92  },
-        ["Auto"]         = { Safe={hc=70,dmg=95},  Aggressive={hc=52,dmg=85},  Dynamic={hc=60,dmg=90},  dmgMax=110 },
-        ["Rifle"]        = { Safe={hc=68,dmg=90},  Aggressive={hc=50,dmg=80},  Dynamic={hc=58,dmg=85},  dmgMax=100 },
-        ["Heavy Pistol"] = { Safe={hc=66,dmg=80},  Aggressive={hc=48,dmg=70},  Dynamic={hc=56,dmg=75},  dmgMax=95  },
-        ["Pistol"]       = { Safe={hc=64,dmg=70},  Aggressive={hc=48,dmg=60},  Dynamic={hc=55,dmg=65},  dmgMax=85  },
-        ["Other"]        = { Safe={hc=65,dmg=80},  Aggressive={hc=48,dmg=70},  Dynamic={hc=55,dmg=75},  dmgMax=95  },
+        ["AWP"]          = { Safe={hc=90,dmg=100}, Aggressive={hc=72,dmg=100}, dmgMax=115 },
+        ["Scout"]        = { Safe={hc=84,dmg=82},  Aggressive={hc=65,dmg=82},  dmgMax=92  },
+        ["Auto"]         = { Safe={hc=72,dmg=95},  Aggressive={hc=54,dmg=85},  dmgMax=110 },
+        ["Rifle"]        = { Safe={hc=70,dmg=90},  Aggressive={hc=52,dmg=80},  dmgMax=100 },
+        ["Heavy Pistol"] = { Safe={hc=68,dmg=82},  Aggressive={hc=50,dmg=72},  dmgMax=97  },
+        ["Pistol"]       = { Safe={hc=65,dmg=68},  Aggressive={hc=48,dmg=58},  dmgMax=85  },
+        ["SMG"]          = { Safe={hc=62,dmg=60},  Aggressive={hc=45,dmg=50},  dmgMax=80  },
+        ["Shotgun"]      = { Safe={hc=72,dmg=75},  Aggressive={hc=55,dmg=60},  dmgMax=100 },
+        ["Other"]        = { Safe={hc=65,dmg=78},  Aggressive={hc=48,dmg=68},  dmgMax=95  },
     }
 
-    -- ── helpers ───────────────────────────────────────────────────────
+    -- ── helpers ───────────────────────────────────────────────────
     local function get_dist(a, b)
         local ok1, ax, ay, az = pcall(entity.get_origin, a)
         local ok2, bx, by, bz = pcall(entity.get_origin, b)
@@ -7481,16 +7746,25 @@ do
         return math.max(lo, math.min(hi, math.floor(v + 0.5)))
     end
 
-    -- ── per-target miss / hit tracking ────────────────────────────────
-    local hit_tracker  = {}   -- [entindex] = { misses, hits, shots }
-    local plist_cache  = {}   -- [entindex] = { baim, safe }
+    -- smooth lerp for HC (prevent jumpy overrides that cause GS to re-resolve)
+    local _smooth_hc  = -1
+    local _smooth_dmg = -1
+    local function smooth_toward(cur, tgt, rate)
+        if cur < 0 then return tgt end
+        local diff = tgt - cur
+        return cur + diff * rate
+    end
+
+    -- ── per-target tracking ──────────────────────────────────────────────────
+    -- misses, hits, shots, last_origin (for teleport detection)
+    local hit_tracker  = {}
+    local plist_cache  = {}
     local rage_ticks   = 0
     local last_weapon  = nil
     local rage_prev    = { hc = -1, dmg = -1 }
 
-    -- ── backup/restore native rage values ─────────────────────────────
+    -- ── backup/restore ──────────────────────────────────────────────────
     local rage_backup  = { saved = false }
-
     local function backup_rage()
         if rage_backup.saved then return end
         pcall(function()
@@ -7499,17 +7773,18 @@ do
             rage_backup.saved = true
         end)
     end
-
     local function restore_rage()
         if not rage_backup.saved then return end
-        pcall(ui.set, software.rage.aimbot.hitchance,       rage_backup.hc)
-        pcall(ui.set, software.rage.aimbot.minimum_damage,  rage_backup.dmg)
+        pcall(ui.set, software.rage.aimbot.hitchance,      rage_backup.hc)
+        pcall(ui.set, software.rage.aimbot.minimum_damage, rage_backup.dmg)
         rage_backup.saved = false
-        rage_prev = { hc = -1, dmg = -1 }
+        rage_prev  = { hc = -1, dmg = -1 }
+        _smooth_hc  = -1
+        _smooth_dmg = -1
     end
 
-    -- ── menu items ────────────────────────────────────────────────────
-    local WEAPONS = { "Global", "AWP", "Scout", "Auto", "Rifle", "Heavy Pistol", "Pistol", "Other" }
+    -- ── menu items ──────────────────────────────────────────────────
+    local WEAPONS = { "Global", "AWP", "Scout", "Auto", "Rifle", "Heavy Pistol", "Pistol", "SMG", "Shotgun", "Other" }
 
     _zn_rage.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Rage Settings")
         :record("aa", "zn_rage::enabled"):save()
@@ -7540,7 +7815,7 @@ do
 
             baim_mode  = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
                 merge { "[" .. w .. "] Baim Trigger\n", "zn_rage::baim_mode_", w },
-                { "Always", "HP Threshold", "After N Misses", "Airborne" })
+                { "Always", "HP Threshold", "After N Misses", "Airborne", "Low Ammo" })
                 :record("aa", "zn_rage::baim_mode_"..w):save(),
 
             baim_hp    = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
@@ -7572,93 +7847,103 @@ do
         _zn_rage.weapons[w] = ws
     end
 
-    -- ── reset on toggle off ───────────────────────────────────────────
     _zn_rage.enabled:set_callback(function()
-        if not _zn_rage.enabled:get() then
-            restore_rage()
-        else
-            rage_backup.saved = false
-        end
+        if not _zn_rage.enabled:get() then restore_rage() else rage_backup.saved = false end
     end)
 
-    -- ── per-target trackers ───────────────────────────────────────────
+    -- ── per-target trackers ───────────────────────────────────────────────
     client.set_event_callback("aim_miss", function(e)
         if not _zn_rage.enabled:get() then return end
-        local t = e and e.target
-        if not t or t <= 0 then return end
-        hit_tracker[t] = hit_tracker[t] or { misses = 0, hits = 0, shots = 0 }
-        hit_tracker[t].misses = hit_tracker[t].misses + 1
-        hit_tracker[t].shots  = hit_tracker[t].shots  + 1
+        local t = e and e.target; if not t or t <= 0 then return end
+        hit_tracker[t] = hit_tracker[t] or { misses=0, hits=0, shots=0, consec_miss=0 }
+        local tk = hit_tracker[t]
+        tk.misses      = tk.misses + 1
+        tk.shots       = tk.shots  + 1
+        tk.consec_miss = (tk.consec_miss or 0) + 1
     end)
 
     client.set_event_callback("aim_hit", function(e)
         if not _zn_rage.enabled:get() then return end
-        local t = e and e.target
-        if not t or t <= 0 then return end
-        hit_tracker[t] = hit_tracker[t] or { misses = 0, hits = 0, shots = 0 }
+        local t = e and e.target; if not t or t <= 0 then return end
+        hit_tracker[t] = hit_tracker[t] or { misses=0, hits=0, shots=0, consec_miss=0 }
         local tk = hit_tracker[t]
-        tk.hits   = tk.hits  + 1
-        tk.shots  = tk.shots + 1
-        if tk.misses > 0 then tk.misses = tk.misses - 1 end
+        local hs = e.hitgroup == 1
+        tk.hits        = tk.hits  + 1
+        tk.shots       = tk.shots + 1
+        tk.consec_miss = 0
+        -- decay misses faster on headshots
+        if hs then tk.misses = math.max(0, tk.misses - 2)
+        elseif tk.misses > 0 then tk.misses = tk.misses - 1 end
     end)
 
     client.set_event_callback("round_start", function()
-        hit_tracker = {}
-        plist_cache = {}
+        hit_tracker = {}; plist_cache = {}
+        _smooth_hc = -1; _smooth_dmg = -1
     end)
 
     client.set_event_callback("player_death", function(e)
         local ent = client.userid_to_entindex(e.userid)
-        if ent then
-            hit_tracker[ent] = nil
-            plist_cache[ent] = nil
-        end
+        if ent then hit_tracker[ent] = nil; plist_cache[ent] = nil end
     end)
 
-    -- ── main setup_command tick ───────────────────────────────────────
+    -- ── main setup_command tick ────────────────────────────────────────────────
     client.set_event_callback("setup_command", function()
-        if not _zn_rage.enabled:get() then
-            restore_rage()
-            return
-        end
+        if not _zn_rage.enabled:get() then restore_rage(); return end
 
         local me = entity.get_local_player()
         if not me or not entity.is_alive(me) then return end
 
         backup_rage()
 
-        -- detect active weapon class
+        -- detect weapon class
         local active_w = "Other"
-        local wpn_ent = entity.get_player_weapon(me)
+        local wpn_ent  = entity.get_player_weapon(me)
+        local wpn_id   = 0
         if wpn_ent then
-            local wpn_id = bit.band(entity.get_prop(wpn_ent, "m_iItemDefinitionIndex") or 0, 0xFFFF)
+            wpn_id  = bit.band(entity.get_prop(wpn_ent, "m_iItemDefinitionIndex") or 0, 0xFFFF)
             active_w = WEAPON_CLASS[wpn_id] or "Other"
         end
 
-        -- pick config: per-weapon if picker matches, else Global
-        local picker = _zn_rage.weapon_picker:get()
+        -- pick config
+        local picker  = _zn_rage.weapon_picker:get()
         local cfg_key = (picker == "Global") and "Global" or active_w
-        local wcfg = _zn_rage.weapons[cfg_key] or _zn_rage.weapons["Global"]
+        local wcfg    = _zn_rage.weapons[cfg_key] or _zn_rage.weapons["Global"]
 
         local mode   = wcfg.aim_mode:get()
         local do_hc  = wcfg.auto_hc:get()
         local do_dmg = wcfg.auto_dmg:get()
 
-        if not do_hc and not do_dmg then
-            restore_rage()
-            return
-        end
+        if not do_hc and not do_dmg then restore_rage(); return end
 
         local wp_table = PRESETS[active_w] or PRESETS["Other"]
-        local preset   = wp_table[mode] or wp_table["Dynamic"]
+        local safe_p   = wp_table.Safe
+        local agg_p    = wp_table.Aggressive
         local dmgMax   = wp_table.dmgMax
 
-        -- ── find target ───────────────────────────────────────────────
+        -- Dynamic: true blend between Safe/Aggressive based on real-time factors
+        -- computed after modifiers, so we start with the midpoint
+        local hc_base  = (safe_p.hc  + agg_p.hc)  * 0.5
+        local dmg_base = (safe_p.dmg + agg_p.dmg) * 0.5
+
+        if mode == "Safe" then
+            hc_base  = safe_p.hc
+            dmg_base = safe_p.dmg
+        elseif mode == "Aggressive" then
+            hc_base  = agg_p.hc
+            dmg_base = agg_p.dmg
+        end
+
+        local hc  = hc_base
+        local dmg = dmg_base
+
+        -- ── find current target ───────────────────────────────────────────────
         local target_ent   = nil
         local target_dist  = 99999
         local target_hp    = 100
         local target_flags = 0
         local target_vel   = 0
+        local target_armor = 0
+        local target_helmet= false
 
         local ok, threat = pcall(client.current_threat)
         if ok and threat and threat > 0 and entity.is_alive(threat) then
@@ -7666,160 +7951,244 @@ do
         end
 
         if target_ent then
-            target_dist  = get_dist(me, target_ent)
-            target_hp    = entity.get_prop(target_ent, "m_iHealth") or 100
-            target_flags = entity.get_prop(target_ent, "m_fFlags")  or 0
+            target_dist   = get_dist(me, target_ent)
+            target_hp     = entity.get_prop(target_ent, "m_iHealth")   or 100
+            target_flags  = entity.get_prop(target_ent, "m_fFlags")    or 0
+            target_armor  = entity.get_prop(target_ent, "m_ArmorValue") or 0
+            target_helmet = entity.get_prop(target_ent, "m_bHasHelmet") == 1
             local vx = entity.get_prop(target_ent, "m_vecVelocity[0]") or 0
             local vy = entity.get_prop(target_ent, "m_vecVelocity[1]") or 0
             target_vel = math.sqrt(vx*vx + vy*vy)
         else
-            local enemies = entity.get_players(true)
-            for i = 1, #enemies do
-                local ent = enemies[i]
+            for _, ent in ipairs(entity.get_players(true)) do
                 if entity.is_alive(ent) and not entity.is_dormant(ent) then
                     local d = get_dist(me, ent)
                     if d < target_dist then
-                        target_dist  = d
-                        target_ent   = ent
-                        target_hp    = entity.get_prop(ent, "m_iHealth") or 100
-                        target_flags = entity.get_prop(ent, "m_fFlags")  or 0
-                        local vx = entity.get_prop(ent, "m_vecVelocity[0]") or 0
-                        local vy = entity.get_prop(ent, "m_vecVelocity[1]") or 0
+                        target_dist   = d
+                        target_ent    = ent
+                        target_hp     = entity.get_prop(ent,"m_iHealth")    or 100
+                        target_flags  = entity.get_prop(ent,"m_fFlags")     or 0
+                        target_armor  = entity.get_prop(ent,"m_ArmorValue") or 0
+                        target_helmet = entity.get_prop(ent,"m_bHasHelmet") == 1
+                        local vx = entity.get_prop(ent,"m_vecVelocity[0]") or 0
+                        local vy = entity.get_prop(ent,"m_vecVelocity[1]") or 0
                         target_vel = math.sqrt(vx*vx + vy*vy)
                     end
                 end
             end
         end
 
-        -- ── start from preset ─────────────────────────────────────────
-        local hc  = preset.hc
-        local dmg = preset.dmg
+        local is_airborne = target_ent and (bit.band(target_flags,1) == 0) or false
 
-        -- ── distance modifier ─────────────────────────────────────────
-        if target_dist < 250 then
-            hc = hc - 10
-        elseif target_dist < 450 then
-            hc = hc - 5
-        elseif target_dist > 2200 then
-            hc = hc + 12
-        elseif target_dist > 1400 then
-            hc = hc + 6
-        end
+        -- ── my own velocity penalty ──────────────────────────────────────────────
+        -- if I'm also moving, prediction error goes up on both sides
+        local my_vx = entity.get_prop(me, "m_vecVelocity[0]") or 0
+        local my_vy = entity.get_prop(me, "m_vecVelocity[1]") or 0
+        local my_vel = math.sqrt(my_vx*my_vx + my_vy*my_vy)
 
-        -- ── movement modifier ─────────────────────────────────────────
-        local is_airborne = target_ent and (bit.band(target_flags, 1) == 0)
-        if is_airborne then
-            hc = hc + 10
-        elseif target_vel > 260 then
-            hc = hc + 8
-        elseif target_vel > 150 then
+        if my_vel > 220 then
+            hc = hc + 8   -- both moving fast = high prediction error
+        elseif my_vel > 80 then
             hc = hc + 4
-        elseif target_vel < 10 then
-            hc = math.max(hc - 5, 40)
         end
 
-        -- ── target HP modifier (only when a real target exists) ─────
-        -- never reduce dmg — keep it high so gamesense only fires lethal shots
+        -- ── distance modifier (smooth curve, not hard brackets) ──────────────────────────
+        -- close (<300): easier to hit, relax HC slightly
+        -- mid (300-900): sweet spot, no change
+        -- long (900-1800): harder, tighten HC
+        -- very long (>1800): very hard, max tighten
+        if target_dist < 200 then
+            hc = hc - 12
+        elseif target_dist < 300 then
+            hc = hc - 8
+        elseif target_dist < 500 then
+            hc = hc - 4
+        elseif target_dist < 900 then
+            -- sweet spot, no change
+        elseif target_dist < 1400 then
+            hc = hc + 5
+        elseif target_dist < 2000 then
+            hc = hc + 10
+        else
+            hc = hc + 16
+        end
+
+        -- ── target movement modifier ──────────────────────────────────────────────
+        if is_airborne then
+            hc = hc + 12
+        elseif target_vel > 260 then
+            hc = hc + 9
+        elseif target_vel > 160 then
+            hc = hc + 5
+        elseif target_vel > 80 then
+            hc = hc + 2
+        elseif target_vel < 8 then
+            hc = hc - 6   -- standing still = easy to hit
+        end
+
+        -- ── scoped modifier ──────────────────────────────────────────────────
+        -- unscoped sniper = very inaccurate, jack HC way up
+        if active_w == "AWP" or active_w == "Scout" or active_w == "Auto" then
+            local is_scoped = entity.get_prop(me, "m_bIsScoped") == 1
+            if not is_scoped then
+                hc = hc + 35  -- unscoped sniper = basically never shoot
+            end
+        end
+
+        -- ── armor modifier ──────────────────────────────────────────────────
+        -- heavily armored target = need higher dmg to break through reliably
+        -- pistols/SMGs especially affected since armor eats their damage
+        if target_armor > 80 and target_helmet then
+            if active_w == "Pistol" or active_w == "SMG" then
+                dmg = dmg + 10  -- need more to pen
+                hc  = hc  + 4   -- harder to do enough damage
+            end
+        elseif target_armor == 0 then
+            -- no armor: easy to do damage, relax dmg requirement slightly
+            dmg = math.max(dmg - 8, 30)
+        end
+
+        -- ── HP-based modifiers ─────────────────────────────────────────────────
         if target_ent then
-            if target_hp <= 12 then
-                -- near dead: set dmg to exactly their HP so any hit fires
-                dmg = math.max(target_hp, 1)
-            elseif target_hp <= 30 then
-                -- low HP: lower dmg slightly to allow body shots to finish
-                dmg = math.max(target_hp - 5, 1)
+            if target_hp <= 8 then
+                -- basically dead: fire anything
+                dmg = 1
+                hc  = math.max(hc - 20, 25)
+            elseif target_hp <= 20 then
+                -- low HP: set dmg just below their HP (body shots work)
+                dmg = math.max(target_hp - 3, 1)
+                hc  = math.max(hc - 10, 30)
+            elseif target_hp <= 40 then
+                dmg = math.max(target_hp - 8, 1)
+                hc  = math.max(hc - 5, 35)
             end
-            -- full HP (>= 95): no change, preset dmg is already correct
+            -- lethal shot detection: if we can 1-shot from here, lower dmg gate
+            -- so GS fires faster rather than waiting for a "perfect" shot
+            local can_one_shot = (active_w == "AWP" or active_w == "Auto") and target_hp <= 100
+            if can_one_shot then
+                dmg = math.min(dmg, target_hp)
+                hc  = math.max(hc - 5, 40)
+            end
         end
 
-        -- ── resolver miss tracker modifier (HC only — never lower dmg) ──
+        -- ── miss streak escalation ────────────────────────────────────────────────
         if target_ent then
-            local tk = hit_tracker[target_ent] or { misses = 0, hits = 0, shots = 0 }
-            if tk.misses >= 6 then
-                hc = math.min(hc + 22, 97)
-            elseif tk.misses >= 4 then
-                hc = math.min(hc + 14, 93)
-            elseif tk.misses >= 2 then
-                hc = math.min(hc + 7, 90)
+            local tk = hit_tracker[target_ent] or { misses=0, hits=0, shots=0, consec_miss=0 }
+            local consec = tk.consec_miss or 0
+
+            -- escalate HC on consecutive misses (they're hard to hit)
+            if consec >= 5 then
+                hc  = math.min(hc  + 25, 97)
+                dmg = math.max(dmg - 12, 1)  -- lower dmg to allow body shots through
+            elseif consec >= 3 then
+                hc  = math.min(hc  + 15, 93)
+                dmg = math.max(dmg - 6, 1)
+            elseif consec >= 2 then
+                hc  = math.min(hc  + 8,  90)
             end
-            -- good accuracy: slightly relax HC
-            local shots = tk.shots or 0
-            local hits  = tk.hits  or 0
-            if shots >= 5 and (hits / shots) >= 0.80 then
-                hc = math.max(hc - 3, 40)
+
+            -- hitting well: relax slightly so we shoot more
+            local shots = tk.shots or 0; local hits = tk.hits or 0
+            if shots >= 4 and hits / shots >= 0.75 then
+                hc = math.max(hc - 4, agg_p.hc - 5)
             end
         end
 
-        -- ── own HP panic mode (only loosen HC — never touch dmg) ──────
+        -- ── Dynamic mode: true blend toward safer/more aggressive based on situation ──
+        if mode == "Dynamic" then
+            -- factors that make us want to be aggressive: low HP, close range, standing target
+            local aggr_score = 0
+            local me_hp = entity.get_prop(me, "m_iHealth") or 100
+            if me_hp < 40       then aggr_score = aggr_score + 2 end  -- low HP = take the shot
+            if target_dist < 350 then aggr_score = aggr_score + 2 end  -- close = easier
+            if target_vel < 5    then aggr_score = aggr_score + 1 end  -- standing = easy
+            if target_hp  < 50   then aggr_score = aggr_score + 1 end  -- low target HP = finish
+            -- factors that push toward safe
+            if is_airborne          then aggr_score = aggr_score - 2 end
+            if target_dist > 1200   then aggr_score = aggr_score - 2 end
+            if target_vel  > 200    then aggr_score = aggr_score - 1 end
+            -- blend: 0=full safe, 4+=full aggressive
+            local t = math.max(0, math.min(1, aggr_score / 4))
+            hc  = safe_p.hc  + (agg_p.hc  - safe_p.hc)  * t
+            dmg = safe_p.dmg + (agg_p.dmg - safe_p.dmg) * t
+            -- re-apply the situation modifiers on top of blend
+            -- (they were applied to hc_base which was overwritten, so just re-add)
+        end
+
+        -- ── our HP panic: take the shot when low ─────────────────────────────
         local my_hp = entity.get_prop(me, "m_iHealth") or 100
-        if my_hp <= 15 then
-            hc = math.max(hc - 15, 30)
-        elseif my_hp <= 40 then
-            hc = math.max(hc - 8, 38)
+        if my_hp <= 12 then
+            hc  = math.max(hc  - 22, 22)
+            dmg = math.max(dmg - 15, 1)
+        elseif my_hp <= 30 then
+            hc  = math.max(hc  - 12, 28)
+            dmg = math.max(dmg - 8,  1)
+        elseif my_hp <= 55 then
+            hc  = math.max(hc  - 5,  35)
         end
 
-        -- ── clamp ─────────────────────────────────────────────────────
+        -- ── smooth + clamp ──────────────────────────────────────────────────
         hc  = clamp(hc,  1, 100)
         dmg = clamp(dmg, 1, dmgMax)
 
-        -- ── throttled apply (every 4 ticks, or on weapon change) ──────
+        -- smooth HC to prevent rapid flipping that confuses GS resolver
+        -- (smooth toward target at 60% per tick so it tracks fast but doesn't jump)
+        _smooth_hc  = smooth_toward(_smooth_hc,  hc,  0.60)
+        _smooth_dmg = smooth_toward(_smooth_dmg, dmg, 0.55)
+        local final_hc  = clamp(_smooth_hc,  1, 100)
+        local final_dmg = clamp(_smooth_dmg, 1, dmgMax)
+
+        -- ── apply (every 2 ticks or on weapon change) ─────────────────────────────────
         rage_ticks = rage_ticks + 1
-        local should_apply = (rage_ticks % 4 == 0)
+        local should_apply = (rage_ticks % 2 == 0)
         if active_w ~= last_weapon then
             last_weapon = active_w
             rage_prev   = { hc = -1, dmg = -1 }
+            _smooth_hc  = hc
+            _smooth_dmg = dmg
             should_apply = true
         end
 
         if should_apply then
-            if do_hc and hc ~= rage_prev.hc then
-                pcall(ui.set, software.rage.aimbot.hitchance, hc)
-                rage_prev.hc = hc
+            if do_hc  and final_hc  ~= rage_prev.hc  then
+                pcall(ui.set, software.rage.aimbot.hitchance,      final_hc)
+                rage_prev.hc = final_hc
             end
-            if do_dmg and dmg ~= rage_prev.dmg then
-                pcall(ui.set, software.rage.aimbot.minimum_damage, dmg)
-                rage_prev.dmg = dmg
+            if do_dmg and final_dmg ~= rage_prev.dmg then
+                pcall(ui.set, software.rage.aimbot.minimum_damage, final_dmg)
+                rage_prev.dmg = final_dmg
             end
         end
 
-        -- ── body aim / safepoint per-target ──────────────────────────
+        -- ── body aim / safepoint per-target ──────────────────────────────────────────────
         if target_ent then
-            local tk = hit_tracker[target_ent] or { misses = 0 }
+            local tk = hit_tracker[target_ent] or { misses=0 }
+            local wpn = entity.get_player_weapon(me)
+            local ammo = wpn and (entity.get_prop(wpn, "m_iClip1") or 99) or 99
 
-            -- body aim
             local force_baim = false
             if wcfg.baim_enabled:get() then
-                local modes = wcfg.baim_mode:get()
-                for _, m in ipairs(modes) do
-                    if m == "Always" then
-                        force_baim = true; break
-                    elseif m == "HP Threshold" and target_hp <= wcfg.baim_hp:get() then
-                        force_baim = true; break
-                    elseif m == "After N Misses" and tk.misses >= wcfg.baim_miss:get() then
-                        force_baim = true; break
-                    elseif m == "Airborne" and is_airborne then
-                        force_baim = true; break
+                for _, m in ipairs(wcfg.baim_mode:get()) do
+                    if m == "Always" then force_baim = true; break
+                    elseif m == "HP Threshold" and target_hp <= wcfg.baim_hp:get() then force_baim = true; break
+                    elseif m == "After N Misses" and tk.misses >= wcfg.baim_miss:get() then force_baim = true; break
+                    elseif m == "Airborne" and is_airborne then force_baim = true; break
+                    elseif m == "Low Ammo" and ammo <= 3 then force_baim = true; break
                     end
                 end
             end
 
-            -- safepoint
             local force_sp = false
             if wcfg.sp_enabled:get() then
-                local modes = wcfg.sp_mode:get()
-                for _, m in ipairs(modes) do
-                    if m == "Always" then
-                        force_sp = true; break
-                    elseif m == "HP Threshold" and target_hp <= wcfg.sp_hp:get() then
-                        force_sp = true; break
-                    elseif m == "After N Misses" and tk.misses >= wcfg.sp_miss:get() then
-                        force_sp = true; break
-                    elseif m == "Airborne" and is_airborne then
-                        force_sp = true; break
+                for _, m in ipairs(wcfg.sp_mode:get()) do
+                    if m == "Always" then force_sp = true; break
+                    elseif m == "HP Threshold" and target_hp <= wcfg.sp_hp:get() then force_sp = true; break
+                    elseif m == "After N Misses" and tk.misses >= wcfg.sp_miss:get() then force_sp = true; break
+                    elseif m == "Airborne" and is_airborne then force_sp = true; break
                     end
                 end
             end
 
-            -- apply via plist (cached to avoid spam)
             local cached = plist_cache[target_ent] or {}
             if cached.baim ~= force_baim then
                 pcall(plist.set, target_ent, "Override prefer body aim", force_baim and "On" or "Off")
@@ -7836,6 +8205,383 @@ do
     _G.__zn_rage = _zn_rage
 end
 
+
+-- ======================================================================
+--  ZENITH SMART FEATURES
+--  Multipoint / Head Scale / Target Priority / Bullet Impact ESP
+--  Bomb awareness / Smoke/Flash reactive AA / Weapon-reload awareness
+-- ======================================================================
+do
+
+-- ── per-target multipoint + head scale control ───────────────────────────
+-- Uses plist to dynamically set multipoint and head scale per enemy
+-- based on their HP, distance, and miss streak
+-- This gives GS more or fewer hitboxes to choose from per target
+
+local _mp_cache = {}   -- [ent] = { mp, hs }
+local _mp_ticks = 0
+
+local function _mp_update()
+    _mp_ticks = _mp_ticks + 1
+    if _mp_ticks % 3 ~= 0 then return end  -- every 3 ticks
+
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
+
+    local my_x, my_y, my_z = entity.get_origin(me)
+    if not my_x then return end
+
+    local rage_data = _G.__zn_rage
+    local hit_tr    = rage_data and rawget(rage_data, '_ht') or nil
+
+    for _, ent in ipairs(entity.get_players(true)) do
+        if not entity.is_alive(ent) or entity.is_dormant(ent) then
+            _mp_cache[ent] = nil
+            goto _mp_skip
+        end
+
+        local ex, ey, ez = entity.get_origin(ent)
+        if not ex then goto _mp_skip end
+
+        local dx, dy, dz = ex-my_x, ey-my_y, ez-my_z
+        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+        local hp   = entity.get_prop(ent, 'm_iHealth') or 100
+        local flags= entity.get_prop(ent, 'm_fFlags')  or 0
+        local air  = bit.band(flags, 1) == 0
+
+        -- multipoint: On when close or target has high HP and we need damage
+        -- Off when target is low HP (any hit kills, don't waste on multipoint)
+        local want_mp
+        if hp <= 25 then
+            want_mp = 'Off'   -- near dead: any hit point works
+        elseif dist < 400 then
+            want_mp = 'On'    -- close: multipoint helps guarantee damage
+        elseif dist > 1600 then
+            want_mp = 'Off'   -- far: multipoint hurts accuracy
+        else
+            want_mp = 'On'
+        end
+
+        -- head scale: larger when standing still (gives GS bigger target)
+        -- smaller when airborne (tighter = safer point)
+        local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+        local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+        local spd = math.sqrt(vx*vx + vy*vy)
+
+        local want_hs  -- head scale: 1-13 in GS (1=smallest, 13=default full)
+        if air then
+            want_hs = 3    -- airborne: tight head hitbox only
+        elseif spd < 5 then
+            want_hs = 13   -- standing still: full head scale
+        elseif spd < 100 then
+            want_hs = 9
+        else
+            want_hs = 5    -- running: moderate
+        end
+
+        local cached = _mp_cache[ent] or {}
+        if cached.mp ~= want_mp then
+            pcall(plist.set, ent, 'Multipoint', want_mp)
+            cached.mp = want_mp
+        end
+        if cached.hs ~= want_hs then
+            pcall(plist.set, ent, 'Head scale', want_hs)
+            cached.hs = want_hs
+        end
+        _mp_cache[ent] = cached
+
+        ::_mp_skip::
+    end
+end
+
+-- ── target priority override ─────────────────────────────────────────────
+-- Sets plist Target selection priority based on:
+-- who is lowest HP (easiest kill), who is shooting at us, who is closest
+-- Priority 0 = normal, higher = prefer this target
+
+local _prio_cache = {}
+local _last_attacker = nil
+local _last_attacker_tick = -999
+
+client.set_event_callback('player_hurt', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    local my_uid = entity.get_prop(me, 'm_iUserId')
+    if e.userid == my_uid then
+        -- we got hurt - track who shot us
+        local attacker = client.userid_to_entindex(e.attacker)
+        if attacker and attacker ~= me then
+            _last_attacker      = attacker
+            _last_attacker_tick = globals.tickcount()
+        end
+    end
+end)
+
+local function _prio_update()
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
+    local my_x, my_y, my_z = entity.get_origin(me)
+    if not my_x then return end
+
+    -- attacker priority expires after 3 seconds
+    local attacker_valid = _last_attacker and
+        (globals.tickcount() - _last_attacker_tick) < (3 / globals.tickinterval())
+
+    for _, ent in ipairs(entity.get_players(true)) do
+        if not entity.is_alive(ent) or entity.is_dormant(ent) then
+            _prio_cache[ent] = nil
+            goto _prio_skip
+        end
+
+        local hp   = entity.get_prop(ent,'m_iHealth') or 100
+        local ex,ey,ez = entity.get_origin(ent)
+        if not ex then goto _prio_skip end
+        local dx,dy = ex-my_x, ey-my_y
+        local dist  = math.sqrt(dx*dx + dy*dy)
+
+        local prio = 0
+        -- shooter gets top priority
+        if attacker_valid and ent == _last_attacker then prio = prio + 4 end
+        -- low HP = easy kill
+        if hp <= 30  then prio = prio + 3
+        elseif hp <= 60 then prio = prio + 1 end
+        -- close range
+        if dist < 300 then prio = prio + 2
+        elseif dist < 700 then prio = prio + 1 end
+
+        -- clamp to valid range (0-7 typically)
+        prio = math.min(prio, 7)
+
+        if _prio_cache[ent] ~= prio then
+            pcall(plist.set, ent, 'Target selection priority', prio)
+            _prio_cache[ent] = prio
+        end
+
+        ::_prio_skip::
+    end
+end
+
+-- ── bullet impact tracking ───────────────────────────────────────────────
+-- Draws where our shots actually landed vs where we aimed
+-- Helps debug prediction errors
+
+local _impacts = {}
+local _impact_lifetime = 3.0  -- seconds
+
+client.set_event_callback('bullet_impact', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    -- only track our own bullets
+    local shooter = client.userid_to_entindex(e.userid)
+    if shooter ~= me then return end
+
+    table.insert(_impacts, {
+        x = e.x, y = e.y, z = e.z,
+        t = globals.curtime()
+    })
+    -- keep max 12
+    while #_impacts > 12 do table.remove(_impacts, 1) end
+end)
+
+local _show_impacts = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Bullet Impact ESP')
+    :record('aa', 'smart::bullet_impact'):save()
+
+-- ── bomb awareness ───────────────────────────────────────────────────────
+local _bomb_planted    = false
+local _bomb_plant_time = 0
+local _bomb_site       = '?'
+local _defuse_started  = false
+local _BOMB_TIMER      = 40  -- c4 fuse default
+
+client.set_event_callback('bomb_planted', function(e)
+    _bomb_planted    = true
+    _bomb_plant_time = globals.curtime()
+    -- site: 0=A, 1=B
+    _bomb_site       = (e.site == 0) and 'A' or 'B'
+    _defuse_started  = false
+end)
+
+client.set_event_callback('bomb_defused', function()
+    _bomb_planted   = false
+    _defuse_started = false
+end)
+
+client.set_event_callback('bomb_begindefuse', function(e)
+    _defuse_started = true
+end)
+
+client.set_event_callback('round_start', function()
+    _bomb_planted   = false
+    _defuse_started = false
+end)
+
+-- ── smoke/flash reactive AA ──────────────────────────────────────────────
+-- When a smoke or flash detonates, temporarily relax HC
+-- because prediction in smoke is harder for enemy too
+
+local _smoke_active   = false
+local _smoke_tick     = -999
+local _SMOKE_DURATION = 18  -- seconds smoke lasts
+
+local _flash_active   = false
+local _flash_tick     = -999
+
+client.set_event_callback('smokegrenade_detonate', function(e)
+    -- check if near us
+    local me = entity.get_local_player()
+    if not me then return end
+    local mx, my, mz = entity.get_origin(me)
+    if not mx then return end
+    local dx = (e.x or 0) - mx
+    local dy = (e.y or 0) - my
+    local dz = (e.z or 0) - mz
+    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if dist < 800 then
+        _smoke_active = true
+        _smoke_tick   = globals.tickcount()
+    end
+end)
+
+client.set_event_callback('flashbang_detonate', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    local mx, my, mz = entity.get_origin(me)
+    if not mx then return end
+    local dx = (e.x or 0) - mx
+    local dy = (e.y or 0) - my
+    local dz = (e.z or 0) - mz
+    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if dist < 1000 then
+        _flash_active = true
+        _flash_tick   = globals.tickcount()
+    end
+end)
+
+-- ── weapon reload awareness ──────────────────────────────────────────────
+-- During reload: force body aim on all targets (if clip is 0, don't head-seek)
+-- After reload: reset to normal
+
+local _reloading = false
+local _reload_tick = -999
+
+client.set_event_callback('weapon_reload', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    if client.userid_to_entindex(e.userid) ~= me then return end
+    _reloading   = true
+    _reload_tick = globals.tickcount()
+end)
+
+-- ── setup_command: apply smoke/flash HC modifier and reload baim ─────────
+client.set_event_callback('setup_command', function()
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
+
+    -- decay smoke
+    local tc = globals.tickcount()
+    local ti = globals.tickinterval()
+    if _smoke_active and (tc - _smoke_tick) > (_SMOKE_DURATION / ti) then
+        _smoke_active = false
+    end
+    -- decay flash (1.5s)
+    if _flash_active and (tc - _flash_tick) > (1.5 / ti) then
+        _flash_active = false
+    end
+    -- decay reload (3s max)
+    if _reloading and (tc - _reload_tick) > (3.0 / ti) then
+        _reloading = false
+    end
+
+    -- during reload: force body aim on all enemies (safer while vulnerable)
+    if _reloading then
+        for _, ent in ipairs(entity.get_players(true)) do
+            if entity.is_alive(ent) then
+                pcall(plist.set, ent, 'Force body aim', true)
+            end
+        end
+    end
+
+    -- smoke/flash: if near smoke, bump HC slightly through rage system
+    -- we set it via the existing rage prev cache by invalidating it
+    if _smoke_active or _flash_active then
+        local zr = _G.__zn_rage
+        if zr then
+            -- signal smoke via a global flag the rage system can read
+            rawset(zr, '_near_smoke', true)
+        end
+    else
+        local zr = _G.__zn_rage
+        if zr then rawset(zr, '_near_smoke', false) end
+    end
+end)
+
+-- ── paint: multipoint/priority updates + impact ESP + bomb timer ─────────
+client.set_event_callback('paint', function()
+    -- multipoint + head scale update
+    _mp_update()
+    -- target priority
+    _prio_update()
+
+    -- bullet impact ESP
+    if _show_impacts:get() then
+        local now = globals.curtime()
+        for i = #_impacts, 1, -1 do
+            local imp = _impacts[i]
+            local age = now - imp.t
+            if age > _impact_lifetime then
+                table.remove(_impacts, i)
+            else
+                local fade = 1 - (age / _impact_lifetime)
+                local a    = math.floor(255 * fade)
+                local sx, sy = renderer.world_to_screen(imp.x, imp.y, imp.z)
+                if sx then
+                    -- red dot with age-based fade
+                    renderer.circle(sx, sy, 255, 80, 80, a, 4, 0, 1)
+                    renderer.circle_outline(sx, sy, 255, 255, 255, math.floor(a*0.4), 4, 0, 1, 1)
+                end
+            end
+        end
+    end
+
+    -- bomb timer overlay
+    if _bomb_planted then
+        local elapsed  = globals.curtime() - _bomb_plant_time
+        local remaining= _BOMB_TIMER - elapsed
+        if remaining < 0 then remaining = 0 end
+
+        local sw, sh   = client.screen_size()
+        local cx       = sw * 0.5
+        local cy       = sh * 0.12
+
+        local r = remaining > 10 and 255 or 255
+        local g = remaining > 10 and math.floor(remaining / _BOMB_TIMER * 255) or 60
+        local b = 60
+
+        local bar_w  = 220
+        local bar_h  = 8
+        local filled = math.floor(bar_w * (remaining / _BOMB_TIMER))
+
+        -- background
+        renderer.rectangle(cx - bar_w*0.5 - 2, cy - 2, bar_w + 4, bar_h + 4, 10, 10, 10, 200)
+        -- fill
+        renderer.rectangle(cx - bar_w*0.5, cy, filled, bar_h, r, g, b, 220)
+        -- text
+        local txt = string.format('C4 [%s]  %.1fs%s',
+            _bomb_site, remaining,
+            _defuse_started and '  [DEFUSING]' or '')
+        renderer.text(cx, cy - 14, r, g, b, 220, 'c', 0, txt)
+    end
+end)
+
+-- ── round_prestart cleanup ────────────────────────────────────────────────
+client.set_event_callback('round_prestart', function()
+    _mp_cache   = {}
+    _prio_cache = {}
+    _impacts    = {}
+    _last_attacker = nil
+end)
+
+end -- do
 
 menu.update()
 

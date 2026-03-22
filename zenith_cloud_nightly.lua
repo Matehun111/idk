@@ -2205,6 +2205,23 @@ local _chaos_jitter_seed = 0
         end
     end
 
+        -- velocity jitter bias: lean jitter toward strafe direction
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off' then
+            local lp = entity.get_local_player()
+            if lp then
+                local vx = entity.get_prop(lp, 'm_vecVelocity[0]') or 0
+                local vy = entity.get_prop(lp, 'm_vecVelocity[1]') or 0
+                local spd = math.sqrt(vx*vx + vy*vy)
+                if spd > 20 then
+                    local eye_yaw = localplayer.angles and localplayer.angles.y or 0
+                    local vel_yaw = math.deg(math.atan2(vy, vx))
+                    local rel = ((vel_yaw - eye_yaw + 180) % 360) - 180
+                    local bias = rel > 0 and math.min(spd * 0.04, 8) or -math.min(spd * 0.04, 8)
+                    ctx.yaw_offset = (ctx.yaw_offset or 0) + bias
+                end
+            end
+        end
+
     local safe_head_presets = {
         [1] = {
             [3] = {
@@ -2250,6 +2267,27 @@ local _chaos_jitter_seed = 0
                 ctx.jitter_offset = ctx.jitter_offset * 0.35
             else
                 -- shifted phase: mirror the offset
+                ctx.jitter_offset = -ctx.jitter_offset
+            end
+        end
+
+        -- micro-jitter: add tiny noise every tick to prevent stable tracking
+        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off' then
+            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
+        end
+
+        -- desync shift: flip jitter_offset sign every 22 ticks
+        -- makes the desync amount itself cycle, not just the direction
+        -- resolvers that pattern-match offset magnitude will mispredict
+        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
+        and ctx.jitter_offset ~= nil then
+            local shift_cycle = 22
+            local phase = globals.tickcount() % shift_cycle
+            if phase < shift_cycle * 0.45 then
+                -- normal phase: use jitter_offset as-is
+            elseif phase < shift_cycle * 0.55 then
+                ctx.jitter_offset = ctx.jitter_offset * 0.35
+            else
                 ctx.jitter_offset = -ctx.jitter_offset
             end
         end
@@ -2532,6 +2570,78 @@ do
                 pcall(override.set, software.aa.angles.body_yaw[2],
                     cur_off > 0 and -180 or 180)
             end
+        end
+    end)
+end
+
+--- region lag_peak
+do
+    -- Lag Peak: when you fire a shot, spike the fake lag to maximum for 1 tick
+    -- The shot arrives during a different lagcomp window than the enemy expects,
+    -- making it harder for their aimbot to compensate for your real position.
+    -- Works best combined with Double Tap.
+
+    local lp_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Lag Peak")
+        :record("aa", "lagpeak::enabled"):save()
+
+    local lp_amount  = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Peak Amount", "\n", "lagpeak::amount" }, 1, 14, 14, true, "t")
+        :record("aa", "lagpeak::amount"):save()
+
+    local lp_recover = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
+        merge { "- Recover Ticks", "\n", "lagpeak::recover" }, 1, 6, 2, true, "t")
+        :record("aa", "lagpeak::recover"):save()
+
+    local lp_on_dt   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "- Only on DT")
+        :record("aa", "lagpeak::on_dt"):save()
+
+    _G.__lagpeak_show = function()
+        _safe_display(lp_enabled)
+        if lp_enabled:get() then
+            _safe_display(lp_amount)
+            _safe_display(lp_recover)
+            _safe_display(lp_on_dt)
+        end
+    end
+
+    local _lp_fire_tick  = -999
+    local _lp_orig_limit = nil
+    local _lp_orig_var   = nil
+    local _lp_spiking    = false
+    local _lp_spike_end  = -1
+
+    client.set_event_callback("aim_fire", function(e)
+        if not lp_enabled:get() then return end
+        if lp_on_dt:get() and not software.is_double_tap() then return end
+        local fl = software and software.aa and software.aa.fakelag
+        if not fl then return end
+        -- save current limit before spike
+        pcall(function()
+            _lp_orig_limit = ui.get(fl.limit)
+            _lp_orig_var   = ui.get(fl.variance)
+        end)
+        -- spike: set fake lag to peak amount
+        pcall(ui.set, fl.limit,    lp_amount:get())
+        pcall(ui.set, fl.variance, 0)  -- no variance during spike
+        _lp_spiking   = true
+        _lp_fire_tick = globals.tickcount()
+        _lp_spike_end = _lp_fire_tick + lp_recover:get()
+    end)
+
+    client.set_event_callback("setup_command", function()
+        if not lp_enabled:get() then return end
+        if not _lp_spiking then return end
+        local fl = software and software.aa and software.aa.fakelag
+        if not fl then return end
+        -- restore original limit after recover ticks
+        if globals.tickcount() >= _lp_spike_end then
+            if _lp_orig_limit ~= nil then
+                pcall(ui.set, fl.limit,    _lp_orig_limit)
+                pcall(ui.set, fl.variance, _lp_orig_var or 0)
+            end
+            _lp_spiking   = false
+            _lp_orig_limit = nil
+            _lp_orig_var   = nil
         end
     end)
 end
@@ -5660,7 +5770,7 @@ do
             : record("aa", merge { "custom", "::", state, "::", "zenith_safe" })
             : save()
 
-            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", "Randomize Jitter", "Ghost" })
+            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", "Randomize Jitter", "Ghost", "Ghost" })
             : record("aa", merge { "custom", "::", state, "::", "body_yaw" })
             : save()
 
@@ -7487,6 +7597,10 @@ menu.set_callback(function()
             _safe_display(defensive.snap_range)
             _safe_display(defensive.snap_offset)
         end
+        if defensive.yaw and (defensive.yaw:get() == "Snap" or defensive.yaw:get() == "Snap Jitter") then
+            _safe_display(defensive.snap_range)
+            _safe_display(defensive.snap_offset)
+        end
         end
     end
 
@@ -8120,6 +8234,383 @@ do
     _G.__zn_rage = _zn_rage
 end
 
+
+-- ======================================================================
+--  ZENITH SMART FEATURES
+--  Multipoint / Head Scale / Target Priority / Bullet Impact ESP
+--  Bomb awareness / Smoke/Flash reactive AA / Weapon-reload awareness
+-- ======================================================================
+do
+
+-- ── per-target multipoint + head scale control ───────────────────────────
+-- Uses plist to dynamically set multipoint and head scale per enemy
+-- based on their HP, distance, and miss streak
+-- This gives GS more or fewer hitboxes to choose from per target
+
+local _mp_cache = {}   -- [ent] = { mp, hs }
+local _mp_ticks = 0
+
+local function _mp_update()
+    _mp_ticks = _mp_ticks + 1
+    if _mp_ticks % 3 ~= 0 then return end  -- every 3 ticks
+
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
+
+    local my_x, my_y, my_z = entity.get_origin(me)
+    if not my_x then return end
+
+    local rage_data = _G.__zn_rage
+    local hit_tr    = rage_data and rawget(rage_data, '_ht') or nil
+
+    for _, ent in ipairs(entity.get_players(true)) do
+        if not entity.is_alive(ent) or entity.is_dormant(ent) then
+            _mp_cache[ent] = nil
+            goto _mp_skip
+        end
+
+        local ex, ey, ez = entity.get_origin(ent)
+        if not ex then goto _mp_skip end
+
+        local dx, dy, dz = ex-my_x, ey-my_y, ez-my_z
+        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+        local hp   = entity.get_prop(ent, 'm_iHealth') or 100
+        local flags= entity.get_prop(ent, 'm_fFlags')  or 0
+        local air  = bit.band(flags, 1) == 0
+
+        -- multipoint: On when close or target has high HP and we need damage
+        -- Off when target is low HP (any hit kills, don't waste on multipoint)
+        local want_mp
+        if hp <= 25 then
+            want_mp = 'Off'   -- near dead: any hit point works
+        elseif dist < 400 then
+            want_mp = 'On'    -- close: multipoint helps guarantee damage
+        elseif dist > 1600 then
+            want_mp = 'Off'   -- far: multipoint hurts accuracy
+        else
+            want_mp = 'On'
+        end
+
+        -- head scale: larger when standing still (gives GS bigger target)
+        -- smaller when airborne (tighter = safer point)
+        local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
+        local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+        local spd = math.sqrt(vx*vx + vy*vy)
+
+        local want_hs  -- head scale: 1-13 in GS (1=smallest, 13=default full)
+        if air then
+            want_hs = 3    -- airborne: tight head hitbox only
+        elseif spd < 5 then
+            want_hs = 13   -- standing still: full head scale
+        elseif spd < 100 then
+            want_hs = 9
+        else
+            want_hs = 5    -- running: moderate
+        end
+
+        local cached = _mp_cache[ent] or {}
+        if cached.mp ~= want_mp then
+            pcall(plist.set, ent, 'Multipoint', want_mp)
+            cached.mp = want_mp
+        end
+        if cached.hs ~= want_hs then
+            pcall(plist.set, ent, 'Head scale', want_hs)
+            cached.hs = want_hs
+        end
+        _mp_cache[ent] = cached
+
+        ::_mp_skip::
+    end
+end
+
+-- ── target priority override ─────────────────────────────────────────────
+-- Sets plist Target selection priority based on:
+-- who is lowest HP (easiest kill), who is shooting at us, who is closest
+-- Priority 0 = normal, higher = prefer this target
+
+local _prio_cache = {}
+local _last_attacker = nil
+local _last_attacker_tick = -999
+
+client.set_event_callback('player_hurt', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    local my_uid = entity.get_prop(me, 'm_iUserId')
+    if e.userid == my_uid then
+        -- we got hurt - track who shot us
+        local attacker = client.userid_to_entindex(e.attacker)
+        if attacker and attacker ~= me then
+            _last_attacker      = attacker
+            _last_attacker_tick = globals.tickcount()
+        end
+    end
+end)
+
+local function _prio_update()
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
+    local my_x, my_y, my_z = entity.get_origin(me)
+    if not my_x then return end
+
+    -- attacker priority expires after 3 seconds
+    local attacker_valid = _last_attacker and
+        (globals.tickcount() - _last_attacker_tick) < (3 / globals.tickinterval())
+
+    for _, ent in ipairs(entity.get_players(true)) do
+        if not entity.is_alive(ent) or entity.is_dormant(ent) then
+            _prio_cache[ent] = nil
+            goto _prio_skip
+        end
+
+        local hp   = entity.get_prop(ent,'m_iHealth') or 100
+        local ex,ey,ez = entity.get_origin(ent)
+        if not ex then goto _prio_skip end
+        local dx,dy = ex-my_x, ey-my_y
+        local dist  = math.sqrt(dx*dx + dy*dy)
+
+        local prio = 0
+        -- shooter gets top priority
+        if attacker_valid and ent == _last_attacker then prio = prio + 4 end
+        -- low HP = easy kill
+        if hp <= 30  then prio = prio + 3
+        elseif hp <= 60 then prio = prio + 1 end
+        -- close range
+        if dist < 300 then prio = prio + 2
+        elseif dist < 700 then prio = prio + 1 end
+
+        -- clamp to valid range (0-7 typically)
+        prio = math.min(prio, 7)
+
+        if _prio_cache[ent] ~= prio then
+            pcall(plist.set, ent, 'Target selection priority', prio)
+            _prio_cache[ent] = prio
+        end
+
+        ::_prio_skip::
+    end
+end
+
+-- ── bullet impact tracking ───────────────────────────────────────────────
+-- Draws where our shots actually landed vs where we aimed
+-- Helps debug prediction errors
+
+local _impacts = {}
+local _impact_lifetime = 3.0  -- seconds
+
+client.set_event_callback('bullet_impact', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    -- only track our own bullets
+    local shooter = client.userid_to_entindex(e.userid)
+    if shooter ~= me then return end
+
+    table.insert(_impacts, {
+        x = e.x, y = e.y, z = e.z,
+        t = globals.curtime()
+    })
+    -- keep max 12
+    while #_impacts > 12 do table.remove(_impacts, 1) end
+end)
+
+local _show_impacts = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Bullet Impact ESP')
+    :record('aa', 'smart::bullet_impact'):save()
+
+-- ── bomb awareness ───────────────────────────────────────────────────────
+local _bomb_planted    = false
+local _bomb_plant_time = 0
+local _bomb_site       = '?'
+local _defuse_started  = false
+local _BOMB_TIMER      = 40  -- c4 fuse default
+
+client.set_event_callback('bomb_planted', function(e)
+    _bomb_planted    = true
+    _bomb_plant_time = globals.curtime()
+    -- site: 0=A, 1=B
+    _bomb_site       = (e.site == 0) and 'A' or 'B'
+    _defuse_started  = false
+end)
+
+client.set_event_callback('bomb_defused', function()
+    _bomb_planted   = false
+    _defuse_started = false
+end)
+
+client.set_event_callback('bomb_begindefuse', function(e)
+    _defuse_started = true
+end)
+
+client.set_event_callback('round_start', function()
+    _bomb_planted   = false
+    _defuse_started = false
+end)
+
+-- ── smoke/flash reactive AA ──────────────────────────────────────────────
+-- When a smoke or flash detonates, temporarily relax HC
+-- because prediction in smoke is harder for enemy too
+
+local _smoke_active   = false
+local _smoke_tick     = -999
+local _SMOKE_DURATION = 18  -- seconds smoke lasts
+
+local _flash_active   = false
+local _flash_tick     = -999
+
+client.set_event_callback('smokegrenade_detonate', function(e)
+    -- check if near us
+    local me = entity.get_local_player()
+    if not me then return end
+    local mx, my, mz = entity.get_origin(me)
+    if not mx then return end
+    local dx = (e.x or 0) - mx
+    local dy = (e.y or 0) - my
+    local dz = (e.z or 0) - mz
+    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if dist < 800 then
+        _smoke_active = true
+        _smoke_tick   = globals.tickcount()
+    end
+end)
+
+client.set_event_callback('flashbang_detonate', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    local mx, my, mz = entity.get_origin(me)
+    if not mx then return end
+    local dx = (e.x or 0) - mx
+    local dy = (e.y or 0) - my
+    local dz = (e.z or 0) - mz
+    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if dist < 1000 then
+        _flash_active = true
+        _flash_tick   = globals.tickcount()
+    end
+end)
+
+-- ── weapon reload awareness ──────────────────────────────────────────────
+-- During reload: force body aim on all targets (if clip is 0, don't head-seek)
+-- After reload: reset to normal
+
+local _reloading = false
+local _reload_tick = -999
+
+client.set_event_callback('weapon_reload', function(e)
+    local me = entity.get_local_player()
+    if not me then return end
+    if client.userid_to_entindex(e.userid) ~= me then return end
+    _reloading   = true
+    _reload_tick = globals.tickcount()
+end)
+
+-- ── setup_command: apply smoke/flash HC modifier and reload baim ─────────
+client.set_event_callback('setup_command', function()
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
+
+    -- decay smoke
+    local tc = globals.tickcount()
+    local ti = globals.tickinterval()
+    if _smoke_active and (tc - _smoke_tick) > (_SMOKE_DURATION / ti) then
+        _smoke_active = false
+    end
+    -- decay flash (1.5s)
+    if _flash_active and (tc - _flash_tick) > (1.5 / ti) then
+        _flash_active = false
+    end
+    -- decay reload (3s max)
+    if _reloading and (tc - _reload_tick) > (3.0 / ti) then
+        _reloading = false
+    end
+
+    -- during reload: force body aim on all enemies (safer while vulnerable)
+    if _reloading then
+        for _, ent in ipairs(entity.get_players(true)) do
+            if entity.is_alive(ent) then
+                pcall(plist.set, ent, 'Force body aim', true)
+            end
+        end
+    end
+
+    -- smoke/flash: if near smoke, bump HC slightly through rage system
+    -- we set it via the existing rage prev cache by invalidating it
+    if _smoke_active or _flash_active then
+        local zr = _G.__zn_rage
+        if zr then
+            -- signal smoke via a global flag the rage system can read
+            rawset(zr, '_near_smoke', true)
+        end
+    else
+        local zr = _G.__zn_rage
+        if zr then rawset(zr, '_near_smoke', false) end
+    end
+end)
+
+-- ── paint: multipoint/priority updates + impact ESP + bomb timer ─────────
+client.set_event_callback('paint', function()
+    -- multipoint + head scale update
+    _mp_update()
+    -- target priority
+    _prio_update()
+
+    -- bullet impact ESP
+    if _show_impacts:get() then
+        local now = globals.curtime()
+        for i = #_impacts, 1, -1 do
+            local imp = _impacts[i]
+            local age = now - imp.t
+            if age > _impact_lifetime then
+                table.remove(_impacts, i)
+            else
+                local fade = 1 - (age / _impact_lifetime)
+                local a    = math.floor(255 * fade)
+                local sx, sy = renderer.world_to_screen(imp.x, imp.y, imp.z)
+                if sx then
+                    -- red dot with age-based fade
+                    renderer.circle(sx, sy, 255, 80, 80, a, 4, 0, 1)
+                    renderer.circle_outline(sx, sy, 255, 255, 255, math.floor(a*0.4), 4, 0, 1, 1)
+                end
+            end
+        end
+    end
+
+    -- bomb timer overlay
+    if _bomb_planted then
+        local elapsed  = globals.curtime() - _bomb_plant_time
+        local remaining= _BOMB_TIMER - elapsed
+        if remaining < 0 then remaining = 0 end
+
+        local sw, sh   = client.screen_size()
+        local cx       = sw * 0.5
+        local cy       = sh * 0.12
+
+        local r = remaining > 10 and 255 or 255
+        local g = remaining > 10 and math.floor(remaining / _BOMB_TIMER * 255) or 60
+        local b = 60
+
+        local bar_w  = 220
+        local bar_h  = 8
+        local filled = math.floor(bar_w * (remaining / _BOMB_TIMER))
+
+        -- background
+        renderer.rectangle(cx - bar_w*0.5 - 2, cy - 2, bar_w + 4, bar_h + 4, 10, 10, 10, 200)
+        -- fill
+        renderer.rectangle(cx - bar_w*0.5, cy, filled, bar_h, r, g, b, 220)
+        -- text
+        local txt = string.format('C4 [%s]  %.1fs%s',
+            _bomb_site, remaining,
+            _defuse_started and '  [DEFUSING]' or '')
+        renderer.text(cx, cy - 14, r, g, b, 220, 'c', 0, txt)
+    end
+end)
+
+-- ── round_prestart cleanup ────────────────────────────────────────────────
+client.set_event_callback('round_prestart', function()
+    _mp_cache   = {}
+    _prio_cache = {}
+    _impacts    = {}
+    _last_attacker = nil
+end)
+
+end -- do
 
 menu.update()
 
