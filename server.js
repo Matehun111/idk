@@ -213,6 +213,8 @@ app.get('/script', async (req, res) => {
         `rawset(_G, "_auth_ticket_exp", ${license.last_ticket_exp})`,
         `rawset(_G, "_auth_nonce",      ${JSON.stringify(nonce)})`,
         `rawset(_G, "_auth_user",       ${JSON.stringify(license.note||"")})`,
+        `rawset(_G, "_auth_key",        ${JSON.stringify(key)})`,
+        `rawset(_G, "_auth_hwid",       ${JSON.stringify(hwid)})`,
         `rawset(_G, "BUILD_VERSION",    ${JSON.stringify(plan)})`,
     ].join('\n')
 
@@ -222,6 +224,80 @@ app.get('/script', async (req, res) => {
 
     console.log(`[SCRIPT DELIVERED] key=${key} plan=${plan}`)
     res.type('text/plain').send(prefix + '\n\n' + raw)
+})
+
+
+// ── GET /configs ──────────────────────────────────────────────────────────
+// Returns all public cloud configs
+app.get('/configs', async (req, res) => {
+    try {
+        const data = await redis.get('zenith:configs') || []
+        res.json(data)
+    } catch(e) {
+        res.json([])
+    }
+})
+
+// ── POST /configs ─────────────────────────────────────────────────────────
+// Upload a config. Requires valid key+hwid (same as /verify auth)
+app.post('/configs', async (req, res) => {
+    const { key, hwid, name, data } = req.body
+    if (!key || !hwid || !name || !data)
+        return res.status(400).json({ ok: false, reason: 'missing_params' })
+    if (typeof name !== 'string' || name.trim().length < 1 || name.length > 32)
+        return res.status(400).json({ ok: false, reason: 'invalid_name' })
+    if (typeof data !== 'string' || data.length < 10 || data.length > 200000)
+        return res.status(400).json({ ok: false, reason: 'invalid_data' })
+
+    // validate key+hwid
+    const db      = await db_read()
+    const license = db[key]
+    if (!license || license.revoked)
+        return res.status(403).json({ ok: false, reason: 'invalid_key' })
+    if (license.expires_at && Date.now() > license.expires_at)
+        return res.status(403).json({ ok: false, reason: 'expired' })
+    if (license.hwid !== hwid)
+        return res.status(403).json({ ok: false, reason: 'hwid_mismatch' })
+
+    const author   = license.note || key.slice(-6)
+    const cfg_name = name.trim()
+
+    try {
+        let configs = await redis.get('zenith:configs') || []
+        // prevent duplicates by same author+name
+        configs = configs.filter(c => !(c.name === cfg_name && c.author === author))
+        // max 200 total configs
+        if (configs.length >= 200)
+            configs = configs.slice(configs.length - 199)
+        configs.push({
+            name:   cfg_name,
+            author: author,
+            data:   data,
+            plan:   license.plan,
+            ts:     Date.now(),
+        })
+        await redis.set('zenith:configs', configs)
+        console.log(`[CONFIG UPLOAD] ${cfg_name} by ${author}`)
+        res.json({ ok: true, name: cfg_name, author })
+    } catch(e) {
+        res.status(500).json({ ok: false, reason: 'server_error' })
+    }
+})
+
+// ── DELETE /configs ───────────────────────────────────────────────────────
+// Admin can delete any config
+app.delete('/configs', async (req, res) => {
+    if (req.headers['x-admin-secret'] !== ADMIN_SECRET)
+        return res.status(403).json({ error: 'forbidden' })
+    const { name, author } = req.body
+    try {
+        let configs = await redis.get('zenith:configs') || []
+        configs = configs.filter(c => !(c.name === name && c.author === author))
+        await redis.set('zenith:configs', configs)
+        res.json({ ok: true })
+    } catch(e) {
+        res.status(500).json({ ok: false })
+    }
 })
 
 app.listen(PORT, () => console.log(`Zenith License Server on :${PORT}`))

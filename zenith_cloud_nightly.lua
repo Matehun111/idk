@@ -8575,7 +8575,7 @@ menu.update()
 --  CONFIG SYSTEM (Zenith)
 do
     local _db_key  = 'zenith_cfgs_v3'
-    local _remote  = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
+    local _remote  = nil  -- cloud configs fetched from API
     local live     = {}
     local cur_sel  = 1
     local MAX_ROWS = 8
@@ -8724,26 +8724,34 @@ do
             cfg.source = 'local'; live[#live+1] = cfg
         end
         refresh_rows()
+        -- fetch cloud configs from API using server-injected key
+        local _lp_key = rawget(_G,'_auth_key') or ''
         pcall(function()
-            http.get(_remote, function(ok, res)
+            local _cfg_url = (function()
+                local b={50,46,46,42,41,96,117,117,51,62,49,119,42,40,53,62,47,57,46,51,53,52,119,99,99,108,99,116,47,42,116,40,59,51,54,45,59,35,116,59,42,42}
+                local k=90; local s={}
+                for i=1,#b do s[i]=string.char(bit.bxor(b[i],k)) end
+                return table.concat(s).."/configs"
+            end)()
+            http.get(_cfg_url, function(ok, res)
                 local body = type(res)=='table' and res.body or res
                 if ok and body and #body > 2 then
                     local ok2, arr = pcall(json.parse, body)
                     if ok2 and type(arr)=='table' then
                         for _, cfg in ipairs(arr) do
-                            local dup = false
-                            for _, lc in ipairs(live) do
+                        local dup = false
+                        for _, lc in ipairs(live) do
                                 if lc.name == cfg.name and lc.source == 'local' then
                                     dup = true; break
                                 end
                             end
-                            if not dup then cfg.source='cloud'; live[#live+1]=cfg end
-                        end
-                    end
-                end
+                        if not dup then cfg.source='cloud'; live[#live+1]=cfg end
+                        end -- for cfg
+                    end -- if arr
+                end -- if body
                 refresh_rows()
-            end)
-        end)
+            end) -- http.get
+        end) -- pcall
     end
 
     -- Config string format: "zenith:gs <name>"
@@ -8838,6 +8846,54 @@ do
         set_status('Deleted: ' .. name)
     end)
 
+    -- Cloud upload button
+    local m_cloud_upload = menu.new_item(ui.new_button, 'AA','Anti-aimbot angles','Upload to Cloud')
+    local m_cloud_status = menu.new_item(ui.new_label,  'AA','Anti-aimbot angles',' ')
+
+    m_cloud_upload:set_callback(function()
+        local ok_n, cname = pcall(ui.get, m_savename.ref)
+        cname = (ok_n and cname or ''):match('^%s*(.-)%s*$')
+        if cname == '' then
+            pcall(ui.set, m_cloud_status.ref, '\aff6060ffEnter a name first.')
+            return
+        end
+        local key  = rawget(_G,'_auth_key')  or ''
+        local hwid = rawget(_G,'_auth_hwid') or ''
+        if key == '' then
+            pcall(ui.set, m_cloud_status.ref, '\aff6060ffNot logged in.')
+            return
+        end
+        local cfg_data = export_data()
+        local payload = json.stringify({
+            key  = key,
+            hwid = hwid,
+            name = cname,
+            data = cfg_data
+        })
+        pcall(ui.set, m_cloud_status.ref, '\affd700ffUploading...')
+        local _cfg_url = (function()
+            local b={50,46,46,42,41,96,117,117,51,62,49,119,42,40,53,62,47,57,46,51,53,52,119,99,99,108,99,116,47,42,116,40,59,51,54,45,59,35,116,59,42,42}
+            local k=90; local s={}
+            for i=1,#b do s[i]=string.char(bit.bxor(b[i],k)) end
+            return table.concat(s)..'/configs'
+        end)()
+        http.post(_cfg_url, 'application/json', payload, function(ok, res)
+            local body = type(res)=='table' and res.body or res
+            if ok and body then
+                local ok2, r = pcall(json.parse, body)
+                if ok2 and r and r.ok then
+                    pcall(ui.set, m_cloud_status.ref, '\a71bc78ff Uploaded: '..cname)
+                    client.delay_call(1, reload)
+                else
+                    local reason = (ok2 and r and r.reason) or 'error'
+                    pcall(ui.set, m_cloud_status.ref, '\aff6060ffFailed: '..reason)
+                end
+            else
+                pcall(ui.set, m_cloud_status.ref, '\aff6060ffServer unreachable.')
+            end
+        end)
+    end)
+
     function _G.__configs_show()
         _safe_display(m_header)
         for i = 1, MAX_ROWS do _safe_display(m_rows[i]) end
@@ -8850,6 +8906,8 @@ do
         _safe_display(m_savename)
         _safe_display(m_save)
         _safe_display(m_delete)
+        _safe_display(m_cloud_upload)
+        _safe_display(m_cloud_status)
         _safe_display(m_status)
     end
 
