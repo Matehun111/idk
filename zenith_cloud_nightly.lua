@@ -8888,6 +8888,8 @@ do
     end)
 
     -- Cloud upload button (raw ui, bypasses menu visibility system)
+    local _cst_ref = ui.new_label('AA', 'Anti-aimbot angles', '\aaaaaaaff  ')
+    ui.set_visible(_cst_ref, false)
     local _cup_ref = ui.new_button('AA', 'Anti-aimbot angles', 'Upload to Cloud', function()
         local ok_n, cname = pcall(ui.get, m_savename.ref)
         cname = (ok_n and cname or ''):match('^%s*(.-)%s*$')
@@ -8932,10 +8934,8 @@ do
         end)
     end)
 
-    local _cst_ref = ui.new_label('AA', 'Anti-aimbot angles', '\aaaaaaaff  ')
-    -- hide by default, only shown on Configs page
+    -- hide upload button by default
     ui.set_visible(_cup_ref, false)
-    ui.set_visible(_cst_ref, false)
     rawset(_G, '_zn_cloud_upload_ref', _cup_ref)
     rawset(_G, '_zn_cloud_status_ref', _cst_ref)
 
