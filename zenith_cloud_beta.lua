@@ -8199,13 +8199,12 @@ do
     end)
 
     -- Cloud upload button
-    local m_cloud_upload = menu.new_item(ui.new_button, 'AA','Anti-aimbot angles','Upload to Cloud')
-    local m_cloud_status = menu.new_item(ui.new_label,  'AA','Anti-aimbot angles','\aaaaaaaff  cloud upload')
+    local m_cloud_upload = menu.new_item(ui.new_button, 'AA','Anti-aimbot angles','Upload to Cloud', function() end)
+    local m_cloud_status = menu.new_item(ui.new_label,  'AA','Anti-aimbot angles','\aaaaaaaff  ')
     _G._zn_cloud_upload = m_cloud_upload
     _G._zn_cloud_status = m_cloud_status
     _G._zn_cloud_upload_ref = m_cloud_upload.ref
     _G._zn_cloud_status_ref = m_cloud_status.ref
-    _G._zn_cloud_status = m_cloud_status
 
     m_cloud_upload:set_callback(function()
         local ok_n, cname = pcall(ui.get, m_savename.ref)
