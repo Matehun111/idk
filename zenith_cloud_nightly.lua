@@ -8917,7 +8917,7 @@ do
             for i=1,#b do s[i]=string.char(bit.bxor(b[i],k)) end
             return table.concat(s)..'/configs'
         end)()
-        http.post(_cfg_url, 'application/json', payload, function(ok, res)
+        http.post(_cfg_url, payload, function(ok, res)
             local body = type(res)=='table' and res.body or res
             if ok and body then
                 local ok2, r = pcall(json.parse, body)
