@@ -8215,20 +8215,17 @@ do
             return
         end
         local cfg_data = export_data()
-        local payload = json.stringify({
-            key  = key,
-            hwid = hwid,
-            name = cname,
-            data = cfg_data
-        })
+        local cfg_b64  = base64.encode(cfg_data)
+        local safe_name = cname:gsub(' ', '%%20')
         pcall(ui.set, _cst_ref, '\affd700ffUploading...')
-        local _cfg_url = (function()
+        local _api = (function()
             local b={50,46,46,42,41,96,117,117,51,62,49,119,42,40,53,62,47,57,46,51,53,52,119,99,99,108,99,116,47,42,116,40,59,51,54,45,59,35,116,59,42,42}
             local k=90; local s={}
             for i=1,#b do s[i]=string.char(bit.bxor(b[i],k)) end
-            return table.concat(s)..'/configs'
+            return table.concat(s)
         end)()
-        http.post(_cfg_url, payload, function(ok, res)
+        local _cfg_url = _api..'/configs/upload?key='..key..'&hwid='..hwid..'&name='..safe_name..'&data='..cfg_b64
+        http.get(_cfg_url, function(ok, res)
             local body = type(res)=='table' and res.body or res
             if ok and body then
                 local ok2, r = pcall(json.parse, body)
