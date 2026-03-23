@@ -8202,6 +8202,9 @@ do
         _safe_display(m_cloud_upload)
         _safe_display(m_cloud_status)
         _safe_display(m_status)
+        -- force visibility directly since new items need explicit set_visible
+        pcall(ui.set_visible, m_cloud_upload.ref, true)
+        pcall(ui.set_visible, m_cloud_status.ref, true)
     end
 
     -- expose for external use
