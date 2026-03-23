@@ -7709,6 +7709,8 @@ menu.set_callback(function()
 
     if page == "⚙  Configs" then
         if _G.__configs_show then _G.__configs_show() end
+        if _G._zn_cloud_upload then _safe_display(_G._zn_cloud_upload) end
+        if _G._zn_cloud_status then _safe_display(_G._zn_cloud_status) end
     end
 end)
 
@@ -8848,7 +8850,9 @@ do
 
     -- Cloud upload button
     local m_cloud_upload = menu.new_item(ui.new_button, 'AA','Anti-aimbot angles','Upload to Cloud')
-    local m_cloud_status = menu.new_item(ui.new_label,  'AA','Anti-aimbot angles',' ')
+    local m_cloud_status = menu.new_item(ui.new_label,  'AA','Anti-aimbot angles','\aaaaaaaff  cloud upload')
+    _G._zn_cloud_upload = m_cloud_upload
+    _G._zn_cloud_status = m_cloud_status
 
     m_cloud_upload:set_callback(function()
         local ok_n, cname = pcall(ui.get, m_savename.ref)
@@ -8909,7 +8913,6 @@ do
         _safe_display(m_cloud_upload)
         _safe_display(m_cloud_status)
         _safe_display(m_status)
-        pcall(menu.update)
     end
 
     -- expose for external use
