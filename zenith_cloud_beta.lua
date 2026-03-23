@@ -2656,8 +2656,29 @@ do
         local on_peek = false
         for _, condition in next, defensive.state:get() do
             if condition == 'On Peek' then
-                should_work = true
-                on_peek = true
+                -- detect actual peeking: player is moving AND there are enemies visible
+                local vx = entity.get_prop(lp, "m_vecVelocity[0]") or 0
+                local vy = entity.get_prop(lp, "m_vecVelocity[1]") or 0
+                local spd = math.sqrt(vx*vx + vy*vy)
+                -- peek = moving fast enough (not standing still)
+                local is_peeking = spd > 60
+                -- also check if any enemy is close enough to shoot us
+                if not is_peeking then
+                    for _, ent in ipairs(entity.get_players(true)) do
+                        if entity.is_alive(ent) then
+                            local ex,ey,ez = entity.get_origin(ent)
+                            local mx,my,mz = entity.get_origin(lp)
+                            if ex and mx then
+                                local dist = math.sqrt((ex-mx)^2+(ey-my)^2)
+                                if dist < 800 then is_peeking = true; break end
+                            end
+                        end
+                    end
+                end
+                if is_peeking then
+                    should_work = true
+                    on_peek = true
+                end
                 break
             else
                 if condition == lp_state then
@@ -2707,9 +2728,20 @@ do
             elseif val == 'Up' then
                 pitch_value, pitch_mode = 0, 'Up'
             elseif val == 'Up Switch' then
-                pitch_value, pitch_mode = client.random_float(45, 60) * -1, 'Custom'
+                -- lock pitch for entire choke window so resolver cant adapt mid-shot
+                local tc2 = globals.tickcount()
+                if tc2 ~= _snap_pitch_tick then
+                    _snap_pitch_val  = client.random_float(55, 89) * -1
+                    _snap_pitch_tick = tc2
+                end
+                pitch_value, pitch_mode = _snap_pitch_val, 'Custom'
             elseif val == 'Down Switch' then
-                pitch_value, pitch_mode = client.random_float(45, 60), 'Custom'
+                local tc3 = globals.tickcount()
+                if tc3 ~= _snap_pitch_tick then
+                    _snap_pitch_val  = client.random_float(55, 89)
+                    _snap_pitch_tick = tc3
+                end
+                pitch_value, pitch_mode = _snap_pitch_val, 'Custom'
             elseif val == 'Random' then
                 pitch_value, pitch_mode = client.random_float(-89, 89), 'Custom'
             elseif val == 'Jitter Pitch' then
@@ -2745,6 +2777,28 @@ do
                 yaw_value   = utils.normalize(_chaos_seed - 180, -180, 180)
             elseif val == 'Random' then
                 yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
+            elseif val == 'Snap' then
+                local tc = globals.tickcount()
+                if tc ~= _snap_last_tick then
+                    local range  = defensive.snap_range:get()
+                    local offset = defensive.snap_offset:get()
+                    local rand_angle = client.random_float(-range * 0.5, range * 0.5)
+                    _snap_last_offset = utils.normalize(offset + rand_angle, -180, 180)
+                    _snap_last_tick = tc
+                end
+                yaw_value = _snap_last_offset
+            elseif val == 'Snap Jitter' then
+                local tc = globals.tickcount()
+                local range  = defensive.snap_range:get()
+                local offset = defensive.snap_offset:get()
+                if tc ~= _snap_last_tick then
+                    _snap_jitter_side = (_snap_jitter_side == 1) and -1 or 1
+                    _snap_last_tick = tc
+                end
+                local flip = (localplayer.packets % 2 == 0) and 1 or -1
+                yaw_value = utils.normalize(
+                    offset * _snap_jitter_side * flip + client.random_float(-15, 15),
+                    -180, 180)
             end
 
             if manual_yaw ~= nil and should_flick then
@@ -2754,9 +2808,6 @@ do
 
         -- client.color_log(255, 255, 255, f('\nDefensive: %s\nShould Ignore: %s\nAvoid Backstab: %s\nForce Defensive: %s\nFreestanding: %s', globals.tickcount() > double_tap.defensive_tk - 2, should_ignore, avoid_backstab.get(), cmd.force_defensive, software.is_freestanding()))
 
-        if globals.tickcount() > double_tap.defensive_tk - 2 then
-            return
-        end
 
         if avoid_backstab.get() or should_ignore then
             return
@@ -6102,6 +6153,10 @@ do
         'outplayed', 'cry about it', 'too easy', 'go next',
         'rekt', 'kys', 'mad?', 'sit', 'done', 'bye',
         'no shot', 'clean', 'diff', 'pack it up',
+        'u good?', 'next', 'lmao', 'terrible', 'W',
+        'bro really tried', 'stay down', 'touch grass',
+        'discord.gg/4qSQtPKas5', 'zenith.gs | discord.gg/4qSQtPKas5',
+        'get rekt | discord.gg/4qSQtPKas5',
     }
 
     -- ── headshot-specific pool ────────────────────────────────────────
@@ -7440,9 +7495,15 @@ menu.set_callback(function()
 
     if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
-        if _G._zn_cloud_upload then _safe_display(_G._zn_cloud_upload) end
-        if _G._zn_cloud_status then _safe_display(_G._zn_cloud_status) end
+        -- force cloud upload button visible directly
+        if _G._zn_cloud_upload_ref then
+            pcall(ui.set_visible, _G._zn_cloud_upload_ref, true)
+        end
+        if _G._zn_cloud_status_ref then
+            pcall(ui.set_visible, _G._zn_cloud_status_ref, true)
+        end
     end
+
 end)
 
 
@@ -8142,6 +8203,9 @@ do
     local m_cloud_status = menu.new_item(ui.new_label,  'AA','Anti-aimbot angles','\aaaaaaaff  cloud upload')
     _G._zn_cloud_upload = m_cloud_upload
     _G._zn_cloud_status = m_cloud_status
+    _G._zn_cloud_upload_ref = m_cloud_upload.ref
+    _G._zn_cloud_status_ref = m_cloud_status.ref
+    _G._zn_cloud_status = m_cloud_status
 
     m_cloud_upload:set_callback(function()
         local ok_n, cname = pcall(ui.get, m_savename.ref)
@@ -8202,9 +8266,6 @@ do
         _safe_display(m_cloud_upload)
         _safe_display(m_cloud_status)
         _safe_display(m_status)
-        -- force visibility directly since new items need explicit set_visible
-        pcall(ui.set_visible, m_cloud_upload.ref, true)
-        pcall(ui.set_visible, m_cloud_status.ref, true)
     end
 
     -- expose for external use
