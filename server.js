@@ -83,18 +83,25 @@ function sign_ticket(key, hwid, plan, ticket_exp, nonce) {
 }
 
 app.use(cors())
-app.use(express.json({ limit: "50mb" }))
-app.use(express.urlencoded({ limit: "50mb", extended: true }))
-// Also accept raw text/plain as JSON (for GS http.post which sends no content-type)
+// Accept JSON, urlencoded, and raw text (GS http.post sends no content-type)
 app.use((req, res, next) => {
-    if (req.method === 'POST' && !req.headers['content-type']?.includes('json') && typeof req.body !== 'object') {
+    const ct = req.headers['content-type'] || ''
+    if (ct.includes('application/json')) {
+        express.json({ limit: '50mb' })(req, res, next)
+    } else if (ct.includes('urlencoded')) {
+        express.urlencoded({ limit: '50mb', extended: true })(req, res, next)
+    } else if (req.method === 'POST' || req.method === 'PUT') {
+        // GS http.post sends raw JSON with no content-type header
         let raw = ''
-        req.on('data', d => raw += d)
+        req.on('data', d => { raw += d })
         req.on('end', () => {
-            try { req.body = JSON.parse(raw) } catch { req.body = {} }
+            try { req.body = JSON.parse(raw) }
+            catch { req.body = {} }
             next()
         })
-    } else { next() }
+    } else {
+        next()
+    }
 })
 
 // ── POST /admin/create ────────────────────────────────────────────────────
