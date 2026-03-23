@@ -7740,15 +7740,15 @@ menu.set_callback(function()
         if _G.__home then _G.__home.show() end
     end
 
+    -- hide cloud buttons on every page by default
+    if _G._zn_cloud_upload_ref then pcall(ui.set_visible, _G._zn_cloud_upload_ref, false) end
+    if _G._zn_cloud_status_ref then pcall(ui.set_visible, _G._zn_cloud_status_ref, false) end
+
     if page == "⚙  Configs" then
         if _G.__configs_show then _G.__configs_show() end
-        -- force cloud upload button visible directly
-        if _G._zn_cloud_upload_ref then
-            pcall(ui.set_visible, _G._zn_cloud_upload_ref, true)
-        end
-        if _G._zn_cloud_status_ref then
-            pcall(ui.set_visible, _G._zn_cloud_status_ref, true)
-        end
+        -- show cloud buttons only on Configs page
+        if _G._zn_cloud_upload_ref then pcall(ui.set_visible, _G._zn_cloud_upload_ref, true) end
+        if _G._zn_cloud_status_ref then pcall(ui.set_visible, _G._zn_cloud_status_ref, true) end
     end
 
 end)
@@ -8933,6 +8933,9 @@ do
     end)
 
     local _cst_ref = ui.new_label('AA', 'Anti-aimbot angles', '\aaaaaaaff  ')
+    -- hide by default, only shown on Configs page
+    ui.set_visible(_cup_ref, false)
+    ui.set_visible(_cst_ref, false)
     rawset(_G, '_zn_cloud_upload_ref', _cup_ref)
     rawset(_G, '_zn_cloud_status_ref', _cst_ref)
 
