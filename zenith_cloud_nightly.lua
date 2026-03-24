@@ -554,8 +554,8 @@ LPH_NO_VIRTUALIZE(function ()
 
         function software.get_dpi_scale()
             local value = ui.get(software.misc.settings.dpi_scale)
-            local unit = string.match(value, "(%d+)%%")
-
+            local unit = value and string.match(value, "(%d+)%%")
+            unit = tonumber(unit) or 100
             return unit * 0.01
         end
 
@@ -2156,23 +2156,6 @@ local _chaos_jitter_seed = 0
             end
         end
     end
-
-        -- velocity jitter bias: lean jitter toward strafe direction
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off' then
-            local lp = entity.get_local_player()
-            if lp then
-                local vx = entity.get_prop(lp, 'm_vecVelocity[0]') or 0
-                local vy = entity.get_prop(lp, 'm_vecVelocity[1]') or 0
-                local spd = math.sqrt(vx*vx + vy*vy)
-                if spd > 20 then
-                    local eye_yaw = localplayer.angles and localplayer.angles.y or 0
-                    local vel_yaw = math.deg(math.atan2(vy, vx))
-                    local rel = ((vel_yaw - eye_yaw + 180) % 360) - 180
-                    local bias = rel > 0 and math.min(spd * 0.04, 8) or -math.min(spd * 0.04, 8)
-                    ctx.yaw_offset = (ctx.yaw_offset or 0) + bias
-                end
-            end
-        end
 
     local safe_head_presets = {
         [1] = {
@@ -8084,33 +8067,17 @@ do
         -- mid (300-900): sweet spot, no change
         -- long (900-1800): harder, tighten HC
         -- very long (>1800): very hard, max tighten
-        if target_dist < 200 then
-            hc = hc - 12
-        elseif target_dist < 300 then
-            hc = hc - 8
-        elseif target_dist < 500 then
-            hc = hc - 4
-        elseif target_dist < 900 then
-            -- sweet spot, no change
-        elseif target_dist < 1400 then
-            hc = hc + 5
-        elseif target_dist < 2000 then
-            hc = hc + 10
-        else
-            hc = hc + 16
+        for _, d in ipairs(TUNE.dist) do
+            if target_dist < d.max then hc = hc + d.delta; break end
         end
 
         -- ── target movement modifier ──────────────────────────────────────────────
-        if is_airborne then
-            hc = hc + 12
-        elseif target_vel > 260 then
-            hc = hc + 9
-        elseif target_vel > 160 then
-            hc = hc + 5
-        elseif target_vel > 80 then
-            hc = hc + 2
-        elseif target_vel < 8 then
-            hc = hc - 6   -- standing still = easy to hit
+        do local m=TUNE.move
+            if     is_airborne      then hc=hc+m.air
+            elseif target_vel>260   then hc=hc+m.fast
+            elseif target_vel>160   then hc=hc+m.mid
+            elseif target_vel>80    then hc=hc+m.slow
+            elseif target_vel<8     then hc=hc-m.still end
         end
 
         -- ── scoped modifier ──────────────────────────────────────────────────
@@ -8167,15 +8134,12 @@ do
             local tk = hit_tracker[target_ent] or { misses=0, hits=0, shots=0, consec_miss=0 }
             local consec = tk.consec_miss or 0
 
-            -- escalate HC on consecutive misses (they're hard to hit)
-            if consec >= 5 then
-                hc  = math.min(hc  + 25, 97)
-                dmg = math.max(dmg - 12, 1)  -- lower dmg to allow body shots through
-            elseif consec >= 3 then
-                hc  = math.min(hc  + 15, 93)
-                dmg = math.max(dmg - 6, 1)
-            elseif consec >= 2 then
-                hc  = math.min(hc  + 8,  90)
+            -- escalate HC/dmg using TUNE miss tables
+            for thr, pen in pairs(TUNE.miss_penalty) do
+                if consec >= thr then hc = math.min(hc + pen, 97) end
+            end
+            for thr, cut in pairs(TUNE.miss_dmg_cut) do
+                if consec >= thr then dmg = math.max(dmg - cut, 1) end
             end
 
             -- hitting well: relax slightly so we shoot more
@@ -8199,7 +8163,7 @@ do
             if target_dist > 1200   then aggr_score = aggr_score - 2 end
             if target_vel  > 200    then aggr_score = aggr_score - 1 end
             -- blend: 0=full safe, 4+=full aggressive
-            local t = math.max(0, math.min(1, aggr_score / 4))
+            local t = math.max(0, math.min(1, aggr_score / TUNE.dynamic_aggr_max))
             hc  = safe_p.hc  + (agg_p.hc  - safe_p.hc)  * t
             dmg = safe_p.dmg + (agg_p.dmg - safe_p.dmg) * t
             -- re-apply the situation modifiers on top of blend
@@ -8231,28 +8195,26 @@ do
                     local aa_type = rd.aa_type or "Gathering"
                     local conf    = rd.confidence or 0.5
                     -- Jitter Hitchance: lower HC when jitter/chaotic (resolver less reliable)
-                    if (aa_type == "Jitter" or aa_type == "Chaotic") and conf < 0.7 then
-                        local penalty = math.floor((0.7 - conf) * 30)
-                        hc = math.max(hc - penalty, 25)
+                    if (aa_type == "Jitter" or aa_type == "Chaotic") and conf < TUNE.jitter_conf_floor then
+                        hc = math.max(hc - math.floor((TUNE.jitter_conf_floor-conf)*TUNE.jitter_penalty_scale), 25)
                     end
-                    -- Desync safety: increase HC on high desync
                     local desync = rd.desync or 0
-                    if desync > 40 then
-                        hc = math.min(hc + math.floor((desync - 40) * 0.15), 100)
+                    if desync > TUNE.high_desync_start then
+                        hc = math.min(hc + math.floor((desync-TUNE.high_desync_start)*TUNE.high_desync_scale), 100)
                     end
                 end
             end
         end
         -- smooth HC to prevent rapid flipping
         -- (smooth toward target at 60% per tick so it tracks fast but doesn't jump)
-        _smooth_hc  = smooth_toward(_smooth_hc,  hc,  0.60)
-        _smooth_dmg = smooth_toward(_smooth_dmg, dmg, 0.55)
+        _smooth_hc  = smooth_toward(_smooth_hc,  hc,  TUNE.smooth_hc)
+        _smooth_dmg = smooth_toward(_smooth_dmg, dmg, TUNE.smooth_dmg)
         local final_hc  = clamp(_smooth_hc,  1, 100)
         local final_dmg = clamp(_smooth_dmg, 1, dmgMax)
 
         -- ── apply (every 2 ticks or on weapon change) ─────────────────────────────────
         rage_ticks = rage_ticks + 1
-        local should_apply = (rage_ticks % 2 == 0)
+        local should_apply = (rage_ticks % TUNE.apply_every_ticks == 0)
         if active_w ~= last_weapon then
             last_weapon = active_w
             rage_prev   = { hc = -1, dmg = -1 }
@@ -8325,6 +8287,40 @@ do
     _G.__zn_rage = _zn_rage
 end
 end -- _HAS_AIMBOT
+
+
+-- ======================================================================
+--  ZENITH TUNE TABLE -- all magic numbers in one place
+-- ======================================================================
+local TUNE = {
+    apply_every_ticks     = 2,
+    smooth_hc             = 0.60,
+    smooth_dmg            = 0.55,
+    jitter_conf_floor     = 0.70,
+    jitter_penalty_scale  = 30,
+    high_desync_start     = 40,
+    high_desync_scale     = 0.15,
+    miss_penalty          = { [2]=8,  [3]=15, [5]=25 },
+    miss_dmg_cut          = { [3]=6,  [5]=12 },
+    hp_panic = {
+        dying  = { hp=12, hc_cut=22, dmg_cut=15, floor_hc=22 },
+        low    = { hp=30, hc_cut=12, dmg_cut=8,  floor_hc=28 },
+        medium = { hp=55, hc_cut=5 },
+    },
+    dist = {
+        { max=200,  delta=-12 }, { max=300,  delta=-8  }, { max=500,  delta=-4  },
+        { max=900,  delta=0   }, { max=1400, delta=5   }, { max=2000, delta=10  },
+        { max=1e9,  delta=16  },
+    },
+    move = { air=12, fast=9, mid=5, slow=2, still=6 },
+    dynamic_aggr_max      = 4,
+    min_samples_for_state = 8,
+    state_decay           = 0.85,
+}
+local function ema(prev, val, alpha)
+    if prev < 0 then return val end
+    return prev + alpha * (val - prev)
+end
 
 if _HAS_AIMBOT then
 --  ZENITH SMART FEATURES
@@ -9895,7 +9891,8 @@ local function _pattern(ent, d, state, ld, jt, decay)
 
     -- ── per-state memory ────────────────────────────────────────────────
     local ss = d.state_stats[state]
-    if ss and ss.hits >= 2 and ss.hits > ss.misses * 0.6 then
+    local _ss_total = ss and (ss.hits + ss.misses) or 0
+    if ss and _ss_total >= TUNE.min_samples_for_state and ss.hits > ss.misses * 0.6 then
         side   = ss.best_side
         desync = ss.best_desync
         conf   = _max(conf, 0.88)
@@ -10408,6 +10405,14 @@ client.set_event_callback('round_start',function()
         d.fail_streak=0; d.hit_streak=0; d.brute_stage=0; d.brute_locked=false
         d.def_snap_cnt=0; d.def_flick_cnt=0; d.def_active=false
         d.miss_pattern={}; d.adaptive_desync=nil
+        if d.state_stats then
+            for _,ss in pairs(d.state_stats) do
+                if ss then
+                    ss.hits   = math.floor((ss.hits   or 0)*TUNE.state_decay)
+                    ss.misses = math.floor((ss.misses or 0)*TUNE.state_decay)
+                end
+            end
+        end
     end
 end)
 client.set_event_callback('player_disconnect',function(e)
