@@ -2770,7 +2770,7 @@ do
     : record("aa", "defensive::state")
     : save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Snap Pitch", "Fake Up" })
+    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Ranged Jitter", "Snap Pitch", "Fake Up" })
     : record("aa", "defensive::pitch")
     : save()
 
@@ -2942,6 +2942,20 @@ do
                     local extremes = { -89, -75, -60, 60, 75, 89 }
                     _snap_pitch_val  = extremes[math.random(1, #extremes)]
                     _snap_pitch_tick = tc
+                end
+                pitch_value = _snap_pitch_val
+                pitch_mode  = 'Custom'
+            elseif val == 'Ranged Jitter' then
+                local tc4 = globals.tickcount()
+                if tc4 ~= _snap_pitch_tick then
+                    local ranges = { -89, -75, -60, -45, 45, 60, 75, 89 }
+                    local last = _snap_pitch_val or 0
+                    local cands = {}
+                    for _, v in ipairs(ranges) do
+                        if math.abs(v - last) > 60 then cands[#cands+1] = v end
+                    end
+                    _snap_pitch_val  = #cands > 0 and cands[math.random(#cands)] or ranges[math.random(#ranges)]
+                    _snap_pitch_tick = tc4
                 end
                 pitch_value = _snap_pitch_val
                 pitch_mode  = 'Custom'
@@ -3299,23 +3313,25 @@ do
 
     local sv_gravity = cvar.sv_gravity
     local function extrapolate_entity(ent, pos)
-        local tick_interval = globals.tickinterval()
-
-        local velocity = vector(entity.get_prop(ent, "m_vecVelocity"))
+        local ti  = globals.tickinterval()
+        local vel = vector(entity.get_prop(ent, "m_vecVelocity"))
         local new_pos = pos:clone()
-
-        local ticks = 25
-        if #velocity < 32 then
-            ticks = 40
+        local spd = #vel
+        -- latency-aware tick count for better extrapolation accuracy
+        local latency = 0
+        local nci = iengineclient.get_net_channel_info()
+        if nci then
+            local ok1, l1 = pcall(inetchannel.get_latency, nci, 0)
+            local ok2, l2 = pcall(inetchannel.get_latency, nci, 1)
+            latency = (ok1 and l1 or 0) + (ok2 and l2 or 0)
         end
-
-        new_pos.x = new_pos.x + velocity.x * tick_interval * ticks
-        new_pos.y = new_pos.y + velocity.y * tick_interval * ticks
-
+        local ticks = math.max(8, math.min(math.floor(latency / ti + 0.5) + 4, 64))
+        if spd < 32 then ticks = math.min(ticks, 20) end
+        new_pos.x = new_pos.x + vel.x * ti * ticks
+        new_pos.y = new_pos.y + vel.y * ti * ticks
         if entity.get_prop(ent, "m_hGroundEntity") == nil then
-            new_pos.z = new_pos.z + velocity.z * tick_interval * ticks - sv_gravity:get_float() * tick_interval
+            new_pos.z = new_pos.z + vel.z * ti * ticks - sv_gravity:get_float() * 0.5 * ti * ticks
         end
-
         return new_pos
     end
 
@@ -8206,7 +8222,28 @@ do
         hc  = clamp(hc,  1, 100)
         dmg = clamp(dmg, 1, dmgMax)
 
-        -- smooth HC to prevent rapid flipping that confuses GS resolver
+        -- Hitscan Logic: resolver-aware HC blending
+        if target_ent then
+            local _res_get = rawget(_G, "ZenithResolver_GetData")
+            if _res_get then
+                local rd = pcall(_res_get, target_ent) and _res_get(target_ent) or nil
+                if rd then
+                    local aa_type = rd.aa_type or "Gathering"
+                    local conf    = rd.confidence or 0.5
+                    -- Jitter Hitchance: lower HC when jitter/chaotic (resolver less reliable)
+                    if (aa_type == "Jitter" or aa_type == "Chaotic") and conf < 0.7 then
+                        local penalty = math.floor((0.7 - conf) * 30)
+                        hc = math.max(hc - penalty, 25)
+                    end
+                    -- Desync safety: increase HC on high desync
+                    local desync = rd.desync or 0
+                    if desync > 40 then
+                        hc = math.min(hc + math.floor((desync - 40) * 0.15), 100)
+                    end
+                end
+            end
+        end
+        -- smooth HC to prevent rapid flipping
         -- (smooth toward target at 60% per tick so it tracks fast but doesn't jump)
         _smooth_hc  = smooth_toward(_smooth_hc,  hc,  0.60)
         _smooth_dmg = smooth_toward(_smooth_dmg, dmg, 0.55)
@@ -9643,12 +9680,15 @@ local function _jitter_predict(d)
         return last > 0 and 2 or 1, 0.62
     end
 
-    -- measure average period between flips
+    -- measure average period using weighted recent flips (more weight to recent)
     local period_sum = 0
+    local period_wsum = 0
     for i = 2, #flips do
-        period_sum = period_sum + (flips[i] - flips[i-1])
+        local w = i / #flips  -- more weight to recent flips
+        period_sum  = period_sum  + (flips[i] - flips[i-1]) * w
+        period_wsum = period_wsum + w
     end
-    local avg_period = period_sum / (#flips - 1)
+    local avg_period = period_sum / period_wsum
 
     -- how many ticks since last flip?
     local last_flip_idx = flips[#flips]

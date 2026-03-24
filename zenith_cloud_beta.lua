@@ -2603,7 +2603,7 @@ do
     : record("aa", "defensive::state")
     : save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch" })
+    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Ranged Jitter", "Snap Pitch", "Fake Up" })
     : record("aa", "defensive::pitch")
     : save()
 
