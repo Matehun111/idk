@@ -7672,7 +7672,7 @@ menu.set_callback(function()
         end
     end
 
-    -- ── MISC ─────────────────────────────────────────────────────────
+    -- ─��� MISC ─────────────────────────────────────────────────────────
     -- Features/tweaks, AA tweaks, Safe Head, Buy Bot, Clantag, extras
     if page == "☰  Misc" then
         -- Features toggle
@@ -7955,6 +7955,33 @@ do
         local ent = client.userid_to_entindex(e.userid)
         if ent then hit_tracker[ent] = nil; plist_cache[ent] = nil end
     end)
+
+    -- ── TUNE TABLE (must be before setup_command) ────────────────────────────────
+    local TUNE = {
+        apply_every_ticks     = 2,
+        smooth_hc             = 0.60,
+        smooth_dmg            = 0.55,
+        jitter_conf_floor     = 0.70,
+        jitter_penalty_scale  = 30,
+        high_desync_start     = 40,
+        high_desync_scale     = 0.15,
+        miss_penalty          = { [2]=8,  [3]=15, [5]=25 },
+        miss_dmg_cut          = { [3]=6,  [5]=12 },
+        hp_panic = {
+            dying  = { hp=12, hc_cut=22, dmg_cut=15, floor_hc=22 },
+            low    = { hp=30, hc_cut=12, dmg_cut=8,  floor_hc=28 },
+            medium = { hp=55, hc_cut=5 },
+        },
+        dist = {
+            { max=200,  delta=-12 }, { max=300,  delta=-8  }, { max=500,  delta=-4  },
+            { max=900,  delta=0   }, { max=1400, delta=5   }, { max=2000, delta=10  },
+            { max=1e9,  delta=16  },
+        },
+        move = { air=12, fast=9, mid=5, slow=2, still=6 },
+        dynamic_aggr_max      = 4,
+        min_samples_for_state = 8,
+        state_decay           = 0.85,
+    }
 
     -- ── main setup_command tick ────────────────────────────────────────────────
     client.set_event_callback("setup_command", function()
@@ -8288,39 +8315,6 @@ do
 end
 end -- _HAS_AIMBOT
 
-
--- ======================================================================
---  ZENITH TUNE TABLE -- all magic numbers in one place
--- ======================================================================
-local TUNE = {
-    apply_every_ticks     = 2,
-    smooth_hc             = 0.60,
-    smooth_dmg            = 0.55,
-    jitter_conf_floor     = 0.70,
-    jitter_penalty_scale  = 30,
-    high_desync_start     = 40,
-    high_desync_scale     = 0.15,
-    miss_penalty          = { [2]=8,  [3]=15, [5]=25 },
-    miss_dmg_cut          = { [3]=6,  [5]=12 },
-    hp_panic = {
-        dying  = { hp=12, hc_cut=22, dmg_cut=15, floor_hc=22 },
-        low    = { hp=30, hc_cut=12, dmg_cut=8,  floor_hc=28 },
-        medium = { hp=55, hc_cut=5 },
-    },
-    dist = {
-        { max=200,  delta=-12 }, { max=300,  delta=-8  }, { max=500,  delta=-4  },
-        { max=900,  delta=0   }, { max=1400, delta=5   }, { max=2000, delta=10  },
-        { max=1e9,  delta=16  },
-    },
-    move = { air=12, fast=9, mid=5, slow=2, still=6 },
-    dynamic_aggr_max      = 4,
-    min_samples_for_state = 8,
-    state_decay           = 0.85,
-}
-local function ema(prev, val, alpha)
-    if prev < 0 then return val end
-    return prev + alpha * (val - prev)
-end
 
 if _HAS_AIMBOT then
 --  ZENITH SMART FEATURES
@@ -10017,7 +10011,7 @@ local function _pattern(ent, d, state, ld, jt, decay)
     -- ── per-state memory ────────────────────────────────────────────────
     local ss = d.state_stats[state]
     local _ss_total = ss and (ss.hits + ss.misses) or 0
-    if ss and _ss_total >= TUNE.min_samples_for_state and ss.hits > ss.misses * 0.6 then
+    if ss and _ss_total >= 8 and ss.hits > ss.misses * 0.6 then
         side   = ss.best_side
         desync = ss.best_desync
         conf   = _max(conf, 0.88)
@@ -10669,8 +10663,8 @@ client.set_event_callback('round_start',function()
         if d.state_stats then
             for _,ss in pairs(d.state_stats) do
                 if ss then
-                    ss.hits   = math.floor((ss.hits   or 0)*TUNE.state_decay)
-                    ss.misses = math.floor((ss.misses or 0)*TUNE.state_decay)
+                    ss.hits   = math.floor((ss.hits   or 0)*0.85)
+                    ss.misses = math.floor((ss.misses or 0)*0.85)
                 end
             end
         end
