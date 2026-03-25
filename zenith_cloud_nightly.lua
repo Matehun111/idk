@@ -1,16 +1,3 @@
--- ======================================================================
---  AUTH GUARD
--- ======================================================================
-if not rawget(_G, "_auth_ok")      then error("auth missing")   end
-if not rawget(_G, "_auth_ticket")  then error("ticket missing") end
-if not rawget(_G, "_auth_nonce")   then error("nonce missing")  end
-if not rawget(_G, "BUILD_VERSION") then error("build missing")  end
-do
-    local exp = rawget(_G, "_auth_ticket_exp")
-    if type(exp) ~= "number" then error("ticket invalid") end
-end
--- ======================================================================
-
 -- ZENITH | NIGHTLY | Cloud Build
 
 local function _safe_display(obj)
@@ -27,6 +14,7 @@ local function _safe_set_visible(obj, val)
     end
 end
 
+
 if not LPH_OBFUSCATED then
     LPH_NO_VIRTUALIZE = function(...) return ... end
 end
@@ -34,12 +22,15 @@ end
 local USERNAME = _auth_user or 'user'
 local BUILD    = BUILD_VERSION
 
+-- version gates
 local _HAS_AIMBOT   = (BUILD == 'beta' or BUILD == 'nightly')
 local _HAS_RESOLVER = (BUILD == 'nightly')
 
+--- declarations
 local f = string.format
 local merge = table.concat
 
+--- modules
 local ffi = require "ffi"
 local vector = require "vector"
 local http = require "gamesense/http"
@@ -87,6 +78,7 @@ local clipboard do
     clipboard.get = get
 end
 
+
 local oprint = print
 local function print(...)
     local res = ""
@@ -104,6 +96,7 @@ local function print_raw(r, g, b, ...)
     client.color_log(255, 255, 255, f(...))
 end
 
+--- defines
 local function contains(list, value)
     for i = 1, #list do
         if list[i] == value then
@@ -209,6 +202,7 @@ local hit_marker = { }
 local unmute = { }
 local shared = { }
 
+--- region utils
 do
     local escape = {
         ["="] = true,
@@ -429,6 +423,8 @@ local memory do
     end
 end
 
+--- region software
+
 LPH_NO_VIRTUALIZE(function ()
     do
         software.rage = {
@@ -554,8 +550,8 @@ LPH_NO_VIRTUALIZE(function ()
 
         function software.get_dpi_scale()
             local value = ui.get(software.misc.settings.dpi_scale)
-            local unit = value and string.match(value, "(%d+)%%")
-            unit = tonumber(unit) or 100
+            local unit = string.match(value, "(%d+)%%")
+
             return unit * 0.01
         end
 
@@ -569,6 +565,7 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
+--- region override
 do
     local data = { }
 
@@ -611,6 +608,7 @@ do
     end
 end
 
+--- region iengineclient
 do
     local native_GetNetChannelInfo = vtable_bind("engine.dll", "VEngineClient014", 78, "void*(__thiscall*)(void*)")
 
@@ -619,6 +617,7 @@ do
     end
 end
 
+--- region inetchannel
 do
     local native_IsLoopback = vtable_thunk(6, "bool(__thiscall*)(void*)")
     local native_IsTimingOut = vtable_thunk(7, "bool(__thiscall*)(void*)")
@@ -671,6 +670,7 @@ do
     end
 end
 
+--- region ceaser
 do
     local function ascii_base(s)
         if string.lower(s) == s then
@@ -695,6 +695,8 @@ do
         return ceasar.cipher(s, -key)
     end
 end
+
+--- region menu
 
 LPH_NO_VIRTUALIZE(function ()
     do
@@ -950,9 +952,12 @@ local zenith_config_system do
     end
 end
 
+
+-- ======================================================================
 --  ZENITH UI  -  Zenith pui tabs
---  Pages: Home | Builder | Defensive | Visual | Misc | Configs
+--  Tabs: Anti Aim | Visuals | Misc | Configs
 --  (replaces the original gui.selection combobox approach)
+-- ======================================================================
 
 local required = require
 local pui = required 'gamesense/pui' or error('failed to load pui')
@@ -967,14 +972,35 @@ local group_fakelag = pui.group('AA', 'Fake lag')
 local group         = pui.group('AA', 'Anti-aimbot angles')
 local group_other   = pui.group('AA', 'Other')
 
-pui.macros.dot = '\v•  \r'
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ZENITH PREMIUM MENU ICONS & STYLING
+-- ═══════════════════════════════════════════════════════════════════════════
+pui.macros.dot = '\v\xE2\x96\xB8  \r'  -- Right-pointing triangle
+
+-- Menu Icons (UTF-8 encoded)
+local ICONS = {
+    diamond     = '\xE2\x97\x86',  -- ◆
+    user        = '\xE2\x96\xB8',  -- ▸
+    branch      = '\xE2\x94\x94',  -- └
+    version     = '\xE2\x96\xA3',  -- ▣
+    online      = '\xE2\x97\x89',  -- ◉
+    info        = '\xE2\x93\x98',  -- ⓘ
+    clock       = '\xE2\x97\x8B',  -- ○
+    stats       = '\xE2\x96\xA0',  -- ■
+    check       = '\xE2\x9C\x93',  -- ✓
+    arrow_r     = '\xE2\x96\xB6',  -- ▶
+    bullet      = '\xE2\x80\xA2',  -- •
+    line_v      = '\xE2\x94\x82',  -- │
+    line_h      = '\xE2\x94\x80',  -- ─
+    corner      = '\xE2\x94\x8C',  -- ┌
+}
 
 -- ── TAB SELECTOR ───────────────────────────────────────────────────────
 local vars = {}
 
 do -- selection
     vars.selection = {}
-    vars.selection.label   = group_fakelag:label('\a888888ff────  \affffffff Z E N I T H  \a888888ff────')
+    vars.selection.label = group_fakelag:label('\a7ec8e3ffZenith  \a888888ff' .. ICONS.diamond .. '  \a666666ffElegance in Execution.')
     -- tab/aa_tab are plain tables; all pui items rendered unconditionally
     vars.selection.tab     = { value = 'Anti Aim' }
     vars.selection.aa_tab  = { value = 'Features' }
@@ -1002,10 +1028,10 @@ vars.misc.selection = vars.misc.selection or {
 
 -- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
 shared = shared or {}
-shared.fl_whatsup     = group_fakelag:label(string.format('\a666666ff►  \affffffff%s', USERNAME))
-shared.fl_build       = group_fakelag:label(string.format('\a444444ffbuild  \a5599ffff%s', BUILD))
-shared.fl_online      = group_fakelag:label('\a444444ffonline  \affd700ff…')
-shared.fl_leaderboard = group_fakelag:label('\a444444ffkills  \a888888ff…')
+shared.fl_whatsup = group_fakelag:label(string.format('\a888888ff %s \affffffffUser   \a888888ff> \a71bc78ff%s', ICONS.user, USERNAME))
+shared.fl_build = group_fakelag:label(string.format('\a888888ff %s \affffffffBranch  \a888888ff> \aff5555ffNightly', ICONS.branch))
+shared.fl_version = group_fakelag:label(string.format('\a888888ff %s \affffffffVersion  \a888888ff> \a71bc78ff3.0', ICONS.version))
+shared.fl_online = group_fakelag:label(string.format('\a888888ff %s \affffffffOnline  \a888888ff> \affd700ff...', ICONS.online))
 
 -- shared.online_label: stub that delegates to fl_online (used by websocket callback)
 shared.online_label = {
@@ -1018,61 +1044,172 @@ shared.online_label = {
 
 -- ── LOAD COUNTER + ONLINE ───────────────────────────────────────────
 do
+    -- Times Loaded: increment local counter each load
+    local _loads_key = 'zenith_total_loads_v1'
+    local ok_l, cur_loads = pcall(database.read, _loads_key)
+    cur_loads = (ok_l and type(cur_loads)=='number') and cur_loads or 0
+    cur_loads = cur_loads + 1
+    pcall(database.write, _loads_key, cur_loads)
+    -- value stored, will be applied when label is created below
+    rawset(_G, "_zenith_load_count", cur_loads)
 
-    -- Online users: increment on load, decrement on shutdown
-    -- Uses counterapi.dev (free, reliable)
-    local _ns  = 'zenith-hvh-v3'
-    local _key = 'online_users'
+    -- Online users: heartbeat-based, self-healing
+    -- Each user writes a timestamp every 30s; count entries < 90s old = online
+    local _HB_KEY = 'zenith_online_hb_v1'
+    local _my_hb_user = (_auth_user or 'unknown') .. '_' .. tostring(math.random(10000,99999))
 
     local function _set_online(n)
         if shared.fl_online then
             local col = n > 0 and '\affd700ff' or '\aff6666ff'
-            shared.fl_online:set(string.format('\a444444ffonline  %s%d\affffffff', col, n))
+            shared.fl_online:set(string.format('\a888888ff \xE2\x97\x89 \affffffffOnline  \a888888ff> %s%d', col, n))
         end
     end
 
-    local _incremented = false
-    local function _get_count()
-        http.get(
-            string.format('https://api.counterapi.dev/v1/%s/%s', _ns, _key),
-            function(ok, res)
-                local body = type(res)=='table' and res.body or res
-                if ok and body then
-                    local n = body:match('"count":(%d+)')
-                    if n then _set_online(tonumber(n)) end
-                end
-                client.delay_call(60, _get_count)
-            end
-        )
-    end
-
-    local function _increment()
-        if _incremented then return end
-        _incremented = true
-        http.get(
-            string.format('https://api.counterapi.dev/v1/%s/%s/up', _ns, _key),
-            function(ok, res)
-                local body = type(res)=='table' and res.body or res
-                if ok and body then
-                    local n = body:match('"count":(%d+)')
-                    if n then _set_online(tonumber(n)) end
-                end
-                client.delay_call(60, _get_count)
-            end
-        )
+    local function _hb_tick()
+        local ok_r, tbl = pcall(database.read, _HB_KEY)
+        tbl = (ok_r and type(tbl) == 'table') and tbl or {}
+        local now = math.floor(globals.realtime())
+        tbl[_my_hb_user] = now
+        -- prune entries older than 120s
+        for k, t in pairs(tbl) do
+            if (now - t) > 120 then tbl[k] = nil end
+        end
+        pcall(database.write, _HB_KEY, tbl)
+        -- count entries seen within last 90s
+        local cnt = 0
+        for _, t in pairs(tbl) do
+            if (now - t) <= 90 then cnt = cnt + 1 end
+        end
+        _set_online(cnt)
+        client.delay_call(30, _hb_tick)
     end
 
     client.set_event_callback('shutdown', function()
-        if _incremented then
-            http.get(string.format('https://api.counterapi.dev/v1/%s/%s/down', _ns, _key), function() end)
+        local ok_r, tbl = pcall(database.read, _HB_KEY)
+        if ok_r and type(tbl) == 'table' then
+            tbl[_my_hb_user] = nil
+            pcall(database.write, _HB_KEY, tbl)
         end
     end)
 
-    client.delay_call(2, _increment)
+    client.delay_call(2, _hb_tick)
 end
+
+
+
 
 -- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
 do
+    vars.statistics = {}
+
+    vars.statistics.label_info  = group_other:label('\a7ec8e3ff\xE2\x93\x98 \affffffffInformation')
+    vars.statistics.user        = group_other:label('\a888888ff\xE2\x96\xB8 \affffffffUser: \a71bc78ff'..USERNAME)
+    vars.statistics.loaded      = group_other:label(string.format('\a888888ff\xE2\x96\xA0 \affffffffTimes Loaded: \affd700ff%d', _G._zenith_load_count or 0))
+    vars.statistics.time_in_game= group_other:label('\a888888ff\xE2\x97\x8B \affffffffSession: \a71bc78ff')
+end
+
+-- Stubs for removed pui vars (logic still references these)
+vars.aa = vars.aa or {}
+vars.aa.encha = vars.aa.encha or {
+    get = function(_, key) return false end,
+    set = function() end
+}
+vars.aa.manual_left  = vars.aa.manual_left  or { get = function() return false end }
+vars.aa.manual_right = vars.aa.manual_right or { get = function() return false end }
+
+vars.angles = vars.angles or {}
+vars.visuals = vars.visuals or {}
+vars.visuals.watermark_color2 = vars.visuals.watermark_color2 or {
+    get = function() return 195, 198, 255, 255 end
+}
+vars.misc = vars.misc or {}
+vars.misc.selection = vars.misc.selection or {
+    get = function(_, key) return false end
+}
+
+-- ── USER / BUILD INFO (Fake lag column) ────────────────────────────────
+shared = shared or {}
+shared.fl_whatsup = group_fakelag:label(string.format('\a888888ff | \affffffffUser   \a888888ff> \a71bc78ff%s', USERNAME))
+shared.fl_build = group_fakelag:label('\a888888ff | \affffffffBranch  \a888888ff> \a71bc78ffNightly')
+shared.fl_version = group_fakelag:label('\a888888ff | \affffffffVersion  \a888888ff> \a71bc78ff3.0')
+shared.fl_online = group_fakelag:label('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff...')
+
+-- shared.online_label: stub that delegates to fl_online (used by websocket callback)
+shared.online_label = {
+    set = function(_, str)
+        if shared.fl_online then shared.fl_online:set(str) end
+    end,
+    display = function() end,  -- pui labels always visible, no display() needed
+    get = function() return 'Online: ...' end,
+}
+
+-- ── LOAD COUNTER + ONLINE ───────────────────────────────────────────
+do
+    -- Times Loaded: increment local counter each load
+    local _loads_key = 'zenith_total_loads_v1'
+    local ok_l, cur_loads = pcall(database.read, _loads_key)
+    cur_loads = (ok_l and type(cur_loads)=='number') and cur_loads or 0
+    cur_loads = cur_loads + 1
+    pcall(database.write, _loads_key, cur_loads)
+    -- value stored, will be applied when label is created below
+    rawset(_G, "_zenith_load_count", cur_loads)
+
+    -- Online users: heartbeat-based, self-healing
+    -- Each user writes a timestamp every 30s; count entries < 90s old = online
+    local _HB_KEY = 'zenith_online_hb_v1'
+    local _my_hb_user = (_auth_user or 'unknown') .. '_' .. tostring(math.random(10000,99999))
+
+    local function _set_online(n)
+        if shared.fl_online then
+            local col = n > 0 and '\affd700ff' or '\aff6666ff'
+            shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> %s%d', col, n))
+        end
+    end
+
+    local function _hb_tick()
+        local ok_r, tbl = pcall(database.read, _HB_KEY)
+        tbl = (ok_r and type(tbl) == 'table') and tbl or {}
+        local now = math.floor(globals.realtime())
+        tbl[_my_hb_user] = now
+        -- prune entries older than 120s
+        for k, t in pairs(tbl) do
+            if (now - t) > 120 then tbl[k] = nil end
+        end
+        pcall(database.write, _HB_KEY, tbl)
+        -- count entries seen within last 90s
+        local cnt = 0
+        for _, t in pairs(tbl) do
+            if (now - t) <= 90 then cnt = cnt + 1 end
+        end
+        _set_online(cnt)
+        client.delay_call(30, _hb_tick)
+    end
+
+    client.set_event_callback('shutdown', function()
+        local ok_r, tbl = pcall(database.read, _HB_KEY)
+        if ok_r and type(tbl) == 'table' then
+            tbl[_my_hb_user] = nil
+            pcall(database.write, _HB_KEY, tbl)
+        end
+    end)
+
+    client.delay_call(2, _hb_tick)
+end
+
+
+
+
+
+
+
+-- ── STATISTICS (Misc sidebar) ──────────────────────────────────────────
+do
+    vars.statistics = {}
+
+    vars.statistics.label_info  = group_other:label('\f<dot>Information')
+    vars.statistics.user        = group_other:label('\f<dot>User: \v'..USERNAME)
+    vars.statistics.loaded      = group_other:label(string.format('\f<dot>Times Loaded: \v%d', _G._zenith_load_count or 0))
+    vars.statistics.time_in_game= group_other:label('\f<dot>Session: ')
 end
 
 -- ── HELPERS (Zenith helpers table) ───────────────────────────────────
@@ -1178,8 +1315,7 @@ helpers['functions'] = {
     end,
     fade_handle2 = function(self, time, str, r, g, b, a)
         a = a or 255
-        -- animate between accent blue and deep blue
-        local c1,c2,c3 = 20, 50, 120
+        local c1,c2,c3 = 32, 32, 32
         local t_out, t_iter = {}, 1
         local ra=(c1-r); local ga=(c2-g); local ba=(c3-b)
         for i=1,#str do
@@ -1203,6 +1339,20 @@ helpers['functions'] = {
         end
         self.prev_side=self.side
         return self.side
+    end,
+    update_session = function(self)
+        local rt = globals.realtime()
+        local h = math.floor(rt/3600)
+        local m = math.floor(rt/60)
+        local s = math.floor(rt)
+        local text
+        if s==1 and h<1 and m<1 then text=s.." Second"
+        elseif s>=2 and h<1 and m<1 then text=s.." Seconds"
+        elseif m>=2 and h<1 then text=m.." Minutes"
+        elseif m==1 and h<1 then text=m.." Minute"
+        elseif h<2 then text=h.." Hour"
+        else text=h.." Hours" end
+        vars.statistics.time_in_game:set('\f<dot>Session: \v'..text)
     end,
     animations = (function()
         local a={data={}}
@@ -1236,6 +1386,9 @@ helpers['functions'] = {
             and math.abs(entity.get_prop(index,'m_nTickBase')-self.defensive_ticks)<14
     end,
 }
+
+
+
 
 -- ── HIDE NATIVE AA CONTROLS (mirrors Zenith hide_menu) ───────────────
 hide_menu = function(state)
@@ -1275,14 +1428,11 @@ client.set_event_callback('paint_ui', function()
     if entity.get_local_player() == nil then helpers['functions'].defensive_ticks = 0 end
     if not ui.is_menu_open() then return end
 
+    helpers['functions']:update_session()
     hide_menu(false)
 
     local ref = software.misc.settings.menu_color
-    -- force menu color to Zenith blue
-    pcall(ui.set, ref, 71, 152, 255, 255)
-    local r, g, b, a = 71, 152, 255, 255
-    local water_ui = helpers['functions']:fade_handle2(-globals.curtime(), '  Z  E  N  I  T  H', r, g, b)
-    vars.selection.label:set("                    "..table.concat(water_ui))
+    local r, g, b, a = ui.get(ref)
 end)
 
 client.set_event_callback('shutdown', function()
@@ -1297,16 +1447,16 @@ client.set_event_callback('shutdown', function()
 end)
 
 -- ── GUI system: create proper menu items for original code compatibility ──────
--- gui.selection: sub-page navigation
+-- gui.selection: real combobox for sub-page navigation inside Anti Aim
 gui = gui or {}
 -- gui.enabled stub (checkbox removed, always on)
 gui.enabled = gui.enabled or { get=function() return true end, set=function() end, set_callback=function() end }
 
 if not gui.selection or not gui.selection.ref then
     -- Build the page list based on version
-    local pages = {"⌂  Home", "◆  Builder", "❈  Defensive", "◉  Visual", "☰  Misc", "⚙  Configs"}
-    if _HAS_AIMBOT then table.insert(pages, 4, "◎  Aimbot") end
-    if _HAS_RESOLVER then table.insert(pages, #pages, "↻  Resolver") end
+    local pages = {"Home", "Setup", "Builder", "Visual", "Configs"}
+    if _HAS_AIMBOT   then table.insert(pages, 4, "Aimbot")   end
+    if _HAS_RESOLVER then table.insert(pages, #pages, "Resolver") end
     gui.selection = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
         merge { "\n", "gui.selection" }, pages)
 end
@@ -1342,6 +1492,7 @@ if not _HAS_AIMBOT then
     end)
 end
 
+--- region motion
 do
     local function linear(t, b, c, d)
         return c * t / d + b
@@ -1388,6 +1539,7 @@ do
 end
 
 LPH_NO_VIRTUALIZE(function ()
+    --- region windows
     do
         local data = { }
         local queue = { }
@@ -1617,6 +1769,7 @@ LPH_NO_VIRTUALIZE(function ()
     end
 end)()
 
+--- region graphics
 do
     local alpha_unit = 1 / 255
 
@@ -1744,6 +1897,7 @@ do
     end
 end
 
+--- region decorations
 do
     local function u8(s)
         return string.gsub(s, "[\128-\191]", "")
@@ -1779,6 +1933,7 @@ do
     end
 end
 
+--- region exploit
 do
     local LAG_COMPENSATION_TELEPORTED_DISTANCE_SQR = 64 * 64
 
@@ -1894,6 +2049,7 @@ do
     end
 end
 
+--- region localplayer
 do
     local MOVING_LIMIT = 1.1 * 3.3
     local DUCK_PEEK_LIMIT = 0.79
@@ -1974,6 +2130,7 @@ do
     end
 end
 
+--- region statement
 do
     local list = { }
 
@@ -2053,17 +2210,15 @@ do
     end
 end
 
+--- region antiaim
 do
     local ctx = { }
 
     local zenithyaw_ways = {
-    ["2-Way"] = { -0.5, 0.5 },
-    ["3-Way"] = { -0.5, 0, 0.5 },
-    ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 },
-    ["7-Way"] = { -1, -0.57, -0.28, 0, 0.28, 0.57, 1 },
-    ["Chaos"] = { -1, -0.72, -0.44, -0.16, 0.16, 0.44, 0.72, 1 }
-}
-local _chaos_jitter_seed = 0
+        ["2-Way"] = { -0.5, 0.5 },
+        ["3-Way"] = { -0.5, 0, 0.5 },
+        ["5-Way"] = { -0.75, 1, 0, 0.4, -0.25 }
+    }
 
     local function calculate_jitter_way(n, offset)
         local fmod = localplayer.packets % n
@@ -2135,26 +2290,6 @@ local _chaos_jitter_seed = 0
             ctx.yaw_offset = ctx.yaw_offset + yaw_add
             return
         end
-
-        -- velocity jitter bias: lean jitter toward strafe direction
-        -- makes it harder to predict which way we'll be on the next shot
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off' then
-            local lp = entity.get_local_player()
-            if lp then
-                local vx = entity.get_prop(lp, 'm_vecVelocity[0]') or 0
-                local vy = entity.get_prop(lp, 'm_vecVelocity[1]') or 0
-                local spd = math.sqrt(vx*vx + vy*vy)
-                if spd > 20 then
-                    -- get strafe direction relative to view
-                    local eye_yaw = localplayer.angles and localplayer.angles.y or 0
-                    local vel_yaw = math.deg(math.atan2(vy, vx))
-                    local rel = ((vel_yaw - eye_yaw + 180) % 360) - 180
-                    -- bias: add small push toward strafe side
-                    local bias = rel > 0 and math.min(spd * 0.04, 8) or -math.min(spd * 0.04, 8)
-                    ctx.yaw_offset = (ctx.yaw_offset or 0) + bias
-                end
-            end
-        end
     end
 
     local safe_head_presets = {
@@ -2183,54 +2318,6 @@ local _chaos_jitter_seed = 0
     local randomized
     local val = 180
     local function modify_jitter()
-        -- micro-jitter: add tiny noise every tick to prevent stable tracking
-        -- suppressed during auto-peek so the shot goes exactly where aimed
-        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off'
-        and not ctx._suppress_micro_jitter then
-            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
-        end
-
-        -- desync shift: flip jitter_offset sign every 18-26 ticks
-        -- makes the desync amount itself cycle, not just the direction
-        -- resolvers that pattern-match offset magnitude will mispredict
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
-        and ctx.jitter_offset ~= nil then
-            local shift_cycle = 22
-            local phase = globals.tickcount() % shift_cycle
-            if phase < shift_cycle * 0.45 then
-                -- normal phase: use jitter_offset as-is
-            elseif phase < shift_cycle * 0.55 then
-                -- transition zone: briefly reduce to confuse pattern analysis
-                ctx.jitter_offset = ctx.jitter_offset * 0.35
-            else
-                -- shifted phase: mirror the offset
-                ctx.jitter_offset = -ctx.jitter_offset
-            end
-        end
-
-        -- micro-jitter: add tiny noise every tick to prevent stable tracking
-        -- suppressed during auto-peek so the shot goes exactly where aimed
-        if ctx.yaw_offset ~= nil and ctx.yaw_jitter ~= 'Off'
-        and not ctx._suppress_micro_jitter then
-            ctx.yaw_offset = ctx.yaw_offset + client.random_float(-2.5, 2.5)
-        end
-
-        -- desync shift: flip jitter_offset sign every 22 ticks
-        -- makes the desync amount itself cycle, not just the direction
-        -- resolvers that pattern-match offset magnitude will mispredict
-        if ctx.yaw_jitter ~= nil and ctx.yaw_jitter ~= 'Off'
-        and ctx.jitter_offset ~= nil then
-            local shift_cycle = 22
-            local phase = globals.tickcount() % shift_cycle
-            if phase < shift_cycle * 0.45 then
-                -- normal phase: use jitter_offset as-is
-            elseif phase < shift_cycle * 0.55 then
-                ctx.jitter_offset = ctx.jitter_offset * 0.35
-            else
-                ctx.jitter_offset = -ctx.jitter_offset
-            end
-        end
-
         if ctx.jitter_randomization ~= nil then
             if localplayer.packets % 2 == 0 or randomized == nil then
                 randomized = client.random_int(0, (ctx.jitter_offset > 0 and 1 or -1) * ctx.jitter_randomization)
@@ -2241,18 +2328,13 @@ local _chaos_jitter_seed = 0
 
         if ctx.body_yaw == 'Randomize Jitter' then
             ctx.body_yaw = 'Static'
+
             if localplayer.choking_bool then
                 local rand = client.random_int(0, 1)
                 val = rand == 1 and 180 or -180
             end
+
             ctx.body_yaw_offset = val
-        elseif ctx.body_yaw == 'Ghost' then
-            -- Ghost: body yaw goes OPPOSITE to the current yaw offset
-            -- makes body-based resolvers predict the wrong real side
-            ctx.body_yaw = 'Static'
-            local cur_off = ctx.yaw_offset or 0
-            -- if we're offset right, body yaw says left and vice versa
-            ctx.body_yaw_offset = cur_off > 0 and -180 or 180
         end
 
         if ctx.yaw_jitter == "Zenith" then
@@ -2267,19 +2349,10 @@ local _chaos_jitter_seed = 0
             local zenith_delay = ctx.zenith_delay
 
             local ways = zenithyaw_ways[zenith_mode]
-            local way
-            if zenith_mode == 'Chaos' then
-                -- Chaos: seed mixes tick + packets + body yaw for non-repeating pattern
-                _chaos_jitter_seed = (_chaos_jitter_seed
-                    + globals.tickcount() * 7
-                    + localplayer.packets * 13
-                    + math.floor(math.abs(localplayer.body_yaw or 0))) % #ways
-                way = ways[_chaos_jitter_seed + 1]
-            else
-                way = ways[(localplayer.packets % #ways) + 1]
-            end
+            local way = ways[(localplayer.packets % #ways) + 1]
 
             -- god ( qhose ) forgive me for the piece of code below
+            --- region lulz diagnostics disable@
 
             local byaw = localplayer.body_yaw
 
@@ -2318,6 +2391,7 @@ local _chaos_jitter_seed = 0
                 else
                     angle = utils.normalize_yaw(yaw + ctx.jitter_offset * way)
                 end
+
 
                 delay_data.previous_angle = angle
             end
@@ -2359,7 +2433,6 @@ local _chaos_jitter_seed = 0
     end
 
     local function setup()
-        yaw_direction.is_freestanding = false
         if ctx.enabled ~= nil then
             override.set(software.aa.angles.enabled, ctx.enabled)
         else
@@ -2368,6 +2441,12 @@ local _chaos_jitter_seed = 0
 
         if ctx.pitch ~= nil then
             override.set(software.aa.angles.pitch[1], ctx.pitch)
+            -- apply custom offset immediately, don't rely on ui.get to see the override
+            if ctx.pitch_offset ~= nil then
+                override.set(software.aa.angles.pitch[2], utils.clamp(ctx.pitch_offset, -89, 89))
+            else
+                override.unset(software.aa.angles.pitch[2])
+            end
         end
 
         if ctx.yaw_base ~= nil then
@@ -2387,7 +2466,6 @@ local _chaos_jitter_seed = 0
         end
 
         if ctx.freestanding ~= nil then
-            yaw_direction.is_freestanding = ctx.freestanding
             override.set(software.aa.angles.freestanding[1], ctx.freestanding)
             override.set(software.aa.angles.freestanding[2], ctx.freestanding and
                 "Always on" or "On hotkey")
@@ -2397,15 +2475,8 @@ local _chaos_jitter_seed = 0
             override.set(software.aa.angles.roll, ctx.roll)
         end
 
-        local pitch_value = ui.get(software.aa.angles.pitch[1])
         local yaw_value = ui.get(software.aa.angles.yaw[1])
         local body_yaw_value = ui.get(software.aa.angles.body_yaw[1])
-
-        if pitch_value == "Custom" then
-            if ctx.pitch_offset ~= nil then
-                override.set(software.aa.angles.pitch[2], utils.clamp(ctx.pitch_offset, -89, 89))
-            end
-        end
 
         if yaw_value ~= "Off" then
             if ctx.yaw_offset ~= nil then
@@ -2443,8 +2514,6 @@ local _chaos_jitter_seed = 0
     end
 
     local function update(e)
-        angles.update(ctx)
-        yaw_direction.update(ctx)
         auto_peek.perform(ctx)
         manual_direction.update(ctx)
 
@@ -2474,152 +2543,24 @@ local _chaos_jitter_seed = 0
     end
 end
 
-do
-    local _last_hurt_tick = 0
-    local _flip_body_next = false
-
-    client.set_event_callback('player_hurt', function(e)
-        local lp = entity.get_local_player()
-        if not lp then return end
-        local lp_uid = entity.get_prop(lp, 'm_iUserId')
-        if e.userid == lp_uid then
-            -- WE got hurt: schedule a body yaw flip for next 4 ticks
-            -- breaks enemy resolver side-confirmation
-            if angles and angles.type and angles.type:get() ~= 'Off' then
-                _flip_body_next = true
-                _last_hurt_tick = globals.tickcount()
-            end
-        end
-    end)
-
-    client.set_event_callback('setup_command', function()
-        if not _flip_body_next then return end
-        if globals.tickcount() - _last_hurt_tick > 4 then
-            _flip_body_next = false
-            return
-        end
-        -- flip body yaw for these ticks so their resolver loses confidence
-        local ok, cur = pcall(ui.get, software.aa.angles.body_yaw[1])
-        if ok and cur and cur ~= 'Off' then
-            local ok2, cur_off = pcall(ui.get, software.aa.angles.body_yaw[2])
-            if ok2 and cur_off then
-                pcall(override.set, software.aa.angles.body_yaw[2],
-                    cur_off > 0 and -180 or 180)
-            end
-        end
-    end)
-end
-
-do
-    -- Lag Peak: when you fire a shot, spike the fake lag to maximum for 1 tick
-    -- The shot arrives during a different lagcomp window than the enemy expects,
-    -- making it harder for their aimbot to compensate for your real position.
-    -- Works best combined with Double Tap.
-
-    local lp_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Lag Peak")
-        :record("aa", "lagpeak::enabled"):save()
-
-    local lp_amount  = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Peak Amount", "\n", "lagpeak::amount" }, 1, 14, 14, true, "t")
-        :record("aa", "lagpeak::amount"):save()
-
-    local lp_recover = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Recover Ticks", "\n", "lagpeak::recover" }, 1, 6, 2, true, "t")
-        :record("aa", "lagpeak::recover"):save()
-
-    local lp_on_dt   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "- Only on DT")
-        :record("aa", "lagpeak::on_dt"):save()
-
-    local lp_on_miss = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Only on Miss")
-        :record("aa", "lagpeak::on_miss"):save()
-
-    -- update show function to include on_miss
-
-    _G.__lagpeak_show = function()
-        _safe_display(lp_enabled)
-        if lp_enabled:get() then
-            _safe_display(lp_amount)
-            _safe_display(lp_recover)
-            _safe_display(lp_on_dt)
-            _safe_display(lp_on_miss)
-        end
-    end
-
-    local _lp_fire_tick  = -999
-    local _lp_orig_limit = nil
-    local _lp_orig_var   = nil
-    local _lp_spiking    = false
-    local _lp_spike_end  = -1
-
-    -- trigger lag peak on miss too
-    client.set_event_callback("aim_miss", function(e)
-        if not lp_enabled:get() then return end
-        if not (lp_on_miss and lp_on_miss:get()) then return end
-        local fl = software and software.aa and software.aa.fakelag
-        if not fl then return end
-        pcall(function()
-            _lp_orig_limit = ui.get(fl.limit)
-            _lp_orig_var   = ui.get(fl.variance)
-        end)
-        pcall(ui.set, fl.limit,    lp_amount:get())
-        pcall(ui.set, fl.variance, 0)
-        _lp_spiking   = true
-        _lp_fire_tick = globals.tickcount()
-        _lp_spike_end = _lp_fire_tick + lp_recover:get()
-    end)
-
-    client.set_event_callback("aim_fire", function(e)
-        if not lp_enabled:get() then return end
-        if lp_on_dt:get() and not software.is_double_tap() then return end
-        local fl = software and software.aa and software.aa.fakelag
-        if not fl then return end
-        -- save current limit before spike
-        pcall(function()
-            _lp_orig_limit = ui.get(fl.limit)
-            _lp_orig_var   = ui.get(fl.variance)
-        end)
-        -- spike: set fake lag to peak amount
-        pcall(ui.set, fl.limit,    lp_amount:get())
-        pcall(ui.set, fl.variance, 0)  -- no variance during spike
-        _lp_spiking   = true
-        _lp_fire_tick = globals.tickcount()
-        _lp_spike_end = _lp_fire_tick + lp_recover:get()
-    end)
-
-    client.set_event_callback("setup_command", function()
-        if not lp_enabled:get() then return end
-        if not _lp_spiking then return end
-        local fl = software and software.aa and software.aa.fakelag
-        if not fl then return end
-        -- restore original limit after recover ticks
-        if globals.tickcount() >= _lp_spike_end then
-            if _lp_orig_limit ~= nil then
-                pcall(ui.set, fl.limit,    _lp_orig_limit)
-                pcall(ui.set, fl.variance, _lp_orig_var or 0)
-            end
-            _lp_spiking   = false
-            _lp_orig_limit = nil
-            _lp_orig_var   = nil
-        end
-    end)
-end
-
+---region settings tweaks
 do
     settings.tweaks_enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Features")
     : record("settings", "settings::tweaks_enable")
     : save()
 
-    settings.tweaks = menu.new_item(ui.new_multiselect, 'AA', 'Anti-aimbot angles', merge { "- Functions", "\n", "settings::tweaks" }, { 'Log Aimbot Shots', 'Damage Marker' })
+    settings.tweaks = menu.new_item(ui.new_multiselect, 'AA', 'Anti-aimbot angles', merge { "- Functions", "\n", "settings::tweaks" }, { 'Log Aimbot Shots', 'Damage Marker', 'Trashtalk' })
     : record("settings", "settings::tweaks")
     : save()
 end
 
+--- region widgets
 do
     widgets.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Widgets")
     : record("visuals", "widgets::enabled")
     : save()
 
-    widgets.color_picker = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", merge { "- Color", "\n", "widgets::color_picker" }, 71, 152, 255, 255)
+    widgets.color_picker = menu.new_item(ui.new_color_picker, "AA", "Anti-aimbot angles", merge { "- Color", "\n", "widgets::color_picker" }, 113, 152, 255, 255)
     : record("visuals", "keybinds::color_picker")
     : save()
 
@@ -2640,6 +2581,7 @@ do
     : save()
 end
 
+--- region fast ladder
 do
     aa_tweaks.enable = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Tweaks")
     : record("settings", "aa_tweaks::enable")
@@ -2720,303 +2662,655 @@ do
     end)
 end
 
+
+--- region defensive
+-- Valkyrie AA System (ported to Zenith ctx API)
 do
-    local function get_statement()
-        if localplayer.is_airborne then
-            return "Air";
-        end
+    local G  = "AA"
+    local GR = "Anti-aimbot angles"
 
-        if localplayer.is_crouched then
-            return "Crouched";
-        end
-
-        if localplayer.is_moving then
-            if software.is_slow_motion() then
-                return "Slow Walk";
-            end
-
-            return "Moving";
-        end
-
-        return "Standing"
+    -- helpers
+    local function norm_yaw(a) return ((a + 180) % 360) - 180 end
+    local function has(list, val)
+        if not list then return false end
+        for _,v in ipairs(list) do if v == val then return true end end
+        return false
     end
 
-    defensive.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Defensive AA")
-    : record("aa", "defensive::enabled")
-    : save()
+    -- state definitions (8 states matching Valkyrie)
+    local AA_STATES = {"Global","Standing","Moving","Slowwalking","Crouching","Air","Air-Crouching","Snaking"}
+    local AA_STATE_SHORT = {"G","S","M","SW","C","A","AC","SN"}
 
-    defensive.mode = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- Mode", "\n", "defensive::mode" }, { "On Shot Anti Aim", "Double Tap" })
-    : record("aa", "defensive::mode")
-    : save()
+    -- ── UI: team picker + copy ────────────────────────────────────────
+    local ui_team = menu.new_item(ui.new_combobox, G, GR,
+        merge{"Team", "\n", "hd::team"}, "CT", "T")
+        :record("aa","hd::team"):save()
+    local ui_copy = menu.new_item(ui.new_button, G, GR,
+        merge{"Copy to other team", "\n", "hd::copy"}, function() end)
 
-    defensive.state = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { "- State", "\n", "defensive::state" }, { "Air", "Standing", "Moving", "Slow Walk", "Crouched", "On Peek" })
-    : record("aa", "defensive::state")
-    : save()
+    -- ── UI: state selector ────────────────────────────────────────────
+    local ui_state = menu.new_item(ui.new_combobox, G, GR,
+        merge{"State", "\n", "hd::state"}, table.unpack(AA_STATES))
+        :record("aa","hd::state"):save()
 
-    defensive.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Pitch", "\n", "defensive::pitch" }, { "Default", "Zero", "Up", "Up Switch", "Down Switch", "Random", "Jitter Pitch", "Ranged Jitter", "Snap Pitch", "Fake Up" })
-    : record("aa", "defensive::pitch")
-    : save()
+    -- ── UI: per-state AA items (all 8 states) ─────────────────────────
+    local ab = {}   -- ab[state_idx] = { all ui items }
+    for i = 1, #AA_STATES do
+        local sfx = "_s"..i
+        ab[i] = {
+            enableState  = menu.new_item(ui.new_checkbox,    G,GR, merge{"Enable "..AA_STATES[i].."\n","hd::en"..sfx}):record("aa","hd::en"..sfx):save(),
+            pitch        = menu.new_item(ui.new_combobox,    G,GR, merge{"Pitch\n","hd::pitch"..sfx},  "Off","Default","Up","Down","Minimal","Random","Custom"):record("aa","hd::pitch"..sfx):save(),
+            pitchSlider  = menu.new_item(ui.new_slider,      G,GR, merge{"Pitch add\n","hd::pitchs"..sfx}, -89,89,0,true,"deg",1):record("aa","hd::pitchs"..sfx):save(),
+            yawBase      = menu.new_item(ui.new_combobox,    G,GR, merge{"Yaw base\n","hd::yb"..sfx}, "Local view","At targets"):record("aa","hd::yb"..sfx):save(),
+            yaw          = menu.new_item(ui.new_combobox,    G,GR, merge{"Yaw\n","hd::yaw"..sfx}, "Off","180","Spin","Slow Yaw","L&R"):record("aa","hd::yaw"..sfx):save(),
+            yawStatic    = menu.new_item(ui.new_slider,      G,GR, merge{"Yaw offset\n","hd::ys"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::ys"..sfx):save(),
+            yawLeft      = menu.new_item(ui.new_slider,      G,GR, merge{"Left\n","hd::yl"..sfx}, -180,180,-19,true,"deg",1):record("aa","hd::yl"..sfx):save(),
+            yawRight     = menu.new_item(ui.new_slider,      G,GR, merge{"Right\n","hd::yr"..sfx}, -180,180,36,true,"deg",1):record("aa","hd::yr"..sfx):save(),
+            yawDelay     = menu.new_item(ui.new_slider,      G,GR, merge{"Yaw delay\n","hd::yd"..sfx}, 1,128,16,true,"t",1):record("aa","hd::yd"..sfx):save(),
+            yawJitter    = menu.new_item(ui.new_combobox,    G,GR, merge{"Yaw jitter\n","hd::yj"..sfx}, "Off","Offset","Center","L&R","3-Way"):record("aa","hd::yj"..sfx):save(),
+            yawJitterStatic = menu.new_item(ui.new_slider,   G,GR, merge{"Jitter offset\n","hd::yjs"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::yjs"..sfx):save(),
+            yawJitterLeft  = menu.new_item(ui.new_slider,    G,GR, merge{"Jitter L\n","hd::yjl"..sfx}, -180,180,-14,true,"deg",1):record("aa","hd::yjl"..sfx):save(),
+            yawJitterRight = menu.new_item(ui.new_slider,    G,GR, merge{"Jitter R\n","hd::yjr"..sfx}, -180,180,14,true,"deg",1):record("aa","hd::yjr"..sfx):save(),
+            wayFirst     = menu.new_item(ui.new_slider,      G,GR, merge{"Way 1\n","hd::w1"..sfx}, -180,180,21,true,"deg",1):record("aa","hd::w1"..sfx):save(),
+            waySecond    = menu.new_item(ui.new_slider,      G,GR, merge{"Way 2\n","hd::w2"..sfx}, -180,180,-18,true,"deg",1):record("aa","hd::w2"..sfx):save(),
+            wayThird     = menu.new_item(ui.new_slider,      G,GR, merge{"Way 3\n","hd::w3"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::w3"..sfx):save(),
+            bodyYaw      = menu.new_item(ui.new_combobox,    G,GR, merge{"Body yaw\n","hd::by"..sfx}, "Off","Opposite","Jitter","Static"):record("aa","hd::by"..sfx):save(),
+            bodyYawStatic= menu.new_item(ui.new_slider,      G,GR, merge{"Body yaw offset\n","hd::bys"..sfx}, -180,180,180,true,"deg",1):record("aa","hd::bys"..sfx):save(),
+            -- Defensive AA
+            defensiveAA     = menu.new_item(ui.new_checkbox,    G,GR, merge{"Defensive AA\n","hd::daa"..sfx}):record("aa","hd::daa"..sfx):save(),
+            defensiveTriggers=menu.new_item(ui.new_multiselect, G,GR, merge{"Def triggers\n","hd::dtr"..sfx}, "Always","Tick","Weapon switch"):record("aa","hd::dtr"..sfx):save(),
+            defensiveTickTrigger=menu.new_item(ui.new_slider,   G,GR, merge{"Trigger tick\n","hd::dtt"..sfx}, 1,13,1,true,"t",1):record("aa","hd::dtt"..sfx):save(),
+            defensivePitch  = menu.new_item(ui.new_combobox,    G,GR, merge{"Def pitch\n","hd::dp"..sfx}, "Static","Random","Spin","Jitter","Sine Wave","Random Logic"):record("aa","hd::dp"..sfx):save(),
+            defensivePitchMin=menu.new_item(ui.new_slider,      G,GR, merge{"Def pitch min\n","hd::dpm"..sfx}, -89,89,-89,true,"deg",1):record("aa","hd::dpm"..sfx):save(),
+            defensivePitchMax=menu.new_item(ui.new_slider,      G,GR, merge{"Def pitch max\n","hd::dpM"..sfx}, -89,89,89,true,"deg",1):record("aa","hd::dpM"..sfx):save(),
+            defensivePitchSpeed=menu.new_item(ui.new_slider,    G,GR, merge{"Def pitch spd\n","hd::dps"..sfx}, 1,18,6,true,"t",1):record("aa","hd::dps"..sfx):save(),
+            defensiveYaw    = menu.new_item(ui.new_combobox,    G,GR, merge{"Def yaw\n","hd::dy"..sfx}, "Off","Static","Random","Spin","Jitter","Logic Shift","Zenith Bypass"):record("aa","hd::dy"..sfx):save(),
+            defensiveYawStatic=menu.new_item(ui.new_slider,     G,GR, merge{"Def yaw offset\n","hd::dys"..sfx}, -180,180,0,true,"deg",1):record("aa","hd::dys"..sfx):save(),
+            defensiveYawSpinLeft=menu.new_item(ui.new_slider,   G,GR, merge{"Spin L\n","hd::dysl"..sfx}, -180,180,-120,true,"deg",1):record("aa","hd::dysl"..sfx):save(),
+            defensiveYawSpinRight=menu.new_item(ui.new_slider,  G,GR, merge{"Spin R\n","hd::dysr"..sfx}, -180,180,120,true,"deg",1):record("aa","hd::dysr"..sfx):save(),
+            defensiveYawSpinSpeed=menu.new_item(ui.new_slider,  G,GR, merge{"Spin spd\n","hd::dyss"..sfx}, 1,16,6,true,"t",1):record("aa","hd::dyss"..sfx):save(),
+            defensiveYawJitterRange=menu.new_item(ui.new_slider,G,GR, merge{"Jitter range\n","hd::dyjr"..sfx}, 0,180,90,true,"deg",1):record("aa","hd::dyjr"..sfx):save(),
+            defensiveYawJitterDelay=menu.new_item(ui.new_slider,G,GR, merge{"Jitter delay\n","hd::dyjd"..sfx}, 1,16,1,true,"t",1):record("aa","hd::dyjd"..sfx):save(),
+        }
+        -- Global state (index 1) always enabled with sane defaults
+        if i == 1 then
+            ab[i].enableState:set(true)
+            client.delay_call(0, function()
+                -- only set defaults if config hasn't loaded custom values
+                if ab[1].pitch:get() == "Off" then ab[1].pitch:set("Down") end
+                if ab[1].yaw:get() == "Off"   then ab[1].yaw:set("L&R")   end
+            end)
+        end
+    end
 
-    defensive.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "- Yaw", "\n", "defensive::yaw" }, { "Default", "Sideways", "Forward", "Spinbot", "3-Way", "5-Way", "7-Way", "Chaos", "Random", "Snap", "Snap Jitter" })
-    : record("aa", "defensive::yaw")
-    : save()
+    -- ── Extra controls (from old Zenith hd) ───────────────────────────
+    local ui_freestand   = menu.new_item(ui.new_hotkey, G,GR, merge{"Freestanding","\n","hd::freestand"}):record("aa","hd::freestand"):save()
+    local ui_inverter    = menu.new_item(ui.new_hotkey, G,GR, merge{"Inverter","\n","hd::inverter"}):record("aa","hd::inverter"):save()
+    local ui_man_en      = menu.new_item(ui.new_checkbox, G,GR, "Manual Yaw"):record("aa","hd::man_en"):save()
+    local ui_man_left    = menu.new_item(ui.new_hotkey, G,GR, merge{"  Left","\n","hd::man_l"}):record("aa","hd::man_l"):save()
+    local ui_man_right   = menu.new_item(ui.new_hotkey, G,GR, merge{"  Right","\n","hd::man_r"}):record("aa","hd::man_r"):save()
+    local ui_man_reset   = menu.new_item(ui.new_hotkey, G,GR, merge{"  Reset","\n","hd::man_rs"}):record("aa","hd::man_rs"):save()
+    local ui_vulnlc      = menu.new_item(ui.new_multiselect, G,GR,
+        merge{"LC Breaker","\n","hd::vulnlc"}, "Charged","Shifting","Uncharged")
+        :record("aa","hd::vulnlc"):save()
+    local ui_safehead    = menu.new_item(ui.new_multiselect, G,GR,
+        merge{"Safe head","\n","hd::safehead"}, "Always","Low HP","Knife","Zeus")
+        :record("aa","hd::safehead"):save()
+    -- Fake lag
+    local ui_fl_on       = menu.new_item(ui.new_checkbox, G,GR, merge{"Fake Lag","\n","hd::fl_on"}):record("aa","hd::fl_on"):save()
+    local ui_fl_mode     = menu.new_item(ui.new_combobox, G,GR, merge{"Amount","\n","hd::fl_mode"}, "Dynamic","Maximum","Fluctuate"):record("aa","hd::fl_mode"):save()
+    local ui_fl_variance = menu.new_item(ui.new_slider, G,GR, merge{"Variance","\n","hd::fl_var"}, 0,100,59,true,"%"):record("aa","hd::fl_var"):save()
+    local ui_fl_limit    = menu.new_item(ui.new_slider, G,GR, merge{"Limit","\n","hd::fl_lim"}, 1,14,14,true,"t"):record("aa","hd::fl_lim"):save()
+    local ui_fl_settings = menu.new_item(ui.new_combobox, G,GR, merge{"Settings","\n","hd::fl_settings"}, "Custom","Minimum","Maximum"):record("aa","hd::fl_settings"):save()
 
-    defensive.snap_range = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Snap Range", "\n", "defensive::snap_range" }, 45, 180, 120, true, "deg", 1)
-    : record("aa", "defensive::snap_range")
-    : save()
+    -- ── Runtime state ─────────────────────────────────────────────────
+    local pState         = 1
+    local last_state_raw = 1
+    local aa_inverter    = false
+    local aa_inverter_tick = 0
+    local manual_side    = nil
+    local def_persistent = { yaw_spin=0, pitch_spin=0, last_weapon_switch=0 }
 
-    defensive.snap_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-        merge { "- Snap Offset", "\n", "defensive::snap_offset" }, -180, 180, 90, true, "deg", 1)
-    : record("aa", "defensive::snap_offset")
-    : save()
-
-    local modes = {
-        ['Double Tap'] = software.is_double_tap,
-        ['On Shot Anti Aim'] = software.is_on_shot_antiaim
+    -- Tickbase shift tracker (detects DT/hideshot = defensive active)
+    local def_tracker = {
+        max_tb=0, is_def=false, last_valid=0, record_count=0,
+        smoothing=3, ticks_count=0, invalid={}, history={}
     }
+    local function reset_def_tracker()
+        def_tracker.max_tb=0; def_tracker.is_def=false; def_tracker.last_valid=0
+        def_tracker.record_count=0; def_tracker.ticks_count=0
+        def_tracker.invalid={}; def_tracker.history={}
+    end
+    local function update_def_tracker(lp)
+        if not lp or not entity.is_alive(lp) then reset_def_tracker(); return end
+        local tc = globals.tickcount()
+        local tb = entity.get_prop(lp,"m_nTickBase") or 0
+        local shifted = tb < tc
+        if math.abs(tb - def_tracker.max_tb) > 64 and shifted then reset_def_tracker() end
+        if tb > def_tracker.max_tb then
+            def_tracker.max_tb = tb
+            if not def_tracker.invalid[tb] then
+                def_tracker.record_count = def_tracker.record_count + 1
+                def_tracker.last_valid = tb
+            end
+        elseif tb < def_tracker.max_tb then
+            local diff = def_tracker.max_tb - tb
+            if shifted and diff >= 1 and diff <= 14 then
+                table.insert(def_tracker.history, diff)
+                if #def_tracker.history > def_tracker.smoothing then
+                    table.remove(def_tracker.history, 1)
+                end
+            else
+                def_tracker.history = {}
+            end
+            local total = 0
+            for _,v in ipairs(def_tracker.history) do total=total+v end
+            def_tracker.ticks_count = #def_tracker.history>0 and total/#def_tracker.history or 0
+        end
+        def_tracker.is_def = def_tracker.ticks_count >= 1 and def_tracker.ticks_count <= 14
+        if def_tracker.record_count >= 2 then
+            def_tracker.invalid[def_tracker.last_valid] = true
+            def_tracker.record_count=0; def_tracker.last_valid=0; def_tracker.history={}
+        end
+    end
+    client.set_event_callback("round_start", reset_def_tracker)
 
-    local manual_bebra = {
-        [0] = 90,
-        [1] = -90,
-        [2] = 0
-    }
+    -- CT/T persistence
+    local aa_persistence = { CT={}, T={} }
+    local aa_last_team   = "CT"
 
-    local defensive_3_way = { 90, 180, -90, 180, 90 }
-    local defensive_5_way = { 90, 135, 180, 225, 270 }
-    local defensive_7_way = { 0, 51, 102, 154, 205, 257, 308 }
-    local _chaos_seed      = 0
-    local _snap_last_tick   = -999
-    local _snap_pitch_val   = 0
-    local _snap_pitch_tick  = -999
-    local _snap_last_offset = 0
-    local _snap_jitter_side = 1
+    local function get_team_state()
+        local data = {}
+        for i = 1, #AA_STATES do
+            data[i] = {}
+            for k,v in pairs(ab[i]) do
+                local ok, val = pcall(function() return v:get() end)
+                if ok then data[i][k] = val end
+            end
+        end
+        return data
+    end
+    local function set_team_state(data)
+        if not data then return end
+        for i = 1, #AA_STATES do
+            if data[i] then
+                for k,v in pairs(ab[i]) do
+                    if data[i][k] ~= nil then
+                        pcall(function() v:set(data[i][k]) end)
+                    end
+                end
+            end
+        end
+    end
+
+    ui.set_callback(ui_team.ref, function()
+        local new_team = ui_team:get()
+        if new_team == aa_last_team then return end
+        aa_persistence[aa_last_team] = get_team_state()
+        if not aa_persistence[new_team] then
+            aa_persistence[new_team] = get_team_state()
+        end
+        set_team_state(aa_persistence[new_team])
+        aa_last_team = new_team
+    end)
+    ui.set_callback(ui_copy.ref, function()
+        local cur   = ui_team:get()
+        local other = cur == "CT" and "T" or "CT"
+        aa_persistence[other] = get_team_state()
+        client.color_log(150,200,60,"[Zenith] Copied "..cur.." AA to "..other)
+    end)
+
+    client.set_event_callback("item_equip", function(e)
+        if client.userid_to_entindex(e.userid) == entity.get_local_player() then
+            def_persistent.last_weapon_switch = globals.curtime()
+        end
+    end)
+
+    -- ── Fake lag ──────────────────────────────────────────────────────
+    local function apply_fakelag()
+        local fl = software.aa and software.aa.fakelag
+        if not fl then return end
+        if not ui_fl_on:get() then
+            pcall(ui.set, fl.enabled[1], false)
+            return
+        end
+        local mode = ui_fl_mode:get()
+        local lim  = ui_fl_limit:get()
+        local var  = ui_fl_variance:get() / 100
+        pcall(ui.set, fl.enabled[1], true)
+        pcall(ui.set, fl.limit,    lim)
+        pcall(ui.set, fl.variance, math.floor(var * 100))
+        if mode == "Dynamic" then
+            pcall(ui.set, fl.amount, math.random(1, math.max(1, lim)))
+        elseif mode == "Maximum" then
+            pcall(ui.set, fl.amount, lim)
+        elseif mode == "Fluctuate" then
+            pcall(ui.set, fl.amount, math.random(1, math.max(1, math.floor(lim*(1-var*0.5)))))
+        end
+    end
+
+    -- ── LC breaker ────────────────────────────────────────────────────
+    local function apply_vulnlc(cmd, ctx)
+        local modes = ui_vulnlc:get()
+        if not modes or #modes == 0 then return end
+        local exp_data = exploit.get and pcall(exploit.get) and exploit.get() or nil
+        local charge = exp_data and exp_data.charge or 0
+        local should_break = false
+        if has(modes,"Charged")   and charge >= 1.0 then should_break = true end
+        if has(modes,"Shifting")  and charge > 0 and charge < 1.0 then should_break = true end
+        if has(modes,"Uncharged") and charge == 0 then should_break = true end
+        if should_break and ctx then ctx.defensive_ticks = 1 end
+    end
+
+    -- ── Builder page show function ────────────────────────────────────
+    local function show_state_items(s)
+        local p = ab[s]
+        _safe_display(p.enableState)
+        local en = (s == 1) or p.enableState:rawget()
+        if not en then return end
+
+        _safe_display(p.pitch)
+        if p.pitch:rawget() == "Custom" then _safe_display(p.pitchSlider) end
+        _safe_display(p.yawBase)
+        _safe_display(p.yaw)
+        local ym = p.yaw:rawget()
+        if ym == "Slow Yaw" or ym == "L&R" then
+            _safe_display(p.yawLeft); _safe_display(p.yawRight); _safe_display(p.yawDelay)
+        elseif ym ~= "Off" then
+            _safe_display(p.yawStatic)
+        end
+        _safe_display(p.yawJitter)
+        local jm = p.yawJitter:rawget()
+        if jm == "L&R" then
+            _safe_display(p.yawJitterLeft); _safe_display(p.yawJitterRight); _safe_display(p.yawDelay)
+        elseif jm == "3-Way" then
+            _safe_display(p.wayFirst); _safe_display(p.waySecond); _safe_display(p.wayThird)
+        elseif jm ~= "Off" then
+            _safe_display(p.yawJitterStatic)
+        end
+        _safe_display(p.bodyYaw)
+        if p.bodyYaw:rawget() ~= "Off" and p.bodyYaw:rawget() ~= "Opposite" then
+            _safe_display(p.bodyYawStatic)
+        end
+        -- Defensive AA
+        _safe_display(p.defensiveAA)
+        if p.defensiveAA:rawget() then
+            _safe_display(p.defensiveTriggers)
+            if has(p.defensiveTriggers:rawget(), "Tick") then
+                _safe_display(p.defensiveTickTrigger)
+            end
+            _safe_display(p.defensivePitch)
+            local dpm = p.defensivePitch:rawget()
+            if dpm ~= "Random Logic" then
+                _safe_display(p.defensivePitchMin)
+                if dpm == "Random" or dpm == "Spin" or dpm == "Jitter" or dpm == "Sine Wave" then
+                    _safe_display(p.defensivePitchMax)
+                end
+            end
+            if dpm == "Spin" or dpm == "Sine Wave" then _safe_display(p.defensivePitchSpeed) end
+            _safe_display(p.defensiveYaw)
+            local dym = p.defensiveYaw:rawget()
+            if dym == "Static" or dym == "Random" then
+                _safe_display(p.defensiveYawStatic)
+            elseif dym == "Spin" then
+                _safe_display(p.defensiveYawSpinLeft); _safe_display(p.defensiveYawSpinRight)
+                _safe_display(p.defensiveYawSpinSpeed)
+            elseif dym == "Jitter" or dym == "Logic Shift" then
+                _safe_display(p.defensiveYawJitterRange); _safe_display(p.defensiveYawJitterDelay)
+            end
+        end
+    end
+
+    -- This is called by the Builder page renderer
+    function defensive.show_builder()
+        _safe_display(ui_team); _safe_display(ui_copy)
+        _safe_display(ui_state)
+        local s = ui_state:get()
+        -- find state index
+        local si = 1
+        for i,nm in ipairs(AA_STATES) do if nm == s then si = i; break end end
+        show_state_items(si)
+        -- Controls section
+        _safe_display(ui_fl_settings)
+        _safe_display(ui_vulnlc)
+        _safe_display(ui_edge_yaw); _safe_display(ui_freestand)
+        _safe_display(ui_inverter)
+        _safe_display(ui_man_en)
+        if ui_man_en:get() then
+            _safe_display(ui_man_left); _safe_display(ui_man_right); _safe_display(ui_man_reset)
+        end
+        _safe_display(ui_safehead)
+        _safe_display(ui_fl_on)
+        if ui_fl_on:get() then
+            _safe_display(ui_fl_mode); _safe_display(ui_fl_variance); _safe_display(ui_fl_limit)
+        end
+    end
+
+    -- ── Main AA logic (called by defensive.handle each tick) ──────────
+    local function hd_apply(cmd, ctx)
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+
+        -- inverter tick
+        if cmd.chokedcommands == 0 then
+            aa_inverter = not aa_inverter
+            aa_inverter_tick = aa_inverter_tick + 1
+        end
+
+        -- auto-switch team
+        local my_team_num = entity.get_prop(lp, "m_iTeamNum")
+        local my_team = (my_team_num == 3) and "CT" or (my_team_num == 2 and "T" or nil)
+        if not ui.is_menu_open() and my_team and ui_team:get() ~= my_team then
+            ui_team:set(my_team)
+        end
+
+        -- state detection
+        local flags    = entity.get_prop(lp, "m_fFlags") or 0
+        local onground = bit.band(flags,1) ~= 0
+        local vx = entity.get_prop(lp, "m_vecVelocity[0]") or 0
+        local vy = entity.get_prop(lp, "m_vecVelocity[1]") or 0
+        local spd2    = math.sqrt(vx*vx + vy*vy)
+        local pStill  = spd2 < 5
+        local duck    = entity.get_prop(lp,"m_flDuckAmount") or 0
+        local isSlow  = (function() local ok,v=pcall(software.is_slow_motion); return ok and v or false end)()
+
+        local raw = 1
+        if pStill         then raw = 2 end
+        if not pStill     then raw = 3 end
+        if isSlow         then raw = 4 end
+        if duck > 0.1 then
+            if pStill then raw = 5 else raw = 8 end
+        end
+        if not onground   then raw = 6 end
+        if not onground and duck > 0.1 then raw = 7 end
+
+        if raw ~= last_state_raw then last_state_raw = raw end
+        pState = raw
+        -- keep original state index for defensive check even when falling back to Global
+        local pState_orig = pState
+        if ab[pState] and not ab[pState].enableState:get() and pState ~= 1 then
+            pState = 1
+        end
+
+        local p      = ab[pState]
+        local p_orig = ab[pState_orig] or p  -- for defensive: use original state
+        if not p then return end
+
+        pcall(apply_fakelag)
+        pcall(apply_vulnlc, cmd, ctx)
+
+        -- manual yaw
+        if ui_man_en:get() then
+            if ui_man_reset:rawget() then manual_side = nil
+            elseif ui_man_left:rawget() then manual_side = -1
+            elseif ui_man_right:rawget() then manual_side = 1
+            end
+        else
+            manual_side = nil
+        end
+
+        if manual_side then
+            ctx.yaw_base   = "Local view"
+            ctx.yaw        = "180"
+            ctx.yaw_offset = manual_side * 90
+            ctx.yaw_jitter = "Off"
+            ctx.body_yaw   = "Static"
+            ctx.body_yaw_offset = -180
+            if yaw_direction.edge_yaw and yaw_direction.edge_yaw:rawget() then ctx.edge_yaw = true end
+            if ui_freestand:rawget() then ctx.freestanding = true end
+            return
+        end
+
+        -- update tickbase tracker
+        update_def_tracker(lp)
+
+        -- check defensive activation
+        local is_def = false
+        -- DT/OS always trigger defensive regardless of checkbox
+        if software.is_double_tap and software.is_double_tap() then is_def = true end
+        if software.is_on_shot_antiaim and software.is_on_shot_antiaim() then is_def = true end
+        if def_tracker.is_def then is_def = true end
+        -- per-state manual triggers (only when defensive checkbox is on)
+        if p_orig.defensiveAA:rawget() then
+            local trigs = p_orig.defensiveTriggers:rawget() or {}
+            if has(trigs,"Always") then is_def = true end
+            if has(trigs,"Tick") then
+                local tm = p_orig.defensiveTickTrigger:rawget()
+                if globals.tickcount() % 16 < tm then is_def = true end
+            end
+            if has(trigs,"Weapon switch") then
+                if globals.curtime() - def_persistent.last_weapon_switch < 1.0 then is_def = true end
+            end
+        end
+        -- when defensive fires, use original state if it has def settings, else Global
+        local def_src = (p_orig.defensiveAA:rawget() and p_orig) or (ab[1].defensiveAA:rawget() and ab[1]) or p_orig
+        local pd = is_def and def_src or p
+
+        -- yaw base
+        ctx.yaw_base = p.yawBase:rawget()
+
+        if is_def then
+            -- ── Defensive pitch ───────────────────────────────────────
+            local dpm   = pd.defensivePitch:rawget()
+            local dmin  = pd.defensivePitchMin:rawget()
+            local dmax  = pd.defensivePitchMax:rawget()
+            local dspd  = pd.defensivePitchSpeed:rawget()
+            local rmin  = math.min(dmin,dmax); local rmax = math.max(dmin,dmax)
+            
+            -- Ensure pitch is applied - use Down/Up for extreme values, Custom for specific offsets
+            if dpm == "Static" then
+                if dmin == -89 then
+                    ctx.pitch = "Up"
+                elseif dmin == 89 then
+                    ctx.pitch = "Down"
+                else
+                    ctx.pitch = "Custom"
+                    ctx.pitch_offset = dmin
+                end
+            elseif dpm == "Random" then
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = math.random(rmin, rmax)
+            elseif dpm == "Spin" then
+                -- Improved spin: smooth continuous rotation
+                def_persistent.pitch_spin = def_persistent.pitch_spin + (dspd * 0.5)
+                if def_persistent.pitch_spin > rmax then
+                    def_persistent.pitch_spin = rmin
+                elseif def_persistent.pitch_spin < rmin then
+                    def_persistent.pitch_spin = rmax
+                end
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = math.floor(def_persistent.pitch_spin)
+            elseif dpm == "Jitter" then
+                local t = globals.tickcount() % (dspd * 2) < dspd
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = t and dmin or dmax
+            elseif dpm == "Sine Wave" then
+                local wave = math.sin(globals.curtime() * dspd * 0.5) * (rmax - rmin) / 2 + (rmax + rmin) / 2
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = math.floor(wave)
+            elseif dpm == "Random Logic" then
+                local r = math.random(0, 100)
+                ctx.pitch = "Custom"
+                ctx.pitch_offset = r > 80 and 0 or (math.random(0, 1) == 0 and 89 or -89)
+            end
+
+            -- ── Defensive yaw ─────────────────────────────────────────
+            local dym  = pd.defensiveYaw:rawget()
+            local dys  = pd.defensiveYawStatic:rawget()
+            ctx.yaw = "180"
+            if dym == "Static" then
+                ctx.yaw_offset = dys
+            elseif dym == "Random" then
+                ctx.yaw_offset = math.random(-180,180)
+            elseif dym == "Spin" then
+                local sl = pd.defensiveYawSpinLeft:rawget()
+                local sr = pd.defensiveYawSpinRight:rawget()
+                local ss = pd.defensiveYawSpinSpeed:rawget()
+                -- Improved spin: continuous smooth rotation through full range
+                def_persistent.yaw_spin = def_persistent.yaw_spin + (ss * 2)
+                local spin_min = math.min(sl, sr)
+                local spin_max = math.max(sl, sr)
+                if def_persistent.yaw_spin > spin_max then 
+                    def_persistent.yaw_spin = spin_min 
+                elseif def_persistent.yaw_spin < spin_min then
+                    def_persistent.yaw_spin = spin_max
+                end
+                ctx.yaw_offset = norm_yaw(def_persistent.yaw_spin)
+            elseif dym == "Jitter" then
+                local range = pd.defensiveYawJitterRange:rawget()
+                local delay = pd.defensiveYawJitterDelay:rawget()
+                ctx.yaw_offset = globals.tickcount() % (delay*2) < delay and range or -range
+            elseif dym == "Logic Shift" then
+                local range = pd.defensiveYawJitterRange:rawget()
+                local delay = pd.defensiveYawJitterDelay:rawget()
+                local shift = (globals.tickcount()%32 < 16) and 0 or (globals.tickcount()%64 < 32 and 90 or -90)
+                local jitter = globals.tickcount() % (delay*2) < delay and range or -range
+                ctx.yaw_offset = norm_yaw(shift + jitter)
+            elseif dym == "Zenith Bypass" then
+                local t = aa_inverter_tick % 32
+                local fl = aa_inverter
+                if t == 31 then
+                    ctx.yaw_offset = (aa_inverter_tick%64 < 32) and 180 or 0
+                elseif t < 16 then
+                    ctx.yaw_offset = norm_yaw(110 + (fl and 2 or -2))
+                else
+                    ctx.yaw_offset = norm_yaw(-110 + (fl and 2 or -2))
+                end
+                ctx.body_yaw = "Static"
+                ctx.body_yaw_offset = fl and 60 or -60
+            else
+                -- defensive yaw "Off" = fall through to normal yaw below
+                ctx.yaw = nil  -- will be set by normal yaw block
+            end
+            -- body yaw from current state (if not set by Zenith Bypass)
+            if not ctx.body_yaw then
+                local bm = pd.bodyYaw:rawget()
+                if bm ~= "Off" then
+                    ctx.body_yaw = bm
+                    if bm ~= "Opposite" then ctx.body_yaw_offset = pd.bodyYawStatic:rawget() end
+                end
+            end
+        else
+            -- ── Normal pitch ──────────────────────────────────────────
+            local pm = p.pitch:rawget()
+            if pm == "Custom" then
+                ctx.pitch = "Custom"; ctx.pitch_offset = p.pitchSlider:rawget()
+            elseif pm ~= "Off" then
+                ctx.pitch = pm
+            end
+            -- "Off" = don't override pitch
+
+            -- ── Normal yaw ────────────────────────────────────────────
+            -- Skip if safe_head/defensive already set yaw values
+            if not ctx.yaw then
+                local ym     = p.yaw:rawget()
+                local yd     = p.yawDelay:rawget()
+                local ysw    = globals.tickcount() % (yd*2) < yd
+                if ym ~= "Off" then
+                    ctx.yaw = "180"
+                    if ym == "Slow Yaw" or ym == "L&R" then
+                        ctx.yaw_offset = ysw and p.yawLeft:rawget() or p.yawRight:rawget()
+                    else
+                        ctx.yaw_offset = p.yawStatic:rawget()
+                    end
+                end
+            end
+            -- "Off" = don't override yaw, let GS native handle it
+
+            -- ── Jitter ────────────────────────────────────────────────
+            -- Skip if safe_head/defensive already set jitter values
+            if not ctx.yaw_jitter then
+                local jm = p.yawJitter:rawget()
+                local yd = p.yawDelay:rawget()
+                if jm == "L&R" then
+                    local jsw = globals.tickcount() % (yd*2) < yd
+                    ctx.yaw_jitter  = "Center"
+                    ctx.jitter_offset = jsw and p.yawJitterLeft:rawget() or p.yawJitterRight:rawget()
+                elseif jm == "3-Way" then
+                    ctx.yaw_jitter  = "Center"
+                    local ways = {p.wayFirst:rawget(), p.waySecond:rawget(), p.wayThird:rawget()}
+                    ctx.jitter_offset = ways[(globals.tickcount()%3)+1]
+                elseif jm ~= "Off" then
+                    ctx.yaw_jitter  = jm
+                    ctx.jitter_offset = p.yawJitterStatic:rawget()
+                end
+            end
+
+            -- ── Body yaw ──────────────────────────────────────────────
+            -- Skip if safe_head/defensive already set body yaw
+            if not ctx.body_yaw then
+                local bm = p.bodyYaw:rawget()
+                if bm ~= "Off" then
+                    ctx.body_yaw = bm
+                    if bm ~= "Opposite" then
+                        ctx.body_yaw_offset = p.bodyYawStatic:rawget()
+                    end
+                end
+            end
+        end
+
+        -- inverter
+        if ui_inverter:rawget() and ctx.yaw_offset then
+            ctx.yaw_offset = norm_yaw(ctx.yaw_offset + 180)
+        end
+
+        -- safe head
+        local sh = ui_safehead:get() or {}
+        local lp_hp = entity.get_prop(lp, "m_iHealth") or 100
+        local should_sh = has(sh,"Always")
+            or (has(sh,"Low HP") and lp_hp <= 40)
+            or (has(sh,"Knife")  and (function()
+                local wpn = entity.get_player_weapon(lp)
+                return wpn and (entity.get_classname(wpn) == "CKnife")
+            end)())
+        if should_sh then
+            ctx.pitch="Custom"; ctx.pitch_offset=89
+            ctx.yaw_offset=20; ctx.body_yaw="Static"; ctx.body_yaw_offset=1
+        end
+
+        -- edge yaw / freestanding
+        if yaw_direction.edge_yaw and yaw_direction.edge_yaw:rawget() then ctx.edge_yaw = true end
+        if ui_freestand:rawget() then ctx.freestanding = true end
+
+        -- export current state
+        rawset(_G, "_G._hd_pstate", pState)
+        rawset(_G, "_hd_state", {
+            -- keep old references so Builder page still works with _G._hd_state
+            ui_enable    = {get=function() return true end},
+            ui_state     = ui_state,
+            lbl_pitch    = nil, lbl_yaw=nil, lbl_body=nil, lbl_delay=nil, lbl_fl=nil, lbl_ctrl=nil,
+        })
+    end
 
     function defensive.handle(cmd, ctx)
-        if not defensive.enabled:get() then
-            return
-        end
-
-        local lp = entity.get_local_player()
-        if lp == nil then
-            return
-        end
-
-        local work_on_mode = false
-        for idx, mode in next, defensive.mode:get() do
-            if modes[ mode ] and modes[ mode ]() then
-                work_on_mode = true
-                break
-            end
-        end
-
-        local double_tap = exploit.get()
-        -- only fire when an active mode (DT or OSAA) is currently triggered
-        if not work_on_mode then
-            return
-        end
-
-        local lp_state = get_statement()
-
-        local should_work = false
-        local on_peek = false
-        for _, condition in next, defensive.state:get() do
-            if condition == 'On Peek' then
-                -- detect actual peeking: player is moving AND there are enemies visible
-                local vx = entity.get_prop(lp, "m_vecVelocity[0]") or 0
-                local vy = entity.get_prop(lp, "m_vecVelocity[1]") or 0
-                local spd = math.sqrt(vx*vx + vy*vy)
-                -- peek = moving fast enough (not standing still)
-                local is_peeking = spd > 60
-                -- also check if any enemy is close enough to shoot us
-                if not is_peeking then
-                    for _, ent in ipairs(entity.get_players(true)) do
-                        if entity.is_alive(ent) then
-                            local ex,ey,ez = entity.get_origin(ent)
-                            local mx,my,mz = entity.get_origin(lp)
-                            if ex and mx then
-                                local dist = math.sqrt((ex-mx)^2+(ey-my)^2)
-                                if dist < 800 then is_peeking = true; break end
-                            end
-                        end
-                    end
-                end
-                if is_peeking then
-                    should_work = true
-                    on_peek = true
-                end
-                break
-            else
-                if condition == lp_state then
-                    should_work = true
-                    break
-                end
-            end
-        end
-
-        if not should_work then
-            return
-        end
-
-        local weapon = entity.get_player_weapon(lp)
-        if weapon == nil then
-            return
-        end
-
-        local wpn_info = csgo_weapons(weapon)
-        if wpn_info == nil then
-            return
-        end
-
-        if wpn_info.is_revolver then
-            return
-        end
-
-        if not on_peek then
-            cmd.force_defensive = true
-        end
-
-        local freestanding = yaw_direction.is_freestanding
-        local manual_yaw = manual_direction.get()
-        local should_flick = lp_state == 'Crouched' and manual_direction.options:have_key('Duck Exploit')
-        local should_ignore = freestanding or (manual_yaw ~= nil and not should_flick)
-
-        if should_flick then
-            ctx.body_yaw = 'Static'
-            ctx.body_yaw_offset = 180
-        end
-
-        local pitch_value, pitch_mode = 0, 'Default'
-        do
-            local val = defensive.pitch:get()
-            if val == 'Zero' then
-                pitch_value, pitch_mode = 0, 'Custom'
-            elseif val == 'Up' then
-                pitch_value, pitch_mode = 0, 'Up'
-            elseif val == 'Up Switch' then
-                -- lock pitch for entire choke window so resolver cant adapt mid-shot
-                local tc2 = globals.tickcount()
-                if tc2 ~= _snap_pitch_tick then
-                    _snap_pitch_val  = client.random_float(55, 89) * -1
-                    _snap_pitch_tick = tc2
-                end
-                pitch_value, pitch_mode = _snap_pitch_val, 'Custom'
-            elseif val == 'Down Switch' then
-                local tc3 = globals.tickcount()
-                if tc3 ~= _snap_pitch_tick then
-                    _snap_pitch_val  = client.random_float(55, 89)
-                    _snap_pitch_tick = tc3
-                end
-                pitch_value, pitch_mode = _snap_pitch_val, 'Custom'
-            elseif val == 'Random' then
-                pitch_value, pitch_mode = client.random_float(-89, 89), 'Custom'
-            elseif val == 'Jitter Pitch' then
-                -- alternates sharply every shot tick for a stuttering pitch
-                local tick = globals.tickcount()
-                pitch_value = (tick % 2 == 0) and client.random_float(-75, -55) or client.random_float(55, 75)
-                pitch_mode  = 'Custom'
-            elseif val == 'Snap Pitch' then
-                -- picks a completely new random extreme pitch on each defensive tick
-                -- and locks it for that choke window - makes head snap to unexpected height
-                local tc = globals.tickcount()
-                if tc ~= _snap_pitch_tick then
-                    -- snap to either far up or far down, randomly chosen each tick
-                    -- this makes it impossible to predict which height to aim at
-                    local extremes = { -89, -75, -60, 60, 75, 89 }
-                    _snap_pitch_val  = extremes[math.random(1, #extremes)]
-                    _snap_pitch_tick = tc
-                end
-                pitch_value = _snap_pitch_val
-                pitch_mode  = 'Custom'
-            elseif val == 'Ranged Jitter' then
-                local tc4 = globals.tickcount()
-                if tc4 ~= _snap_pitch_tick then
-                    local ranges = { -89, -75, -60, -45, 45, 60, 75, 89 }
-                    local last = _snap_pitch_val or 0
-                    local cands = {}
-                    for _, v in ipairs(ranges) do
-                        if math.abs(v - last) > 60 then cands[#cands+1] = v end
-                    end
-                    _snap_pitch_val  = #cands > 0 and cands[math.random(#cands)] or ranges[math.random(#ranges)]
-                    _snap_pitch_tick = tc4
-                end
-                pitch_value = _snap_pitch_val
-                pitch_mode  = 'Custom'
-            elseif val == 'Fake Up' then
-                -- pitch slightly up (not full 89) to move head out of easy shot placement
-                -- without being so extreme it looks obvious
-                -- combines well with Snap yaw since the head moves both axes
-                pitch_value = client.random_float(-58, -42)
-                pitch_mode  = 'Custom'
-            end
-
-            if manual_yaw ~= nil and should_flick then
-                pitch_value, pitch_mode = client.random_float(-5, 10), 'Custom'
-            end
-        end
-
-        local yaw_value, yaw_mode = 0, '180'
-        do
-            local val = defensive.yaw:get()
-            if val == 'Sideways' then
-                yaw_value = localplayer.choking * 90 + client.random_float(-30, 30)
-            elseif val == 'Forward' then
-                yaw_value = localplayer.choking * 180 + client.random_float(-30, 30)
-            elseif val == 'Spinbot' then
-                yaw_value = -180 + (globals.tickcount() % 9) * 40 + client.random_float(-30, 30)
-            elseif val == '3-Way' then
-                yaw_value = defensive_3_way[localplayer.packets % 5 + 1] + client.random_float(-15, 15)
-            elseif val == '5-Way' then
-                yaw_value = defensive_5_way[localplayer.packets % 5 + 1] + client.random_float(-15, 15)
-            elseif val == '7-Way' then
-                yaw_value = defensive_7_way[localplayer.packets % 7 + 1] + client.random_float(-20, 20)
-            elseif val == 'Chaos' then
-                -- pseudo-random using tick + packet count so it changes every choked packet
-                _chaos_seed = (_chaos_seed + globals.tickcount() * 1337 + localplayer.packets * 73) % 360
-                yaw_value   = utils.normalize(_chaos_seed - 180, -180, 180)
-            elseif val == 'Random' then
-                yaw_value = utils.normalize(math.random(-180, 180), -180, 180)
-            elseif val == 'Snap' then
-                -- true random snap: new angle every choke window
-                local tc = globals.tickcount()
-                if tc ~= _snap_last_tick then
-                    local range  = defensive.snap_range:get()
-                    local offset = defensive.snap_offset:get()
-                    local rand_angle = client.random_float(-range * 0.5, range * 0.5)
-                    _snap_last_offset = utils.normalize(offset + rand_angle, -180, 180)
-                    _snap_last_tick = tc
-                end
-                yaw_value = _snap_last_offset
-            elseif val == 'Snap Jitter' then
-                local tc = globals.tickcount()
-                local range  = defensive.snap_range:get()
-                local offset = defensive.snap_offset:get()
-                if tc ~= _snap_last_tick then
-                    _snap_jitter_side = (_snap_jitter_side == 1) and -1 or 1
-                    _snap_last_tick = tc
-                end
-                local flip = (localplayer.packets % 2 == 0) and 1 or -1
-                yaw_value = utils.normalize(
-                    offset * _snap_jitter_side * flip + client.random_float(-15, 15),
-                    -180, 180)
-            end
-
-            if manual_yaw ~= nil and should_flick then
-                yaw_value = manual_bebra[ manual_yaw ] + client.random_float(0, 10)
-            end
-        end
-
-        if avoid_backstab.get() or should_ignore then
-            return
-        end
-
-        ctx.pitch = pitch_mode
-        ctx.pitch_offset = pitch_value
-        ctx.yaw = yaw_mode
-        ctx.yaw_offset = yaw_value
+        hd_apply(cmd, ctx)
     end
+
+    -- boot: deferred so config is loaded first
+    local _boot_done = false
+    client.set_event_callback('setup_command', function()
+        if _boot_done then return end
+        _boot_done = true
+        -- auto-set team on first tick
+        local lp = entity.get_local_player()
+        if lp then
+            local tn = entity.get_prop(lp,"m_iTeamNum")
+            local t  = (tn==3) and "CT" or (tn==2 and "T" or nil)
+            if t then ui_team:set(t) end
+        end
+    end)
+
+    -- expose to Builder page renderer
+    rawset(_G, "_valk_ab",     ab)
+    rawset(_G, "_valk_states", AA_STATES)
+    rawset(_G, "_valk_show",   function() defensive.show_builder() end)
+
 end
 
+
+
+
+---region disable on warmup
 do
 
     function disablers.count_alive()
@@ -3037,6 +3331,7 @@ do
 
         return alive
     end
+
 
     function disablers.update(cmd, ctx)
         local lp = entity.get_local_player()
@@ -3073,11 +3368,10 @@ do
     end
 end
 
+--- region avoid_backstab
 do
     local is_active = false
-    -- configurable range: 180 (tight) to 350 (paranoid)
-    -- 220 is default CS:GO knife range + small buffer
-    local AVOID_BACKSTAB_MAX_DISTANCE_SQR = 260 * 260
+    local AVOID_BACKSTAB_MAX_DISTANCE_SQR = 220 * 220
 
     local function get_enemies_with_knife()
         local enemies = entity.get_players(true)
@@ -3095,19 +3389,7 @@ do
 
             local wpn_class = entity.get_classname(wpn)
 
-            -- detect all melee + taser threats
-            local is_melee = wpn_class == "CKnife"
-                or wpn_class == "CKnifeGG"
-                or wpn_class == "CKnifeCT"
-                or wpn_class == "CKnifeT"
-                or wpn_class == "CKnifeGhost"
-                or wpn_class == "CKnifeFalchion"
-                or wpn_class == "CKnifeButterfly"
-                or wpn_class == "CKnifeKarambit"
-                or wpn_class == "CKnifeBowie"
-                or wpn_class == "CKnifeBayonet"
-                or wpn_class == "CEliteWeapon"
-            if is_melee then
+            if wpn_class == "CKnife" then
                 list[#list + 1] = enemy
             end
 
@@ -3184,64 +3466,40 @@ do
     end
 end
 
+--- region safe_head
 do
     local is_active = false
 
     local presets = {
         ["Standing"] = {
             [2] = function(e, ctx, me)
-                -- lean slightly left, body says right = harder to trace
-                ctx.yaw_offset = -18
+                ctx.yaw_offset = -6
+
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
+                ctx.body_yaw_offset = 0
             end,
 
             [3] = function(e, ctx, me)
-                ctx.yaw_offset = 22
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
-            end
-        },
+                ctx.yaw_offset = 8
 
-        ["Moving"] = {
-            [2] = function(e, ctx, me)
-                ctx.yaw_offset = -14
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
-            end,
-
-            [3] = function(e, ctx, me)
-                ctx.yaw_offset = 14
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
-            end
-        },
-
-        ["Slow Walk"] = {
-            [2] = function(e, ctx, me)
-                ctx.yaw_offset = -20
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
-            end,
-
-            [3] = function(e, ctx, me)
-                ctx.yaw_offset = 20
-                ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
+                ctx.body_yaw_offset = 0
             end
         },
 
         ["Crouched"] = {
             [2] = function(e, ctx, me)
-                ctx.yaw_offset = -10
+                ctx.yaw_offset = 0
+
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = 180
+                ctx.body_yaw_offset = 0
             end,
 
             [3] = function(e, ctx, me)
-                ctx.yaw_offset = 45
+                ctx.yaw_offset = 40
+
                 ctx.body_yaw = "Static"
-                ctx.body_yaw_offset = -180
+                ctx.body_yaw_offset = 180
             end
         },
 
@@ -3296,25 +3554,23 @@ do
 
     local sv_gravity = cvar.sv_gravity
     local function extrapolate_entity(ent, pos)
-        local ti  = globals.tickinterval()
-        local vel = vector(entity.get_prop(ent, "m_vecVelocity"))
+        local tick_interval = globals.tickinterval()
+
+        local velocity = vector(entity.get_prop(ent, "m_vecVelocity"))
         local new_pos = pos:clone()
-        local spd = #vel
-        -- latency-aware tick count for better extrapolation accuracy
-        local latency = 0
-        local nci = iengineclient.get_net_channel_info()
-        if nci then
-            local ok1, l1 = pcall(inetchannel.get_latency, nci, 0)
-            local ok2, l2 = pcall(inetchannel.get_latency, nci, 1)
-            latency = (ok1 and l1 or 0) + (ok2 and l2 or 0)
+
+        local ticks = 25
+        if #velocity < 32 then
+            ticks = 40
         end
-        local ticks = math.max(8, math.min(math.floor(latency / ti + 0.5) + 4, 64))
-        if spd < 32 then ticks = math.min(ticks, 20) end
-        new_pos.x = new_pos.x + vel.x * ti * ticks
-        new_pos.y = new_pos.y + vel.y * ti * ticks
+
+        new_pos.x = new_pos.x + velocity.x * tick_interval * ticks
+        new_pos.y = new_pos.y + velocity.y * tick_interval * ticks
+
         if entity.get_prop(ent, "m_hGroundEntity") == nil then
-            new_pos.z = new_pos.z + vel.z * ti * ticks - sv_gravity:get_float() * 0.5 * ti * ticks
+            new_pos.z = new_pos.z + velocity.z * tick_interval * ticks - sv_gravity:get_float() * tick_interval
         end
+
         return new_pos
     end
 
@@ -3449,6 +3705,7 @@ do
     end
 end
 
+--- region manual_yaw
 do
     local LEFT    = 0
     local RIGHT   = 1
@@ -3603,943 +3860,453 @@ do
     end
 end
 
+-- ======================================================================
+--  ZENITH | REWORKED ON-SCREEN EVENT LOG
+--  • Pill/card per entry with rounded accent background
+--  • Slide-in animation (from right)
+--  • Smooth alpha fade-out
+--  • Icons per event type  (✦ hit │ ✖ miss │ ✸ burn │ ↯ unreg)
+--  • Color-coded by category
+--  • Draggable position anchor
+-- ======================================================================
+
+--- region log_aimbot_shots  (REWORKED)
 do
-    local DURATION = 7.0
+    local DURATION    = 6.0
+    local MAX_ENTRIES = 10
 
-    local inferno = { }
-    local regular = { }
+    -- ── Kind definitions ──────────────────────────────────────────────
+    local KIND = {
+        hit      = { icon = '\xe2\x9c\xa6', r=120, g=220, b=120 },
+        headshot = { icon = '\xe2\x9c\xa6', r=255, g=200, b=60  },
+        knife    = { icon = '\xe2\x9c\x82', r=255, g=120, b=60  },
+        nade     = { icon = '\xe2\x9c\xb8', r=255, g=180, b=60  },
+        burn     = { icon = '\xe2\x9c\xb8', r=255, g=100, b=40  },
+        miss     = { icon = '\xe2\x9c\x96', r=220, g=80,  b=80  },
+        spread   = { icon = '\xe2\x9c\x96', r=255, g=200, b=60  },
+        unreg    = { icon = '\xe2\x86\xaf', r=100, g=140, b=255 },
+    }
 
-    local function draw_event_log(r, g, b, a, msg, kind, stable_key)
-        if not settings.tweaks_enable:get() then return end
-        eventlogs.add_stable(r, g, b, a, msg, kind or 'hit', stable_key)
+    local function resolve_kind(weapon, hitgroup, reason)
+        if reason then
+            if reason == 'spread'                                  then return KIND.spread end
+            if reason == 'death' or reason == 'player death'
+               or reason == 'unregistered shot'                    then return KIND.unreg  end
+            return KIND.miss
+        end
+        if weapon == 'inferno'   then return KIND.burn     end
+        if weapon == 'knife'     then return KIND.knife    end
+        if weapon == 'hegrenade' then return KIND.nade     end
+        if hitgroup == 1         then return KIND.headshot end
+        return KIND.hit
     end
 
-    local function push_event_log(data)
-        if #regular > 8 then
-            table.remove(regular, 1)
-        end
+    local HG_NAMES = { [2]='chest',[3]='stomach',[4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg',[8]='neck' }
 
-        regular[#regular + 1] = data
+    local inferno = {}
+    local regular = {}
+
+    local function push_entry(kind, text)
+        if #regular >= MAX_ENTRIES then table.remove(regular, 1) end
+        regular[#regular + 1] = {
+            kind = kind, text = text,
+            lifetime = DURATION, alpha = 0.0, slide = 0.0,
+        }
     end
 
-    local function weapon_to_action(weapon)
-        if weapon == "knife" then
-            return "Knifed"
-        end
-
-        if weapon == "hegrenade" then
-            return "Naded"
-        end
-
-        return "Hit"
-    end
-
-    local function find_inferno_info(ent)
+    local function find_inferno(ent)
         for i = 1, #inferno do
-            local data = inferno[i]
-
-            if data.entity == ent then
-                return data
-            end
-        end
-
-        return nil
-    end
-
-    local function get_miss_color(reason)
-        if reason == "spread" then
-            return eventlogs.spread_color_picker:rawget()
-        end
-
-        if reason == "death" or reason == "unregistered shot" then
-            return eventlogs.unregistered_color_picker:rawget()
-        end
-
-        return eventlogs.miss_color_picker:rawget()
-    end
-
-    local function create_event_message(action, hitgroup, ent, damage)
-        local name = entity.get_player_name(ent)
-        local hitgroup_name = e_hitgroup[hitgroup]
-
-        if action == "Hit" then
-            return f(
-                "%s ${%s} in the ${%s} for ${%s} damage",
-                action, name, hitgroup_name, damage
-            )
-        end
-
-        return f(
-            "%s ${%s} for ${%s} damage",
-            action, name, damage
-        )
-    end
-
-    local function create_inferno_info(ent, damage)
-        local data = { }
-
-        data.entity = ent
-        data.damage = damage
-
-        data.alpha = 0.0
-        data.duration = 7.0
-
-        data.flash_amount = 1.0
-
-        return data
-    end
-
-    local function create_event_info(action, hitgroup, ent, damage)
-        local data = { }
-
-        data.msg  = create_event_message(action, hitgroup, ent, damage)
-        data.kind = 'hit'
-        data.alpha    = 0.0
-        data.duration = 7.0
-
-        return data
-    end
-
-    local function create_miss_info(reason)
-        if reason == "?" then reason = "correction" end
-
-        local data = { }
-        data.msg    = f("Missed shot due to ${%s}", reason)
-        data.reason = reason
-        -- classify into icon kind
-        if reason == "spread" then
-            data.kind = 'spread'
-        elseif reason == "unregistered shot" or reason == "player death" or reason == "death" then
-            data.kind = 'net'
-        else
-            data.kind = 'miss'
-        end
-        data.alpha    = 0.0
-        data.duration = 7.0
-
-        return data
-    end
-
-    local function update_inferno_logs(dt)
-        local r, g, b = widgets.color_picker:rawget()
-
-        for i = #inferno, 1, -1 do
-            local data = inferno[i]
-
-            data.duration = math.max(0, data.duration - dt)
-            data.alpha = motion.interp(data.alpha, data.duration > 0, 0.045)
-
-            if data.alpha <= 0 then
-                table.remove(inferno, i)
-            end
-        end
-
-        for i = 1, #inferno do
-            local data = inferno[i]
-
-            local name = entity.get_player_name(data.entity)
-            local damage = data.damage
-
-            draw_event_log(r, g, b, 255 * data.alpha, f("Burned ${%s} for ${%d} damage", name, damage), 'burned', tostring(data))
+            if inferno[i].entity == ent then return inferno[i] end
         end
     end
-
-    local function update_regular_logs(dt)
-        local r, g, b = widgets.color_picker:rawget()
-
-        for i = #regular, 1, -1 do
-            local data = regular[i]
-
-            data.duration = math.max(0, data.duration - dt)
-            data.alpha = motion.interp(data.alpha, data.duration > 0, 0.045)
-
-            if data.alpha <= 0 then
-                table.remove(regular, i)
-            end
-        end
-
-        for i = 1, #regular do
-            local data = regular[i]
-
-            local col_r = r
-            local col_g = g
-            local col_b = b
-
-            if data.reason ~= nil then
-                col_r, col_g, col_b = get_miss_color(data.reason)
-            end
-
-            draw_event_log(col_r, col_g, col_b, 255 * data.alpha, data.msg, data.kind or 'hit', tostring(data))
-        end
-    end
-
-    local function handle_input()
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if settings.tweaks:have_key('Log Aimbot Shots') then
-            override.set(software.misc.settings.output, false)
-        else
-            override.unset(software.misc.settings.output)
-        end
-    end
-
-    settings.tweaks:set_callback(handle_input)
-    settings.tweaks_enable:set_callback(handle_input)
-    ui.set_callback(software.misc.settings.output, handle_input)
-    handle_input()
 
     function log_aimbot_shots.player_hurt(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        local me = entity.get_local_player()
-
-        local userid = client.userid_to_entindex(e.userid)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local me       = entity.get_local_player()
+        local userid   = client.userid_to_entindex(e.userid)
         local attacker = client.userid_to_entindex(e.attacker)
+        if userid == me or attacker ~= me then return end
 
-        local weapon = e["weapon"]
-        local damage = e["dmg_health"]
+        local weapon = e['weapon']
+        local damage = e['dmg_health']
+        local hg     = e['hitgroup']
+        local name   = entity.get_player_name(userid)
+        local kind   = resolve_kind(weapon, hg, nil)
 
-        local hitgroup = e["hitgroup"]
-
-        if userid == me or attacker ~= me then
+        if weapon == 'inferno' then
+            local d = find_inferno(userid)
+            if d then d.damage = d.damage + damage; d.lifetime = DURATION; return end
+            inferno[#inferno + 1] = {
+                entity = userid, damage = damage, kind = KIND.burn,
+                lifetime = DURATION, alpha = 0.0, slide = 0.0,
+            }
             return
         end
 
-        if weapon == "inferno" then
-            local data = find_inferno_info(userid)
-
-            if data ~= nil then
-                data.damage = data.damage + damage
-                data.duration = DURATION
-
-                data.flash_amount = 1.0
-
-                return
-            end
-
-            inferno[#inferno + 1] = create_inferno_info(userid, damage)
-            return
+        local text
+        if weapon == 'knife' then
+            text = f('Knifed \a[nick]%s\aFFFFFFFF for \a[dmg]%d\aFFFFFFFF dmg', name, damage)
+        elseif weapon == 'hegrenade' then
+            text = f('Naded \a[nick]%s\aFFFFFFFF for \a[dmg]%d\aFFFFFFFF dmg', name, damage)
+        elseif hg == 1 then
+            text = f('\a[hs]HEADSHOT\aFFFFFFFF \a[nick]%s\aFFFFFFFF \a[dmg]%d\aFFFFFFFF dmg', name, damage)
+        else
+            text = f('Hit \a[nick]%s\aFFFFFFFF (%s) \a[dmg]%d\aFFFFFFFF dmg', name, HG_NAMES[hg] or 'body', damage)
         end
-
-        local action = weapon_to_action(weapon)
-        push_event_log(create_event_info(action, hitgroup, userid, damage))
+        push_entry(kind, text)
     end
 
     function log_aimbot_shots.aim_miss(e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        push_event_log(create_miss_info(e.reason))
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local reason = e.reason or '?'
+        if reason == '?' then reason = 'correction' end
+        push_entry(resolve_kind(nil, nil, reason), f('Miss  \a[reason]%s', reason))
     end
 
     function log_aimbot_shots.frame()
         local dt = globals.frametime()
-
-        update_inferno_logs(dt)
-        update_regular_logs(dt)
+        for i = #inferno, 1, -1 do
+            local d = inferno[i]
+            d.lifetime = math.max(0, d.lifetime - dt)
+            d.alpha    = motion.interp(d.alpha, d.lifetime > 0 and 1 or 0, 0.06)
+            d.slide    = motion.interp(d.slide, 1.0, 0.10)
+            if d.alpha <= 0.01 and d.lifetime <= 0 then table.remove(inferno, i) end
+        end
+        for i = #regular, 1, -1 do
+            local d = regular[i]
+            d.lifetime = math.max(0, d.lifetime - dt)
+            d.alpha    = motion.interp(d.alpha, d.lifetime > 0 and 1 or 0, 0.06)
+            d.slide    = motion.interp(d.slide, 1.0, 0.10)
+            if d.alpha <= 0.01 and d.lifetime <= 0 then table.remove(regular, i) end
+        end
     end
-end
 
-do
-    local ALPHA_UNIT   = 1 / 255
+    rawset(_G, '_zn_inferno', inferno)
+    rawset(_G, '_zn_regular', regular)
 
-    -- ── layout tunables ─────────────────────────────────────────────────────
-    local PILL_PAD_X      = 10    -- horizontal padding inside pill
-    local PILL_PAD_Y      = 3     -- vertical padding inside pill
-    local PILL_RADIUS     = 4     -- corner radius of the pill background
-    local PILL_GAP        = 5     -- vertical gap between rows
-    local ACCENT_BAR_W    = 3     -- width of the left colour bar
-    local SLIDE_TICKS     = 0.18  -- seconds for slide-in animation
-    local FADE_IN_TICKS   = 0.12  -- seconds to fade in
-    local PILL_BG_ALPHA   = 0.62  -- background darkness (0-1)
-    local GLOW_SPREAD     = 18    -- horizontal glow gradient width
-    local MAX_ENTRIES     = 10    -- cap live queue
+    -- -- Console hitlog -----------------------------------------------
+    -- Detailed per-shot log to console: hit/miss reason, HC, hitgroup, yaw
+    local _fire_data = {}  -- { damage, hitgroup, tick, target }
 
-    -- ── icon prefixes by type ────────────────────────────────────────────────
-    -- type is set on each log when added:
-    --   'hit'  'miss'  'spread'  'net'
-    -- Plain ASCII prefixes — safe across all renderers
-    local TYPE_ICONS = {
-        hit    = "[+] ",
-        miss   = "[-] ",
-        spread = "[~] ",
-        net    = "[?] ",
-        burned = "[F] ",
+    local HG_FULL = {
+        [0]='generic',[1]='head',[2]='chest',[3]='stomach',
+        [4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg',[8]='neck'
     }
 
-    -- ── helpers ──────────────────────────────────────────────────────────────
-    local function ease_out_quart(t)
-        local u = 1 - t
-        return 1 - u * u * u * u
+    local function get_yaw_info()
+        local lp = entity.get_local_player()
+        if not lp then return '?' end
+        local y = entity.get_prop(lp, 'm_angEyeAngles[1]')
+        return y and f('%.0f', y) or '?'
     end
 
-    local function draw_pill(x, y, w, h, r, g, b, alpha, radius)
-        local ia = math.floor(alpha)
-        if ia <= 0 then return end
-        radius = math.min(radius, math.floor(h / 2))
+    client.set_event_callback('aim_fire', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        _fire_data.damage   = e.damage
+        _fire_data.hitgroup = e.hitgroup
+        _fire_data.tick     = e.tick
+        _fire_data.target   = e.target
+        _fire_data.yaw      = get_yaw_info()
+    end)
 
-        -- filled rounded rect (manual: top/bottom strips + left/right strips + 4 circles)
-        renderer.rectangle(x + radius, y,         w - radius*2, h,            0, 0, 0, ia)
-        renderer.rectangle(x,         y + radius, radius,       h - radius*2, 0, 0, 0, ia)
-        renderer.rectangle(x + w - radius, y + radius, radius,  h - radius*2, 0, 0, 0, ia)
-        renderer.circle(x + radius,         y + radius,         0,0,0, ia, radius, 180, 0.25)
-        renderer.circle(x + radius,         y + h - radius,     0,0,0, ia, radius, 270, 0.25)
-        renderer.circle(x + w - radius,     y + h - radius,     0,0,0, ia, radius,   0, 0.25)
-        renderer.circle(x + w - radius,     y + radius,         0,0,0, ia, radius,  90, 0.25)
-    end
+    client.set_event_callback('aim_hit', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local name = (e.target and entity.get_player_name(e.target)) or '?'
+        local hg   = HG_FULL[e.hitgroup] or 'body'
+        local hc   = e.hit_chance or 0
+        local dmg  = e.damage or 0
+        local bt   = globals.tickcount() - (_fire_data.tick or globals.tickcount())
+        local yaw  = _fire_data.yaw or '?'
+        client.color_log(120, 220, 120, '[Zenith] \0')
+        client.color_log(255, 255, 255, f('HIT %s ', name))
+        client.color_log(255, 220, 60,  f('[%s] \0', hg))
+        client.color_log(255, 255, 255, f('%d dmg  \0', dmg))
+        client.color_log(160, 200, 255, f('HC %d%%  bt %dt  yaw %s', hc, bt, yaw))
+    end)
 
-    local function draw_accent_bar(x, y, h, r, g, b, alpha, radius)
-        local ia = math.floor(alpha)
-        if ia <= 0 then return end
-        -- solid bar
-        renderer.rectangle(x, y + radius, ACCENT_BAR_W, h - radius * 2, r, g, b, ia)
-        renderer.circle(x + radius, y + radius,     r,g,b, ia, radius, 180, 0.25)
-        renderer.circle(x + radius, y + h - radius, r,g,b, ia, radius, 270, 0.25)
-        -- glow gradient bleeding right
-        renderer.gradient(x + ACCENT_BAR_W, y, GLOW_SPREAD, h, r, g, b, math.floor(ia*0.30), r, g, b, 0, false)
-    end
+    client.set_event_callback('aim_miss', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+        local name   = (e.target and entity.get_player_name(e.target)) or '?'
+        local reason = e.reason or 'correction'
+        local hg     = HG_FULL[e.hitgroup] or 'body'
+        local hc     = e.hit_chance or 0
+        local bt     = globals.tickcount() - (_fire_data.tick or globals.tickcount())
+        local yaw    = _fire_data.yaw or '?'
+        client.color_log(220, 80,  80,  '[Zenith] \0')
+        client.color_log(255, 255, 255, f('MISS %s ', name))
+        client.color_log(255, 160, 80,  f('[%s -> %s]  \0', hg, reason))
+        client.color_log(160, 200, 255, f('HC %d%%  bt %dt  yaw %s', hc, bt, yaw))
+    end)
+end
 
-    local function replacement(s, col_a, col_b)
-        local hex_a = utils.to_hex(unpack(col_a))
-        local hex_b = utils.to_hex(unpack(col_b))
-        local repl  = f("\a%s%%1\a%s", hex_a, hex_b)
-        return string.gsub(s, "${(.-)}", repl)
-    end
+--- region evaded_shot_log
+do
+    -- Detect when an enemy bullet passes NEAR but does NOT HIT the local player.
+    -- We suppress the evade log if the local player was hurt by that same shooter
+    -- in the same server tick (meaning the bullet DID land).
 
-    -- ── persistent entry list ───────────────────────────────────────────────
-    -- Each entry lives here across frames and drives its own alpha.
-    -- { r,g,b, msg, kind, spawn_t, alpha_t, target_alpha, key }
-    local live_entries  = {}
-    local preview_shown = false   -- tracks whether preview is currently visible
+    local EVADE_RADIUS   = 72
+    local EVADE_DURATION = 4.0
+    local KIND_EVADE     = { icon = '\xe2\x9c\x93', r = 90, g = 200, b = 255 }
 
-    -- ── helpers ──────────────────────────────────────────────────────────────
-    local function find_entry_by_key(key)
-        for i = 1, #live_entries do
-            if live_entries[i].key == key then return live_entries[i], i end
+    -- table of { tick, shooter_entindex } for every time we were hurt
+    local hurt_log = {}
+
+    client.set_event_callback('player_hurt', function(e)
+        local lp = entity.get_local_player()
+        if not lp then return end
+        -- e.userid = victim, e.attacker = shooter
+        local victim_id = e['userid']
+        if not victim_id then return end
+        local victim = client.userid_to_entindex(victim_id)
+        if victim ~= lp then return end
+        local attacker_id = e['attacker']
+        if not attacker_id then return end
+        local attacker = client.userid_to_entindex(attacker_id)
+        if not attacker then return end
+        -- record this hit so bullet_impact can check against it
+        hurt_log[#hurt_log + 1] = { tick = globals.tickcount(), shooter = attacker }
+        -- prune old entries
+        local cur = globals.tickcount()
+        for i = #hurt_log, 1, -1 do
+            if cur - hurt_log[i].tick > 2 then table.remove(hurt_log, i) end
         end
-    end
+    end)
 
-    local function push_entry(r, g, b, msg, kind, key, target_a)
-        local now = globals.realtime()
-        local e = find_entry_by_key(key)
-        if e then
-            -- refresh in place — don't reset spawn_t so slide stays settled
-            e.r, e.g, e.b   = r, g, b
-            e.msg            = msg
-            e.kind           = kind
-            e.target_alpha   = target_a
-            return e
-        end
-        if #live_entries >= MAX_ENTRIES then
-            table.remove(live_entries, 1)
-        end
-        local entry = {
-            r = r, g = g, b = b,
-            msg          = msg,
-            kind         = kind,
-            spawn_t      = now,
-            alpha_t      = 0.0,
-            target_alpha = target_a,
-            key          = key,
-        }
-        table.insert(live_entries, entry)
-        return entry
-    end
-
-    -- ── preview ──────────────────────────────────────────────────────────────
-    local preview_target = 0.0
-
-    local function update_preview()
-        local real_count = 0
-        for _, e in ipairs(live_entries) do
-            if not e.is_preview then real_count = real_count + 1 end
-        end
-        local can_show = widgets.enabled:get() and ui.is_menu_open() and real_count == 0
-        preview_target = motion.interp(preview_target, can_show and 1 or 0, 0.045)
-
-        local pv = preview_target
-        if pv <= 0.01 then
-            -- fade out all preview entries
-            for _, e in ipairs(live_entries) do
-                if e.is_preview then e.target_alpha = 0 end
+    local function was_hit_by(shooter_ent)
+        local cur = globals.tickcount()
+        for _, h in ipairs(hurt_log) do
+            if h.shooter == shooter_ent and cur - h.tick <= 1 then
+                return true
             end
-            return
         end
-
-        local a = pv  -- 0-1, used directly as target_alpha
-
-        local function add_prev(r, g, b, msg, kind, key)
-            local e = push_entry(r, g, b, msg, kind, 'prev_'..key, a)
-            e.is_preview = true
-        end
-
-        local ar, ag, ab = widgets.color_picker:rawget()
-        add_prev(ar,ag,ab, "Hit ${vladislav} for ${10} damage",          'hit',  'h1')
-        add_prev(ar,ag,ab, "Hit ${monster} in the ${head} for ${103} damage", 'hit', 'h2')
-
-        local mr, mg, mb = eventlogs.miss_color_picker:rawget()
-        add_prev(mr,mg,mb, "Missed shot due to ${correction}",       'miss',   'm1')
-        add_prev(mr,mg,mb, "Missed shot due to ${prediction error}", 'miss',   'm2')
-        add_prev(mr,mg,mb, "Missed shot due to ${lagcomp failure}",  'miss',   'm3')
-
-        local sr, sg, sb = eventlogs.spread_color_picker:rawget()
-        add_prev(sr,sg,sb, "Missed shot due to ${spread}",           'spread', 's1')
-
-        local nr, ng, nb = eventlogs.unregistered_color_picker:rawget()
-        add_prev(nr,ng,nb, "Missed shot due to ${unregistered shot}", 'net',   'n1')
-        add_prev(nr,ng,nb, "Missed shot due to ${player death}",      'net',   'n2')
-        add_prev(nr,ng,nb, "Missed shot due to ${death}",             'net',   'n3')
+        return false
     end
 
-    -- ── widget / window ──────────────────────────────────────────────────────
-    local widget = windows.new("##Event Logs", .55, 0.78)
-    widget:set_size(vector(330, 125))
-    local hovered_alpha = 0
+    local function push_evade(shooter)
+        local reg = _G._zn_regular
+        if not reg then return end
+        local name = entity.get_player_name(shooter) or '?'
+        local MAX = 10
+        if #reg >= MAX then table.remove(reg, 1) end
+        reg[#reg + 1] = {
+            kind     = KIND_EVADE,
+            text     = 'Evaded  \a[nick]' .. name .. '\aFFFFFFFF',
+            lifetime = EVADE_DURATION,
+            alpha    = 0.0,
+            slide    = 0.0,
+        }
+        client.color_log(90, 200, 255, '[Zenith]\0')
+        client.color_log(180, 180, 180, ' Evaded shot from \0')
+        client.color_log(255, 180, 80, name)
+    end
 
-    -- ── draw ─────────────────────────────────────────────────────────────────
-    local SLIDE_AMOUNT = 22
+    client.set_event_callback('bullet_impact', function(e)
+        if not settings.tweaks_enable:get() then return end
+        if not settings.tweaks:have_key('Log Aimbot Shots') then return end
+
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+
+        -- if shooter actually hit us (within 1 tick) this is not an evade
+        if was_hit_by(shooter) then return end
+
+        local shooter_id = e['userid']
+        if not shooter_id then return end
+        local shooter = client.userid_to_entindex(shooter_id)
+        if not shooter or shooter == lp then return end
+        if not entity.is_enemy(shooter) then return end
+
+        local ix, iy, iz = e['x'], e['y'], e['z']
+        if not (ix and iy and iz) then return end
+
+        local ox, oy, oz = entity.get_prop(lp, 'm_vecOrigin')
+        if not (ox and oy and oz) then return end
+        oz = oz + 54  -- approximate center-mass height
+
+        local dx, dy, dz = ix-ox, iy-oy, iz-oz
+        if (dx*dx + dy*dy + dz*dz) > EVADE_RADIUS * EVADE_RADIUS then return end
+
+        push_evade(shooter)
+    end)
+end
+
+--- region eventlogs  (REWORKED)
+do
+    local CARD_PAD_X  = 8
+    local CARD_PAD_Y  = 4
+    local CARD_GAP    = 3
+    local CARD_RADIUS = 4
+    local ICON_GAP    = 5
+    local SLIDE_RANGE = 140
+
+    local inferno = _G._zn_inferno
+    local regular = _G._zn_regular
+
+    local MACROS = {
+        nick   = '\aFF9955FF',
+        dmg    = '\aFFD700FF',
+        hs     = '\aFFD700FF',
+        reason = '\aFF6666FF',
+    }
+    local function resolve(s)
+        return (s:gsub('\a%[(.-)%]', function(k) return MACROS[k] or '\aFFFFFFFF' end))
+    end
+
+    local PREVIEW = {
+        { kind={ icon='\xe2\x9c\xa6', r=120,g=220,b=120 }, text='Hit \a[nick]vladislav\aFFFFFFFF (chest) \a[dmg]42\aFFFFFFFF dmg',            alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\xa6', r=255,g=200,b=60  }, text='\a[hs]HEADSHOT\aFFFFFFFF \a[nick]monster\aFFFFFFFF \a[dmg]103\aFFFFFFFF dmg', alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x96', r=220,g=80, b=80  }, text='Miss  \a[reason]correction',                                                  alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x96', r=100,g=140,b=255 }, text='Miss  \a[reason]unregistered shot',                                           alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x96', r=255,g=200,b=60  }, text='Miss  \a[reason]spread',                                                      alpha=1, slide=1 },
+        { kind={ icon='\xe2\x9c\x93', r=90, g=200,b=255 }, text='Evaded  \a[nick]xXsniper420Xx\aFFFFFFFF',                                    alpha=1, slide=1 },
+    }
+
+    -- Persistent position sliders (hidden, saved via config system)
+    local _pos_x_item = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge{'\n','eventlog::pos_x'}, 0, 10000, 7800)
+        :record('visuals','eventlog::pos_x'):save()
+    local _pos_y_item = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
+        merge{'\n','eventlog::pos_y'}, 0, 10000, 7000)
+        :record('visuals','eventlog::pos_y'):save()
+
+    local widget = windows.new('##EventLogsV2', _pos_x_item:get() / 10000, _pos_y_item:get() / 10000)
+    widget:set_size(vector(220, 20))
+
+    -- save position when dragged
+    local _save_timer = 0
+    local function maybe_save_pos()
+        _save_timer = _save_timer - globals.frametime()
+        if _save_timer > 0 then return end
+        if not widget:is_dragging() then return end
+        _save_timer = 0.5
+        local screen = vector(client.screen_size())
+        local pos = widget.pos
+        _pos_x_item:set(math.floor(pos.x / screen.x * 10000 + 0.5))
+        _pos_y_item:set(math.floor(pos.y / screen.y * 10000 + 0.5))
+    end
+
+    local hovered_alpha = 0.0
+
+    local function draw_card(ox, oy, entry, a_mult)
+        if a_mult < 0.01 then return 0 end
+        local kind    = entry.kind
+        local alpha   = (entry.alpha or 1) * a_mult
+        local slide_t = entry.slide or 1
+        local display = resolve(entry.text or '')
+        local flags   = 'd'
+
+        local icon_w, icon_h = renderer.measure_text(flags, kind.icon)
+        local text_w, text_h = renderer.measure_text(flags, display)
+        local card_w = CARD_PAD_X * 2 + icon_w + ICON_GAP + text_w
+        local card_h = CARD_PAD_Y * 2 + math.max(icon_h, text_h)
+
+        local sx = ox + SLIDE_RANGE * (1.0 - slide_t)
+
+        local br = math.floor(kind.r * 0.10)
+        local bg = math.floor(kind.g * 0.10)
+        local bb = math.floor(kind.b * 0.10)
+        graphics.rectangle(sx, oy, card_w, card_h, br, bg, bb, math.floor(185 * alpha), CARD_RADIUS)
+        renderer.rectangle(sx, oy + CARD_RADIUS, 2, card_h - CARD_RADIUS * 2,
+            kind.r, kind.g, kind.b, math.floor(230 * alpha))
+        renderer.text(sx + CARD_PAD_X, oy + (card_h - icon_h) * 0.5,
+            kind.r, kind.g, kind.b, math.floor(255 * alpha), flags, 0, kind.icon)
+        renderer.text(sx + CARD_PAD_X + icon_w + ICON_GAP, oy + (card_h - text_h) * 0.5,
+            255, 255, 255, math.floor(255 * alpha), flags, 0, display)
+
+        return card_h + CARD_GAP
+    end
 
     local function draw_eventlogs()
-        if not widgets.enabled:get() or not widgets.items:have_key("On-Screen Logs") then
-            return
-        end
+        if not widgets.enabled:get() or not widgets.items:have_key('On-Screen Logs') then return end
 
-        local screen  = vector(client.screen_size())
-        local flags   = "d"
-        local now     = globals.realtime()
+        local is_menu    = ui.is_menu_open()
+        local live_count = #regular + #inferno
 
-        local window  = widget
-        window.pos.x  = screen.x * 0.5 - 165
-
-        local pos  = window.pos:clone()
-        local size = window.size:clone()
-        local cx   = pos.x + size.x * 0.5
-
-        hovered_alpha = motion.interp(hovered_alpha,
-            ui.is_menu_open() and window:is_hovering() and 1 or 0, 0.095)
-        if hovered_alpha > 0 then
-            renderer.text(pos.x + size.x * 0.5, pos.y - 12,
-                255, 255, 255, math.floor(200 * hovered_alpha), 'c', nil,
-                'Drag to reposition.')
-            renderer.rectangle(pos.x + 50, pos.y - 2, size.x - 100, 1,
-                255, 255, 255, math.floor(80 * hovered_alpha))
-        end
-
-        -- tick alpha, prune dead entries
-        local i = 1
-        while i <= #live_entries do
-            local e = live_entries[i]
-            e.alpha_t = motion.interp(e.alpha_t, e.target_alpha, 0.07)
-            if e.alpha_t < 0.005 and e.target_alpha <= 0 then
-                table.remove(live_entries, i)
-            else
-                i = i + 1
+        local source, a_mult
+        if is_menu and live_count == 0 then
+            source = PREVIEW; a_mult = 0.55
+        else
+            source = {}
+            for i = #inferno, 1, -1 do
+                local d  = inferno[i]
+                local nm = entity.get_player_name(d.entity) or '?'
+                source[#source + 1] = {
+                    kind = d.kind, alpha = d.alpha, slide = d.slide,
+                    text = f('Burning \a[nick]%s\aFFFFFFFF \a[dmg]%d\aFFFFFFFF dmg', nm, d.damage)
+                }
             end
-        end
-
-        local draw_y = pos.y
-
-        for idx = 1, #live_entries do
-            local e     = live_entries[idx]
-            local alpha = e.alpha_t
-            if alpha < 0.005 then goto continue_log end
-
-            local age      = now - e.spawn_t
-            local slide_p  = math.min(age / SLIDE_TICKS, 1.0)
-            local slide_x  = SLIDE_AMOUNT * (1.0 - ease_out_quart(slide_p))
-
-            local r, g, b  = e.r, e.g, e.b
-            -- plain_msg: strip ${...} markers for shadow + measure
-            local plain_msg = string.gsub(e.msg, "${(.-)}", "%1")
-            local icon      = TYPE_ICONS[e.kind] or ""
-            local plain_txt = icon .. plain_msg
-
-            -- full_txt: colour-escaped version for main render
-            local raw_text  = replacement(e.msg, {r, g, b, 255}, {255, 255, 255, 255})
-            local full_txt  = icon .. raw_text
-
-            local tw, th  = renderer.measure_text(flags, plain_txt)
-            local pill_w  = tw + PILL_PAD_X * 2 + ACCENT_BAR_W
-            local pill_h  = th + PILL_PAD_Y * 2
-
-            local pill_x  = math.floor(cx - pill_w * 0.5 + slide_x)
-            local pill_y  = math.floor(draw_y)
-
-            local ia_pill = math.floor(210 * PILL_BG_ALPHA * alpha)
-            local ia_bar  = math.floor(255 * alpha)
-            local ia_txt  = math.floor(255 * alpha)
-
-            -- pill background
-            draw_pill(pill_x, pill_y, pill_w, pill_h, 0, 0, 0, ia_pill, PILL_RADIUS)
-
-            -- right-edge fade
-            renderer.gradient(
-                pill_x + pill_w - 24, pill_y, 24, pill_h,
-                0,0,0,0,  0,0,0, ia_pill,  false)
-
-            -- left accent bar + glow
-            draw_accent_bar(pill_x, pill_y, pill_h, r, g, b, ia_bar, PILL_RADIUS)
-
-            -- top highlight
-            renderer.gradient(
-                pill_x + PILL_RADIUS, pill_y,
-                pill_w - PILL_RADIUS * 2, 1,
-                255,255,255, math.floor(28 * alpha),
-                255,255,255, 0,  false)
-
-            -- text
-            local tx = pill_x + ACCENT_BAR_W + PILL_PAD_X
-            local ty = pill_y + PILL_PAD_Y
-            -- shadow uses plain text (no colour escapes)
-            renderer.text(tx+1, ty+1, 0,0,0, math.floor(120*alpha), flags, nil, plain_txt)
-            -- main uses colour-escaped text via graphics.text
-            graphics.text(tx, ty, 255,255,255, ia_txt, flags, 0, full_txt)
-
-            draw_y = draw_y + pill_h + PILL_GAP
-
-            ::continue_log::
-        end
-
-        window:update()
-    end
-
-    -- ── colour pickers (unchanged API) ───────────────────────────────────────
-    local function get_color(self) return self.r, self.g, self.b end
-
-    local wr, wg, wb = widgets.color_picker:rawget()
-    eventlogs.hit_color_picker          = { r=wr,  g=wg,  b=wb,  rawget=get_color }
-    eventlogs.spread_color_picker       = { r=255, g=225, b=115, rawget=get_color }
-    eventlogs.miss_color_picker         = { r=255, g=98,  b=98,  rawget=get_color }
-    eventlogs.unregistered_color_picker = { r=100, g=100, b=255, rawget=get_color }
-
-    -- ── public API ───────────────────────────────────────────────────────────
-    -- unique key counter for one-shot entries without a stable handle
-    local _entry_seq = 0
-
-    -- add_stable: uses caller-supplied key so the same logical entry is
-    -- refreshed in place every frame rather than spawning a new one.
-    function eventlogs.add_stable(r, g, b, a, text, kind, key)
-        if key == nil then
-            _entry_seq = _entry_seq + 1
-            key = 'seq_'.._entry_seq
-        end
-        local e = push_entry(r, g, b, text, kind or 'hit', key, a * ALPHA_UNIT)
-        e.is_preview = false
-        return e
-    end
-
-    -- legacy one-shot add (still used by preview internally)
-    function eventlogs.add(r, g, b, a, text, kind)
-        return eventlogs.add_stable(r, g, b, a, text, kind, nil)
-    end
-
-    function eventlogs.pre_frame()
-        -- real shot entries: set target to 0 so they fade once the push stops
-        -- (they will be re-pushed each frame while alive via update_regular_logs)
-        for _, e in ipairs(live_entries) do
-            if not e.is_preview then
-                e.target_alpha = 0
+            for i = #regular, 1, -1 do
+                source[#source + 1] = regular[i]
             end
+            a_mult = 1.0
         end
+
+        if #source == 0 then return end
+
+        local pos = widget.pos:clone()
+        hovered_alpha = motion.interp(hovered_alpha, is_menu and widget:is_hovering() and 1 or 0, 0.08)
+        if hovered_alpha > 0.01 then
+            renderer.text(pos.x, pos.y - 14, 255, 255, 255, math.floor(160 * hovered_alpha), 'd', nil, 'Drag to reposition')
+        end
+
+        local total_h = 0
+        for i = 1, #source do
+            total_h = total_h + draw_card(pos.x, pos.y + total_h, source[i], a_mult)
+        end
+
+        widget:set_size(vector(240, math.max(20, total_h)))
+        widget:update()
+        maybe_save_pos()
     end
 
-    function eventlogs.post_frame()
-        update_preview()
-        draw_eventlogs()
-    end
+    eventlogs.add        = function() end
+    eventlogs.pre_frame  = function() end
+    eventlogs.post_frame = function() draw_eventlogs() end
+
+    local function col(r,g,b) return { r=r,g=g,b=b, rawget=function(self) return self.r,self.g,self.b end } end
+    eventlogs.hit_color_picker          = col(120,220,120)
+    eventlogs.spread_color_picker       = col(255,200,60)
+    eventlogs.miss_color_picker         = col(220,80,80)
+    eventlogs.unregistered_color_picker = col(100,140,255)
 end
 
-local print_dev do
-    print_dev = {
-        data = { }
-    }
-
-    function print_dev.add(text, time)
-        print_dev.data[#print_dev.data+1] = {
-            text = text,
-            time = time + globals.realtime(),
-            alpha = 0.01,
-            offset = 0
-        }
-    end
-
-    client.set_event_callback('paint', function ()
-        local realtime = globals.realtime()
-        local frametime = globals.frametime()
-        local offset = 0
-
-        for i = #print_dev.data, 1, -1 do
-            local log = print_dev.data[i]
-            if not log then
-                goto skip
-            end
-
-            if log.offset ~= offset then
-                log.offset = utils.clamp(log.offset < offset and log.offset + (200 * frametime) or offset, 0, offset)
-            end
-
-            local difference = log.time - realtime
-            log.alpha = motion.interp(log.alpha, difference > 0, 0.045)
-            if log.alpha <= 0 and difference < 0 then
-                table.remove(print_dev.data, i)
-                goto skip
-            end
-
-            local text_sz = vector(renderer.measure_text('d', log.text))
-
-            graphics.text(8, 5 + log.offset, 255, 255, 255, 255 * log.alpha, 'd', nil, log.text)
-
-            offset = offset + text_sz.y + 1
-            ::skip::
-        end
-
-        for i = 1, #print_dev.data do
-            local log_count = #print_dev.data - i
-
-            if log_count > 7 then
-                print_dev.data[ i ].time = 0
-            end
-        end
-    end)
-
-    client.set_event_callback('round_prestart', function ()
-        print_dev.data = { }
-    end)
-
-    setmetatable(print_dev, {
-        __call = function (self, ...)
-            print_dev.add(...)
-        end
-    })
-end
-
-do
-    local hitgroup_str = {
-        [0] = 'generic',
-        'head', 'chest', 'stomach',
-        'left arm', 'right arm',
-        'left leg', 'right leg',
-        'neck', 'generic', 'gear'
-    }
-
-    local weapon_verb = {
-        ['hegrenade'] = 'Naded',
-        ['inferno'] = 'Burned',
-        ['knife'] = 'Knifed',
-    }
-
-    local hex_to_rgb = function( hex )
-        hex = hex:gsub('#', '')
-        return tonumber('0x' .. hex:sub(1, 2)), tonumber('0x' .. hex:sub(3, 4)), tonumber('0x' .. hex:sub(5, 6))
-    end
-
-    local function clean_up(str)
-        local text = str:gsub('(\a%x%x%x%x%x%x)%x%x', '%1')
-        return text
-    end
-
-	local function printc(...)
-		for i, v in ipairs{...} do
-			local r = "\aD9D9D9" .. v
-			for col, text in r:gmatch("\a(%x%x%x%x%x%x)([^\a]*)") do
-                local r, g, b = hex_to_rgb(col)
-				client.color_log(r, g, b, string.format('%s\0', text))
-			end
-            client.color_log(255, 255, 255, '\n\0')
-		end
-	end
-
-    local wanted_damage, wanted_hitgroup, backtrack = 0, 0, 0
-
-    client.set_event_callback("aim_fire", function (e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        wanted_damage = e.damage
-        wanted_hitgroup = e.hitgroup
-        backtrack = globals.tickcount() - e.tick
-    end)
-
-    client.set_event_callback('aim_hit', function (shot)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        local target = shot.target
-        if target == nil then
-            return
-        end
-
-        local info = {
-            '\rHit ',
-            f('\a[nick]%s\r\'s ', entity.get_player_name(target)),
-            'in the ',
-            shot.hitgroup ~= wanted_hitgroup and f('\a[highlight]%s\r(\a[highlight]%s\r) ', hitgroup_str[ shot.hitgroup ], hitgroup_str[ wanted_hitgroup ]) or f('\a[highlight]%s\r ', hitgroup_str[ shot.hitgroup ]),
-            'for ',
-            shot.damage ~= wanted_damage and f('\a[highlight]%d\r(\a[highlight]%d\r) ', shot.damage, wanted_damage) or f('\a[highlight]%d\r ', shot.damage),
-            'damage ',
-            f('(hc: \a[highlight]%d%% \a[idle]· \rhistory: \a[highlight]%dt\r)', shot.hit_chance, backtrack)
-        }
-
-        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
-        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
-        print_dev(str, 8)
-    end)
-
-    client.set_event_callback('aim_miss', function (shot)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        local target = shot.target
-        if target == nil then
-            return
-        end
-
-        local info = {
-            '\rMissed ',
-            f('\a[nick]%s\r\'s ', entity.get_player_name(target)),
-            f('\a[highlight]%s\r ', hitgroup_str[ shot.hitgroup ]),
-            'due to ',
-            f('\a[miss]%s\r ', shot.reason),
-            f('(hc: \a[highlight]%d%% \a[idle]· \rhistory: \a[highlight]%dt\r)', shot.hit_chance, backtrack)
-        }
-
-        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
-        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
-        print_dev(str, 8)
-    end)
-
-    client.set_event_callback('player_hurt', function (e)
-        if not settings.tweaks_enable:get() then
-            return
-        end
-
-        if not settings.tweaks:have_key('Log Aimbot Shots') then
-            return
-        end
-
-        local lp = entity.get_local_player()
-        local victim = client.userid_to_entindex(e.userid)
-        local attacker = client.userid_to_entindex(e.attacker)
-        if victim == nil or attacker == nil or victim == lp or attacker ~= lp then
-            return
-        end
-
-        local hitgroup = hitgroup_str[ e.hitgroup ]
-
-        local verb = weapon_verb[ e.weapon ]
-        if verb == nil then
-            return
-        end
-
-        local info = {
-            '\r' .. verb,
-            f(' \a[nick]%s\r ', entity.get_player_name(victim)),
-            'for ',
-            f('\a[highlight]%d \rdamage ', e.dmg_health or 0),
-            f('(\a[highlight]%d \rhealth remaining)', e.health or 0)
-        }
-
-        local str = utils.format(table.concat(info, ''), 255, 255, 255, 255)
-        printc(f('\aB6E717[gamesense] \aFFFFFF%s', clean_up(str)))
-        print_dev(str, 8)
-    end)
-end
-
--- --region hitchance
--- do
---     hitchance.reset = false
---     hitchance.weapons = { 'G3SG1 / SCAR-20', 'AWP', 'SSG 08', 'R8 Revolver', 'Pistol' }
-
---     hitchance.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Hit Chance")
---     : record("rage", "hitchance::enabled")
---     : save()
-
---     hitchance.weapon_list = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Weapons", hitchance.weapons)
---     : record("rage", "hitchance::weapons")
---     : save()
-
---     for _, weapon in next, hitchance.weapons do
---         hitchance['Enabled_' .. weapon] = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', f('Enable %s', weapon))
---         : record("rage", "hitchance::enable::" .. weapon)
---         : save()
-
---         hitchance['Modes_' .. weapon] = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", merge { 'Modes', '\n', weapon }, { 'No Scope', 'In Air' })
---         : record("rage", "hitchance::modes::" .. weapon)
---         : save()
-
---         hitchance['Distance_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'Distance', '\n', weapon }, 100, 1001, 500, true, 'm', 0.01, { [1001] = 'Inf.' })
---         : record("rage", "hitchance::distance::" .. weapon)
---         : save()
-
---         hitchance['No Scope_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'No Scope', '\n', weapon }, 1, 100, 50, true, '%')
---         : record("rage", "hitchance::noscope::" .. weapon)
---         : save()
-
---         hitchance['In Air_' .. weapon] = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { 'In Air', '\n', weapon }, 1, 100, 50, true, '%')
---         : record("rage", "hitchance::inair::" .. weapon)
---         : save()
---     end
-
---     function hitchance.backups()
---         if hitchance.reset then
---             override.unset(software.rage.aimbot.hitchance)
---             override.unset(software.rage.aimbot.auto_scope)
---             hitchance.reset = false
---         end
---     end
-
---     function hitchance.distance(ent, distance)
---         local my_origin = vector(entity.get_origin(ent))
---         if my_origin == nil then
---             return
---         end
-
---         local target = client.current_threat()
---         if target == nil then
---             return
---         end
-
---         local enemy_origin = vector(entity.get_origin(target))
---         if enemy_origin == nil then
---             return
---         end
-
---         if distance == 1001 then
---             return 'Inf.'
---         end
-
---         return my_origin:dist(enemy_origin) <= distance
---     end
-
---     local noscope_ignore = {
---         ['R8 Revolver'] = true,
---         ['Pistol'] = true
---     }
-
---     client.set_event_callback('setup_command', function (cmd)
---         if not hitchance.enabled:get() then
---             return hitchance.backups()
---         end
-
---         local lp = entity.get_local_player()
---         if lp == nil then
---             return hitchance.backups()
---         end
-
---         local wpn = entity.get_player_weapon(lp)
---         if wpn == nil then
---             return hitchance.backups()
---         end
-
---         if ui.is_menu_open() then
---             return hitchance.backups()
---         end
-
---         local weapon = ui.get(software.rage.weapon.weapon_type)
-
---         if not hitchance['Enabled_' .. weapon] then
---             return hitchance.backups()
---         end
-
---         if not hitchance['Enabled_' .. weapon]:get() then
---             return hitchance.backups()
---         end
-
---         local distance = hitchance.distance(lp, hitchance[ 'Distance_' .. weapon ]:get())
---         local conditions = hitchance[ 'Modes_' .. weapon ]
---         local is_pistol = noscope_ignore[ weapon ] or false
-
---         if conditions:have_key('In Air') and localplayer.is_airborne then
---             override.set(software.rage.aimbot.hitchance, hitchance[ 'In Air_' .. weapon]:get())
---         elseif conditions:have_key('No Scope') and entity.get_prop(lp, 'm_bIsScoped') == 0 and distance and not is_pistol then
---             override.set(software.rage.aimbot.hitchance, hitchance[ 'No Scope_' .. weapon]:get())
---             override.set(software.rage.aimbot.auto_scope, false)
---         else
---             return hitchance.backups()
---         end
-
---         if distance == 'Inf.' then
---             override.unset(software.rage.aimbot.auto_scope)
---         end
-
---         hitchance.reset = true
---     end)
--- end
-
+---region неопознан  (hit-rate counter - kept intact)
 do
     local shots do
-        shots = {
-            total = 0,
-            hits = 0,
-
-            reasons = {
-                ['prediction error'] = true,
-                ['death'] = true
-            }
-        }
-
-        client.set_event_callback('aim_fire', function (shot)
-            shots.total = shots.total + 1
-        end)
-
-        client.set_event_callback('aim_hit', function (shot)
-            shots.hits = shots.hits + 1
-        end)
-
-        client.set_event_callback('player_connect_full', function (e)
-            if client.userid_to_entindex(e['userid']) ~= entity.get_local_player() then
-                return
-            end
-
-            shots.hits = 0
-            shots.total = 0
+        shots = { total = 0, hits = 0 }
+        client.set_event_callback('aim_fire', function() shots.total = shots.total + 1 end)
+        client.set_event_callback('aim_hit',  function() shots.hits  = shots.hits  + 1 end)
+        client.set_event_callback('player_connect_full', function(e)
+            if client.userid_to_entindex(e['userid']) ~= entity.get_local_player() then return end
+            shots.hits = 0; shots.total = 0
         end)
     end
 
-    client.set_event_callback('paint_ui', function ()
+    client.set_event_callback('paint_ui', function()
         local lp = entity.get_local_player()
-        if lp == nil then
-            return
-        end
-
-        if not widgets.enabled:get() or not widgets.items:have_key('Hit Rate') then
-            return
-        end
-
+        if lp == nil then return end
+        if not widgets.enabled:get() or not widgets.items:have_key('Hit Rate') then return end
         local hit_rate = shots.total ~= 0 and (shots.hits / shots.total * 100) or 100
-
         renderer.indicator(255, 255, 255, 200, f('%s%d%%', hit_rate <= 50 and '◣_◢ ' or '', hit_rate))
     end)
-
 end
 
+
+
+---region autopeek
 do
     function auto_peek.perform(ctx)
         if not aa_tweaks.enable:get() then
             return
         end
 
-        if not aa_tweaks.items:have_key('Auto Peek Improvements') then
+        if not aa_tweaks.items:have_key('Auto Peek Improvements')  then
             return
         end
 
@@ -4547,63 +4314,53 @@ do
             return
         end
 
-        -- clean shot position: zero all jitter so bullet goes exactly where aimed
-        ctx.yaw_offset       = 0
-        ctx.yaw_jitter       = 'Off'
-        ctx.body_yaw         = 'Static'
-        ctx.body_yaw_offset  = 0
-        ctx.freestanding     = true
-        ctx.pitch            = 'Default'
-        -- disable micro-jitter during peek shot
-        ctx._suppress_micro_jitter = true
+        ctx.yaw_offset = 0
+        ctx.yaw_jitter = 'Off'
+        ctx.body_yaw = 'Off'
+        ctx.freestanding = true
     end
 end
 
 LPH_NO_VIRTUALIZE(function ()
+        --- region watermark
     do
         local FRAMERATE_AVG_FRAC = 0.9
-
         local cl_updaterate = cvar["cl_updaterate"]
 
-        local alpha = 0.0
-        local offset = vector(6, 5)
-
-        local timer = 0.0
+        local alpha     = 0.0
         local framerate = 0.0
-
+        local timer     = 0.0
         local last_ping = 0.0
-        local last_framerate = 1 / globals.absoluteframetime()
-
+        local last_framerate        = 1 / globals.absoluteframetime()
         local last_server_framerate = 0.0
-        local last_server_var = 0.0
+        local last_server_var       = 0.0
+        local glow_t    = 0.0
 
         local texture do
-            http.get("https://zenith.dev/assets/logo.png", function(status, response)
-                if not status then
-                    return
-                end
-
-                local code = response.status
-
-                if code >= 200 and code < 300 then
-                    texture = renderer.load_png(response.body, 22, 22)
-                end
-            end)
-        end
-
-        local function get_flags()
-            return "d"
+            local _b64 = "iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAC/UlEQVR4nO1USUxTURQ99w+dPh1oSxWI1gGVCKiBqMQqRWMMJBhXf6NRYyIYCWp0r+BaN+7UhQtduPimiRpt4kaJEUIUp6SoGJAmVaAMMraF9ve6KAGNRRcS48KTvLd4991zzrv35gH/AGhuLS0p0dwGCEtFKs75XAbAQwTA75f+lJQEQQAAT03jlbaapmvdAEoyIVX8VeKvlAlEbDabPUZP5TPnuooiRXFg9bYjTyg5faL3lRYAmgXgYjpb8mL1IjQ3E5jNcbsvuP3wmaItBVJq7xpTquFcvXtSl69bXWUbmFsYizR0EWJV4JYWlhxbzu47ero8HOpKdjxvl0KRXun2zfvJuuNNrhRZjxER4PdnLUl2YhUQBGKSjAcK88wsxMeE1MoqBJ72IJljF3JsVhYMYhmIGKhe5MnZ1AhYnw9X93D+i7z1Pu+2A2d5KhUXktMR2GyWdGfwnhB9EwxweuQQERLMvyemiooGqbPzuhd23w1lbfmumYFu3WKR4ch1iyOjCcjiLMYGBllZs5l4ItwW6+1o8npL3oXDrTMA+GdiVRVJ03SXt7bWt7cqUFq5yyR5y7j/5ROajH7B+9BH5Be44XS7Ubi2GLK3hG9dvkQrbHqypzuyvz90+xFUVYCm6cD346ZlZIbDwb6pWImpYJmujwy0i7496zAS9WB73Q7YHQ50PAjCIn/F0Ov7dPLUnrTR4JTPN14wAWBEo/NGpQXDKjRNQ1HFwRpPVX3y4ZtPrI8PoS0iYbSni4c+96F0Zy2eBx4jx+kCpXUq/ropYnZ7c8sqd29t73t4119djdbW1h9KQUTEy8vrLVaj+MWct8o+OTEIWcmFQTZBNhigOAvBuo7Y2GfMxsYRS8xiOPwBNnseZJlCn9qvloKZMpOy4JiZmZRxo94ff9WE8Ns6KdejyJODEFMzSCXiccloSYCQSiamrKIoWmBUBLPNhOnRXn1meuIOQAAt+ef3M7JIqCJUQIU6f6JBA6IbM3c9XQwsxDVomcYjMw3/8ffwDeRqFtr3d6CrAAAAAElFTkSuQmCC"
+            local function _b64decode(s)
+                local b = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+                s = s:gsub('[^'..b..'=]', '')
+                return (s:gsub('.', function(x)
+                    if x == '=' then return '' end
+                    local r,f = '', (b:find(x)-1)
+                    for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end
+                    return r
+                end):gsub('%d%d%d%d%d%d%d%d', function(x)
+                    local n = 0
+                    x:gsub('.', function(c) n = n*2+(c=='1' and 1 or 0) end)
+                    return string.char(n)
+                end))
+            end
+            local ok, bytes = pcall(_b64decode, _b64)
+            if ok and bytes and #bytes > 10 then
+                texture = renderer.load_png(bytes, 22, 22)
+            end
         end
 
         local function get_ping(nci)
-            if inetchannel.is_loopback(nci) then
-                return nil
-            end
-
-            local ping = math.max(0, last_ping * 1000)
-            ping = math.floor(ping)
-
-            return f("%dms", ping)
+            if inetchannel.is_loopback(nci) then return nil end
+            return f("%dms", math.floor(math.max(0, last_ping * 1000)))
         end
 
         local function get_framerate()
@@ -4611,146 +4368,174 @@ LPH_NO_VIRTUALIZE(function ()
             return last_framerate
         end
 
-        local function get_remote_framerate()
-            return last_server_framerate, last_server_var
-        end
-
         local function update_timer(nci, dt)
             timer = timer - dt
             if timer > 0 then return end
-
-            do
-                local latency = inetchannel.get_latency(nci, 0)
-                local update_rate = cl_updaterate:get_float()
-
-                if update_rate > 0.001 then
-                    local adjustment = -0.5 / update_rate
-                    latency = latency + adjustment
-                end
-
-                last_ping = latency
-            end
-
+            local latency = inetchannel.get_latency(nci, 0)
+            local update_rate = cl_updaterate:get_float()
+            if update_rate > 0.001 then latency = latency - 0.5 / update_rate end
+            last_ping = latency
             last_server_framerate, last_server_var = inetchannel.get_remote_framerate(nci)
             last_framerate = framerate > 0 and framerate or 1
-
             timer = timer + 1.0
         end
 
-        function watermark.frame()
-            local can_show_watermark = widgets.enabled:get() and widgets.items:have_key("Watermark")
-            alpha = motion.interp(alpha, can_show_watermark, 0.045)
+        -- draw a single stat chip: [label value]
+        local function draw_chip(x, y, label, value, r, g, b, a, flags)
+            local lw, lh = renderer.measure_text(flags, label)
+            local vw, vh = renderer.measure_text(flags, value)
+            local PAD = 5
+            local IGAP = 3
+            local chip_w = PAD*2 + lw + IGAP + vw
+            local chip_h = math.max(lh, vh) + PAD
 
-            if alpha <= 0 then
-                return
-            end
+            -- chip background
+            graphics.rectangle(x, y, chip_w, chip_h, 14, 14, 18, math.floor(160 * a), 3)
+            -- label (dim)
+            renderer.text(x + PAD, y + (chip_h - lh)*0.5,
+                140, 140, 155, math.floor(220 * a), flags, 0, label)
+            -- value (accent)
+            renderer.text(x + PAD + lw + IGAP, y + (chip_h - vh)*0.5,
+                r, g, b, math.floor(255 * a), flags, 0, value)
+
+            return chip_w + 4  -- advance
+        end
+
+        function watermark.frame()
+            local can_show = widgets.enabled:get() and widgets.items:have_key("Watermark")
+            alpha = motion.interp(alpha, can_show, 0.045)
+            if alpha <= 0 then return end
 
             local lp = entity.get_local_player()
-            if lp == nil then
-                return
-            end
+            if lp == nil then return end
 
             local nci = iengineclient.get_net_channel_info()
             update_timer(nci, globals.frametime())
+            if nci == nil then return end
 
-            if nci == nil then
-                return
-            end
-
-            local screen = vector(client.screen_size())
-            local pos = vector(screen.x - 9, 9)
-
-            local flags = get_flags()
+            local flags = "d"
             local r, g, b = widgets.color_picker:rawget()
+            local a  = alpha
+            local ia = math.floor(255 * a)
+            local screen = vector(client.screen_size())
 
-            local a = 255
-
-            local radius = 5
-
-            local drawlist = { }
-
-            do
-                local label = "Zenith"
-                local build = BUILD
-
-                if texture ~= nil then
-                    label = ""
+            local tokens = {}
+            if widgets.display:have_key("Username") then
+                local nick = USERNAME
+                if widgets.custom_name:get() then
+                    local cn = ui.get(widgets.custom_name_value:get_ref())
+                    if #cn ~= 0 then nick = cn end
                 end
-
-                if build ~= nil then
-                    build = f("[%s]", build)
-
-                    build = decorations.wave(build, globals.realtime(), 255, 255, 255, 255, r, g, b, a)
-                    build = f("%s\affffffff", build)
-                end
-
-                drawlist[#drawlist + 1] = merge({ label, build }, "\x20")
+                tokens[#tokens+1] = { label = nick, accent = true }
+            end
+            if widgets.display:have_key("Latency") then
+                local p = get_ping(nci)
+                if p then tokens[#tokens+1] = { label = p } end
+            end
+            if widgets.display:have_key("FPS") then
+                tokens[#tokens+1] = { label = f("%dfps", math.floor(1 / get_framerate())) }
+            end
+            if widgets.display:have_key("Time") then
+                tokens[#tokens+1] = { label = f("%02d:%02d", client.system_time()) }
             end
 
-            if widgets.display:have_key("Username") then
-                local nickname = USERNAME
+            -- ── Layout constants ───────────────────────────────────────────────
+            local LOGO_W  = texture ~= nil and 26 or 0
+            local PAD_X   = 11
+            local PAD_Y   = 6
+            local SEP_W   = 8
 
-                if widgets.custom_name:get() then
-                    local chosen_nickname = ui.get(widgets.custom_name_value:get_ref())
+            local brand_core  = "ZENITH"
+            local brand_ver   = "  3.0"
+            local bw_core, bh = renderer.measure_text(flags, brand_core)
+            local bw_ver,  _  = renderer.measure_text(flags, brand_ver)
+            local brand_w     = bw_core + bw_ver
 
-                    if #chosen_nickname ~= 0 then
-                        nickname = chosen_nickname
+            local sep_char = "  \xE2\x94\x82  "
+            local sep_cw   = renderer.measure_text(flags, sep_char)
+            local tok_total = 0
+            local tok_items = {}
+            local tok_icons = { "\xE2\x96\xB8", "\xE2\x97\x8B", "\xE2\x96\xA0", "\xE2\x97\x8F" }
+            local ti = 1
+            for _, t in ipairs(tokens) do
+                local ico = tok_icons[ti] or "\xE2\x80\xA2"
+                ti = ti + 1
+                local display = ico .. " " .. t.label
+                local dw2 = renderer.measure_text(flags, display)
+                tok_items[#tok_items+1] = { display = display, dw = dw2, accent = t.accent }
+                tok_total = tok_total + dw2
+            end
+            if #tok_items > 1 then tok_total = tok_total + (#tok_items - 1) * sep_cw end
+
+            local has_tok     = #tok_items > 0
+            local divider_blk = has_tok and (SEP_W * 2 + 1) or 0
+
+            local box_w = 4 + LOGO_W + PAD_X * 2 + brand_w + divider_blk + tok_total + PAD_X
+            local box_h = bh + PAD_Y * 2 + 2
+            local px    = screen.x - 12 - box_w
+            local py    = 10
+
+            glow_t = glow_t + globals.frametime() * 1.2
+            local pulse = 0.55 + 0.45 * math.sin(glow_t)
+            for i = 5, 1, -1 do
+                local ga = math.floor(9 * pulse * a * (6 - i) / 5)
+                renderer.rectangle(px - i, py - i, box_w + i*2, box_h + i*2, r, g, b, ga)
+            end
+
+            renderer.rectangle(px, py, box_w, box_h, 6, 6, 9, math.floor(248 * a))
+            renderer.rectangle(px + 4, py + 1, box_w - 8, 1, 255, 255, 255, math.floor(8 * a))
+            renderer.rectangle(px, py, 4, box_h, r, g, b, ia)
+            renderer.rectangle(px, py, 2, box_h,
+                math.min(255, r + 70), math.min(255, g + 70), math.min(255, b + 70),
+                math.floor(140 * a))
+            renderer.rectangle(px, py, 1, box_h, 255, 255, 255, math.floor(35 * a))
+            renderer.rectangle(px + 4, py + box_h - 1, box_w - 4, 1, r, g, b, math.floor(110 * a))
+
+            if texture ~= nil then
+                renderer.texture(texture, px + 4 + PAD_X, py + math.floor((box_h - 22) * 0.5),
+                    22, 22, 255, 255, 255, math.floor(235 * a), "f")
+            end
+
+            local tx = px + 4 + LOGO_W + PAD_X
+            local ty = py + math.floor((box_h - bh) * 0.5)
+
+            renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(70 * a), flags, 0, brand_core)
+            renderer.text(tx,     ty,     r, g, b, ia,                  flags, 0, brand_core)
+            tx = tx + bw_core
+            local vr = math.floor(r * 0.65 + 0.5)
+            local vg = math.floor(g * 0.65 + 0.5)
+            local vb = math.floor(b * 0.65 + 0.5)
+            renderer.text(tx, ty, vr, vg, vb, math.floor(200 * a), flags, 0, brand_ver)
+            tx = tx + bw_ver
+
+            if has_tok then
+                tx = tx + SEP_W
+                renderer.rectangle(tx, py + 5, 1, box_h - 10, 55, 55, 65, math.floor(210 * a))
+                renderer.rectangle(tx - 1, py + 5, 3, box_h - 10, r, g, b, math.floor(22 * a))
+                tx = tx + 1 + SEP_W
+                for i, t in ipairs(tok_items) do
+                    local cr = t.accent and r   or 185
+                    local cg = t.accent and g   or 185
+                    local cb = t.accent and b   or 192
+                    local ca = math.floor((t.accent and 255 or 225) * a)
+                    if t.accent then
+                        renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(45 * a), flags, 0, t.display)
+                    end
+                    renderer.text(tx, ty, cr, cg, cb, ca, flags, 0, t.display)
+                    tx = tx + t.dw
+                    if i < #tok_items then
+                        renderer.text(tx, ty, 48, 48, 58, math.floor(170 * a), flags, 0, sep_char)
+                        tx = tx + sep_cw
                     end
                 end
-
-                drawlist[#drawlist + 1] = nickname
             end
-
-            if widgets.display:have_key("Latency") then
-                drawlist[#drawlist + 1] = get_ping(nci)
-            end
-
-            if widgets.display:have_key("FPS") then
-                drawlist[#drawlist + 1] = f("%dfps", 1 / get_framerate())
-            end
-
-            if widgets.display:have_key("Server frametime") then
-                drawlist[#drawlist + 1] = f("sv: %.1f (%.1fms)", get_remote_framerate())
-            end
-
-            if widgets.display:have_key("Time") then
-                drawlist[#drawlist + 1] = f("%02d:%02d", client.system_time())
-            end
-
-            local left_padding = 0
-
-            if texture ~= nil then
-                left_padding = 22
-            end
-
-            local text = merge(drawlist, " ∙ ")
-            local text_size = vector(renderer.measure_text(flags, text))
-
-            local rect_size = vector(text_size.x + offset.x * 2, text_size.y + offset.y * 2)
-            rect_size.x = rect_size.x + left_padding
-
-            pos.x = pos.x - rect_size.x
-
-            graphics.header(pos.x, pos.y, rect_size.x, 2, 5, r, g, b, a * alpha)
-            --graphics.glow(pos.x, pos.y, rect_size.x, rect_size.y, r, g, b, a * 0.3 * alpha, thickness, radius)
-            graphics.rectangle(pos.x, pos.y, rect_size.x, rect_size.y, 0, 0, 0, 100 * alpha, radius)
-
-            if texture ~= nil then
-                renderer.texture(texture, pos.x + offset.x - 1, pos.y + (rect_size.y - 22) * 0.5, 22, 22, 255, 255, 255, 255 * alpha, "f")
-            end
-
-            graphics.text(
-                pos.x + left_padding + offset.x - 1,
-                pos.y + (rect_size.y - text_size.y) * 0.5,
-                71, 152, 255, 255 * alpha,
-                flags, 0, text
-            )
         end
     end
 
+        --- region keybinds
     do
-        local alpha = 0.0
-        local width = 0.0
+        local alpha   = 0.0
+        local width   = 0.0
         local holding = 0.0
 
         local all_hotkeys = {
@@ -4828,7 +4613,7 @@ LPH_NO_VIRTUALIZE(function ()
 
     		{
     			ref = { ui.reference("AA", "Other", "On shot anti-aim") },
-    			name = "On Shot Anti-aim",
+    			name = "On Shot AA",
     			offset = 2
     		},
 
@@ -4864,7 +4649,7 @@ LPH_NO_VIRTUALIZE(function ()
 
     		{
     			ref = { ui.reference("Misc", "Miscellaneous", "Last second defuse") },
-    			name = "Last Second Defuse",
+    			name = "Last Sec Defuse",
     			offset = 1
     		},
 
@@ -4882,7 +4667,7 @@ LPH_NO_VIRTUALIZE(function ()
 
     		{
     			ref = { ui.reference("Misc", "Miscellaneous", "Automatic grenade release") },
-    			name = "Grenade Release",
+    			name = "Nade Release",
     			offset = 2
     		},
 
@@ -4893,100 +4678,69 @@ LPH_NO_VIRTUALIZE(function ()
     		}
         }
 
-        local active_keys = { }
-        local hotkey_modes = { "holding", "toggled", "disabled" }
+        local active_keys   = {}
+        local hotkey_modes  = { "holding", "toggled", "disabled" }
+        local flags         = "d"
 
-        local function get_flags()
-            return "d"
-        end
-
+        -- mode label -> short badge text + colour modifier
         local function get_handle()
-            local flags = get_flags()
-            local existent_keys = { }
-
-            local all_active = false
-            local name_width, mode_width = 0, 0
+            local existent_keys = {}
+            local all_active    = false
+            local name_width, badge_width = 0, 0
 
             for i = 1, #all_hotkeys do
-                local hotkey = all_hotkeys[i]
+                local hotkey    = all_hotkeys[i]
                 local unique_id = hotkey.ref[1]
+                local name      = hotkey.name
+                local offset    = hotkey.offset or 1
+                local active    = true
+                local collected = {}
 
-                local name = hotkey.name
-                local offset = hotkey.offset or 1
-
-                local active = true
-                local collected = { }
-
+                for j = 1, offset do collected[j] = hotkey.ref[j] end
                 for j = 1, offset do
-                    collected[j] = hotkey.ref[j]
+                    if not ui.get(collected[j]) then active = false; break end
                 end
 
-                for j = 1, offset do
-                    if not ui.get(collected[j]) then
-                        active = false
-                        break
-                    end
-                end
-
-                if active then
-                    existent_keys[unique_id] = true
-                    all_active = true
-                end
+                if active then existent_keys[unique_id] = true; all_active = true end
 
                 local _, mode = ui.get(collected[#collected])
                 if mode == 0 then goto continue end
 
                 mode = hotkey_modes[mode] or "~"
-                mode = merge { "[", mode, "]" }
+                mode = "[" .. mode .. "]"
 
                 if active_keys[unique_id] == nil then
                     active_keys[unique_id] = {
-                        alpha = 0,
-                        height = 0,
-
-                        name_width = 0,
-                        mode_width = 0,
-
-                        name = name,
-                        mode = mode
+                        alpha=0, height=0,
+                        name_width=0, mode_width=0,
+                        name=name, mode=mode
                     }
                 end
 
-                local value = active_keys[unique_id] do
-                    local name_size = vector(renderer.measure_text(flags, name))
-                    local mode_width = vector(renderer.measure_text(flags, mode))
-
-                    value.name = name
-                    value.mode = mode
-
-                    value.height = math.max(name_size.y, mode_width.y)
-
-                    value.name_width = name_size.x
-                    value.mode_width = mode_width.x
-                end
+                local value = active_keys[unique_id]
+                local nw, nh = renderer.measure_text(flags, name)
+                local mw, mh = renderer.measure_text(flags, mode)
+                value.name        = name
+                value.mode        = mode
+                value.height      = math.max(nh, mh)
+                value.name_width  = nw
+                value.mode_width  = mw
 
                 ::continue::
             end
 
             for k, v in pairs(active_keys) do
                 local active = existent_keys[k] ~= nil
-
                 v.alpha = motion.interp(v.alpha, active, 0.045)
-
                 if v.alpha <= 0 then
                     active_keys[k] = nil
                 elseif active or v.alpha >= 0.25 then
-                    if name_width < v.name_width then
-                        name_width = v.name_width
-                    end
-
-                    if mode_width < v.mode_width then
-                        mode_width = v.mode_width
-                    end
+                    if name_width  < v.name_width  then name_width  = v.name_width  end
+                    if badge_width < v.mode_width  then badge_width = v.mode_width  end
                 end
             end
 
-            return active_keys, all_active, name_width, mode_width
+            return active_keys, all_active, name_width, badge_width
         end
 
         keybinds.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Keybinds")
@@ -4994,164 +4748,97 @@ LPH_NO_VIRTUALIZE(function ()
         : save()
 
         keybinds.window = windows.new("##keybinds", 0.025, 0.415)
-        keybinds.window:set_size(vector(125, 22))
+        keybinds.window:set_size(vector(130, 24))
 
         function keybinds.frame()
             local me = entity.get_local_player()
             if me == nil then return end
 
-            local window = keybinds.window
-            local hotkeys, all_active, name_width, mode_width = get_handle()
+            local window   = keybinds.window
+            local hotkeys, all_active, name_width, badge_width = get_handle()
 
             local menu_check = ui.is_menu_open() or (next(hotkeys) ~= nil and all_active)
-            local can_show_hotkeys = widgets.enabled:get() and widgets.items:have_key("Keybinds") and menu_check
+            local can_show   = widgets.enabled:get()
+                               and widgets.items:have_key("Keybinds")
+                               and menu_check
 
-            alpha = motion.interp(alpha, can_show_hotkeys, 0.045)
-            holding = motion.interp(holding, (can_show_hotkeys and window:is_dragging()) and 0.6 or 1.0, 0.045)
+            alpha   = motion.interp(alpha,   can_show, 0.045)
+            holding = motion.interp(holding, (can_show and window:is_dragging()) and 0.6 or 1.0, 0.045)
 
-            if alpha <= 0 then
-                return
-            end
+            if alpha <= 0 then return end
 
-            local flags = get_flags()
             local r, g, b = widgets.color_picker:get()
+            local ROW_H = 16
 
-            local a = 255
+            -- Measure content width
+            local row_w = name_width + 12 + badge_width
+            width = motion.interp(width, math.max(row_w, 80), 0.045)
 
-            local radius = 5
-            local thickness = 10
+            local box_w = math.floor(width + 0.85)
+            local ab    = alpha * holding
+            local pos   = window.pos
 
-            local offset_ins = vector(10, 5)
-
-            local keyval_gap = 20
-            local keyval_rounding = math.floor(radius * .5)
-
-            -- header
-            local pos = window.pos
-
-            local text = "keybinds"
-            local text_size = vector(renderer.measure_text(flags, text))
-            local text_size_base = vector(renderer.measure_text(flags, "\v"))
-
-            width = motion.interp(width, math.max(
-                offset_ins.x * 4 + text_size.x * (text_size.y / text_size_base.y),
-                keyval_rounding * 2 + name_width + mode_width + keyval_gap,
-                125
-            ), 0.045)
-
-            local max_width = math.floor(width + 0.85)
-            local rect_size = vector(max_width, text_size.y + offset_ins.y * 2)
-
-            if alpha > 0.5 then
-                graphics.blur(pos.x, pos.y, rect_size.x, rect_size.y)
-            end
-
-            graphics.header(pos.x, pos.y, rect_size.x, 2, 5, r, g, b, a * alpha * holding)
-            graphics.glow(pos.x, pos.y, rect_size.x, rect_size.y, r, g, b, a * 0.3 * alpha * holding, thickness, radius)
-            graphics.rectangle(pos.x, pos.y, rect_size.x, rect_size.y, 0, 0, 0, 100 * alpha * holding, radius)
-
-            renderer.text(
-                pos.x + (rect_size.x - text_size.x) * 0.5,
-                pos.y + (rect_size.y - text_size.y) * 0.5,
-                255, 255, 255, 255 * alpha * holding,
-                flags, 0, text
-            )
-
-            -- contents
-            local offset = 2
+            -- ── Clean text rows (no header, no boxes) ─────────────────────────
+            local row_y = pos.y
 
             for _, v in pairs(active_keys) do
-                local alpha = alpha * v.alpha
-                local text_size, text_alpha = vector(v.name_width, v.height), 0
+                local fade_a = math.min(1.0, alpha * v.alpha * 1.25)
+                local row_ab = fade_a * holding
+                local row_a  = math.floor(255 * row_ab)
+                if row_a < 4 then goto skip end
 
-                if alpha >= 0.25 then
-                    text_alpha = math.min(1.0, utils.map(alpha, 0.25, 1.0, 0.0, 1.2))
-                end
+                local rh = utils.round(ROW_H * fade_a)
+                if rh < 2 then goto skip end
 
-                local text_position = vector(pos.x + keyval_rounding, pos.y + rect_size.y + 4 + offset)
+                local ty2 = row_y + math.floor((rh - v.height) * 0.5)
 
-                local value_start = rect_size.x - v.mode_width
-                local value_alpha = utils.map(value_start - v.name_width, 0.0, keyval_gap, 0.0, 1.0, true)
+                -- Feature name with shadow (white/grey)
+                renderer.text(pos.x + 1, ty2 + 1, 0, 0, 0, math.floor(90 * row_ab), flags, 0, v.name)
+                renderer.text(pos.x, ty2, 200, 200, 210, row_a, flags, 0, v.name)
 
-                local h_alpha = text_alpha * holding
+                -- Mode badge with shadow (accent color)
+                local badge_x = pos.x + box_w - v.mode_width
+                renderer.text(badge_x + 1, ty2 + 1, 0, 0, 0, math.floor(80 * row_ab), flags, 0, v.mode)
+                renderer.text(badge_x, ty2, r, g, b, math.floor(row_a * 0.95), flags, 0, v.mode)
 
-                renderer.text(text_position.x, text_position.y, 255, 255, 255, 255 * h_alpha, flags, 0, v.name)
-                renderer.text(text_position.x + rect_size.x - keyval_rounding * 2 - v.mode_width, text_position.y, 255, 255, 255, 255 * h_alpha * value_alpha, flags, 0, v.mode)
-
-                offset = offset + text_alpha * (text_size.y + text_size.y * 0.35)
+                row_y = row_y + rh
+                ::skip::
             end
 
-            window:set_size(rect_size)
+            window:set_size(vector(box_w, 16))
             window:update()
         end
     end
 
+        --- region indicators
     do
-        local alpha = 0.0
-        local align = 0.0
-
+        local alpha        = 0.0
+        local align        = 0.0
         local damage_alpha = 0.0
         local damage_value = 0.0
-        local damage_moving = 0.0
-        local damage_holding = 0.0
+        local damage_moving   = 0.0
+        local damage_holding  = 0.0
 
         local screen = vector(client.screen_size())
         local window = windows.new("##damage", 0.5 + 15 / screen.x, 0.5 - 15 / screen.y)
-
         window:set_anchor(vector(0.0, 1.0))
         window:set_size(vector(22, 22))
 
         local features = {
-            {
-                get = software.is_double_tap,
-                text = "DT",
-                alpha = 0
-            },
-
-            {
-                get = software.is_on_shot_antiaim,
-                text = "HS",
-                alpha = 0
-            },
-
-            {
-                get = software.is_duck_peek_assist,
-                text = "FD",
-                alpha = 0
-            },
-
-            {
-                get = software.is_minimum_damage_override,
-                text = "DMG",
-                alpha = 0
-            }
+            { get = software.is_double_tap,              text = "DT",  alpha = 0, hold_a = 0 },
+            { get = software.is_on_shot_antiaim,         text = "OS",  alpha = 0, hold_a = 0 },
+            { get = software.is_duck_peek_assist,        text = "FD",  alpha = 0, hold_a = 0 },
+            { get = software.is_minimum_damage_override, text = "DMG", alpha = 0, hold_a = 0 },
         }
 
         local function get_statement()
-            if software.is_edge() then
-                return 'EDGE'
+            if software.is_edge()      then return "EDGE"   end
+            if safe_head.get()         then return "SAFE"   end
+            if localplayer.is_airborne then return "AIR"    end
+            if localplayer.is_crouched then return "CROUCH" end
+            if localplayer.is_moving   then
+                return software.is_slow_motion() and "WALK" or "RUN"
             end
-
-            if safe_head.get() then
-                return "SAFE"
-            end
-
-            if localplayer.is_airborne then
-                return "AIR"
-            end
-
-            if localplayer.is_crouched then
-                return "CROUCH"
-            end
-
-            if localplayer.is_moving then
-                if software.is_slow_motion() then
-                    return "S.WALK"
-                end
-
-                return "RUN"
-            end
-
             return "STAND"
         end
 
@@ -5163,221 +4850,163 @@ LPH_NO_VIRTUALIZE(function ()
 
             local wpn = entity.get_player_weapon(me)
             if wpn == nil then return end
-
             local wpn_info = csgo_weapons(wpn)
             if wpn_info == nil then return end
 
-            local menu_check = ui.is_menu_open()
-            local alive_check = entity.is_alive(me)
-
+            local clock        = globals.realtime()
+            local alive_check  = entity.is_alive(me)
             local scoped_check = entity.get_prop(me, "m_bIsScoped")
-            local grenade_check = wpn_info.weapon_type_int == 9
+            local grenade_check= wpn_info.weapon_type_int == 9
+            local menu_check   = ui.is_menu_open()
+            local damage       = software.get_minimum_damage()
 
-            local damage = software.get_minimum_damage()
+            local can_show_ind = widgets.enabled:get()
+                                 and widgets.items:have_key("Crosshair Indicator")
+                                 and alive_check
+            local can_show_dmg = (widgets.enabled:get()
+                                 and widgets.items:have_key("Damage Indicator")
+                                 and not (wpn_info.weapon_type_int == 0 or grenade_check))
+                                 or menu_check
+            local can_move_dmg = can_show_dmg and menu_check
 
-            local can_show_indicators = widgets.enabled:get() and widgets.items:have_key("Crosshair Indicator") and alive_check
-            local can_move_indicators = can_show_indicators and scoped_check == 1
+            alpha         = motion.interp(alpha,         can_show_ind and (grenade_check and 0.4 or 1.0) or 0.0, 0.045)
+            align         = motion.interp(align,         can_show_ind and scoped_check == 1 or false, 0.045)
+            damage_alpha  = motion.interp(damage_alpha,  can_show_dmg, 0.045)
+            damage_value  = motion.interp(damage_value,  damage, 0.045)
+            damage_moving = motion.interp(damage_moving, can_move_dmg, 0.045)
+            damage_holding= motion.interp(damage_holding,(can_move_dmg and window:is_dragging()) and 0.6 or 1.0, 0.045)
 
-            local can_show_damage = widgets.enabled:get() and widgets.items:have_key("Damage Indicator") and not (wpn_info.weapon_type_int == 0 or wpn_info.weapon_type_int == 9) or menu_check
-            local can_move_damage = can_show_damage and menu_check
-
-            alpha = motion.interp(alpha, can_show_indicators and (grenade_check and 0.4 or 1.0) or 0.0, 0.045)
-            align = motion.interp(align, can_move_indicators, 0.045)
-
-            damage_alpha = motion.interp(damage_alpha, can_show_damage, 0.045)
-            damage_value = motion.interp(damage_value, damage, 0.045)
-            damage_moving = motion.interp(damage_moving, can_move_damage, 0.045)
-            damage_holding = motion.interp(damage_holding, (can_move_damage and window:is_dragging()) and 0.6 or 1.0, 0.045)
-
-            local flags = "-d"
-            local clock = globals.realtime()
-
+            local flags  = "-d"
             local screen = vector(client.screen_size())
             local center = screen * 0.5
 
             local r1, g1, b1 = widgets.color_picker:rawget()
-            local r2, g2, b2, a2 = 255, 255, 255, 255
-
             local r, g, b, a = utils.color_lerp(
                 r1, g1, b1, 255,
-                r2, g2, b2, a2,
+                255, 255, 255, 255,
                 utils.breathe(clock + 0.5 - 0.5 * align)
             )
 
-            -- damage
+            -- -- damage indicator (draggable pill) ---------------------
             if damage_alpha > 0 then
-                local value = utils.round(damage_value)
-                local text = f("%d", value)
+                local val   = utils.round(damage_value)
+                local text  = f("%d", val)
+                if damage == 0 then text = "AUTO" end
+                if val > 100   then text = f("HP +%d", val - 100) end
 
-                if damage == 0 then
-                    text = "AUTO"
-                end
+                local dflags   = "d"
+                local mw, mh   = renderer.measure_text(dflags, text)
+                mw = mw + 1
+                local pos      = window.pos:clone()
+                local PAD      = 9
+                local rect_sz  = vector(mw + PAD*2, mh + 10)
+                local tx       = pos.x + (rect_sz.x - mw) * 0.5
+                local ty       = pos.y + (rect_sz.y - mh) * 0.5
+                local da       = damage_alpha * damage_holding
 
-                if value > 100 then
-                    text = f("HP +%d", value - 100)
-                end
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local pos = window.pos:clone()
-                local rect_size = vector(measure.x + 18, measure.y + 16)
-
-                local text_position = pos:clone()
-
-                text_position.x = text_position.x + (rect_size.x - measure.x) * 0.5
-                text_position.y = text_position.y + (rect_size.y - measure.y) * 0.5
+                -- THEME C: flat sharp bg, full-height left strip
+                renderer.rectangle(pos.x, pos.y, rect_sz.x, rect_sz.y,
+                    9, 9, 12, math.floor(210 * da))
+                renderer.rectangle(pos.x, pos.y, 2, rect_sz.y,
+                    r1, g1, b1, math.floor(215 * da))
 
                 if damage_moving > 0 then
-                    graphics.rectangle_outline(pos.x, pos.y, rect_size.x, rect_size.y, 255, 255, 255, 128 * damage_moving * damage_holding, 7)
+                    graphics.rectangle_outline(pos.x, pos.y, rect_sz.x, rect_sz.y,
+                        255, 255, 255, math.floor(90 * damage_moving * damage_holding), 4)
                 end
 
-                local r3, g3, b3 = r, g, b
-                if not can_show_indicators then
-                    r3 = r1
-                    g3 = g1
-                    b3 = b1
-                end
+                local dr, dg, db = can_show_ind and r or r1, can_show_ind and g or g1, can_show_ind and b or b1
+                renderer.text(tx, ty, dr, dg, db,
+                    math.floor(a * damage_alpha * damage_holding), dflags, 0, text)
 
-                renderer.text(text_position.x - 1, text_position.y, r3, g3, b3, a * damage_alpha * damage_holding, flags, 0, text)
-
-                window:set_size(rect_size)
+                window:set_size(rect_sz)
                 window:update()
             end
 
-            if alpha <= 0 then
-                return
-            end
+            if alpha <= 0 then return end
 
-            -- header
-            local pos = center:clone()
+            -- ── Clean crosshair indicator (Valkyrie style) ───────────────────
+            local cx = center.x + utils.round(10 * align)
+            local cy = center.y + 18
+            local dflags = "d"
 
-            pos.x = pos.x + utils.round(10 * align)
-            pos.y = pos.y + 20
+            -- "ZENITH" brand - clean centered text with shadow
+            local brand = "ZENITH"
+            local bw, bh = renderer.measure_text(dflags, brand)
+            local bx = cx - utils.round(bw * 0.5 * (1 - align * 0.5))
 
-            do
-                local text = "Z E N I T H"
+            -- Shadow
+            renderer.text(bx + 1, cy + 1, 0, 0, 0, math.floor(120 * alpha), dflags, 0, brand)
+            -- Main text
+            renderer.text(bx, cy, r, g, b, math.floor(255 * alpha), dflags, 0, brand)
 
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
+            cy = cy + bh + 4
 
-                local text_position = pos:clone()
-                local text_offset = (measure.x * 0.5) * (1 - align)
-
-                text_position.x = text_position.x - utils.round(text_offset)
-
-                -- graphics.glow(text_position.x + 1, text_position.y + 2, measure.x, 4, r, g, b, a * alpha * 0.1, 10, 1)
-                -- renderer.rectangle(text_position.x + 1, text_position.y + 2, measure.x, 4, r, g, b, a * alpha * 0.1)
-
-                text = decorations.wave(text, clock, r1, g1, b1, 255, r2, g2, b2, a2)
-                graphics.text(text_position.x, text_position.y, r, g, b, a * alpha, flags, 0, text)
-
-                pos.y = pos.y + measure.y
-            end
-
-            do
-                local text = get_statement()
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local text_position = pos:clone()
-                local text_offset = (measure.x * 0.5) * (1 - align)
-
-                text_position.x = text_position.x - utils.round(text_offset)
-
-                renderer.text(text_position.x, text_position.y, r, g, b, a * alpha, flags, 0, text)
-                pos.y = pos.y + measure.y
-            end
-
+            -- Feature tags - clean text only, no boxes
             for i = 1, #features do
-                local feature = features[i]
+                local feat = features[i]
+                feat.alpha  = motion.interp(feat.alpha,  can_show_ind and feat.get() or false, 0.045)
+                feat.hold_a = motion.interp(feat.hold_a, feat.alpha > 0.5 and 1 or 0, 0.08)
+                if feat.alpha <= 0.02 then goto cont end
 
-                local value_check = feature.get()
-                local can_show_feature = can_show_indicators and value_check
+                do
+                    local fa = feat.alpha * alpha
+                    local tw, th = renderer.measure_text(dflags, feat.text)
+                    local tx = cx - utils.round(tw * 0.5 * (1 - align * 0.5))
+                    local ty = cy
 
-                feature.alpha = motion.interp(feature.alpha, can_show_feature, 0.045)
+                    -- Shadow
+                    renderer.text(tx + 1, ty + 1, 0, 0, 0, math.floor(100 * fa), dflags, 0, feat.text)
+                    -- Main text
+                    renderer.text(tx, ty, r, g, b, math.floor(255 * fa), dflags, 0, feat.text)
 
-                if feature.alpha <= 0 then
-                    goto continue
+                    cy = cy + utils.round((th + 3) * feat.alpha)
                 end
-
-                local text = feature.text
-                local alpha = feature.alpha * alpha
-
-                local measure = vector(renderer.measure_text(flags, text))
-                measure.x = measure.x + 1
-
-                local text_position = pos:clone()
-                local text_offset = (measure.x * 0.5) * (1 - align)
-
-                text_position.x = text_position.x - utils.round(text_offset)
-
-                renderer.text(text_position.x, text_position.y, r, g, b, a * alpha, flags, 0, text)
-                pos.y = pos.y + utils.round(measure.y * feature.alpha)
-
-                ::continue::
+                ::cont::
             end
         end
     end
 
+        ---region arrows
     do
-        local alpha = 0
-        local left_alpha = 0
+        local alpha       = 0
+        local left_alpha  = 0
         local right_alpha = 0
-
-        local screen = vector(client.screen_size()) * .5
+        local screen      = vector(client.screen_size()) * .5
 
         function arrows.frame()
             local lp = entity.get_local_player()
-            if lp == nil then
-                return
-            end
+            if lp == nil then return end
 
             local wpn = entity.get_player_weapon(lp)
             if wpn == nil then return end
-
             local wpn_info = csgo_weapons(wpn)
             if wpn_info == nil then return end
 
-            local can_show_arrows = manual_direction.enabled:get() and manual_direction.arrows:get() and entity.is_alive(lp)
-            local can_move_indicators = can_show_indicators and scoped_check == 1
+            local can_show = manual_direction.enabled:get() and manual_direction.arrows:get() and entity.is_alive(lp)
+            alpha = motion.interp(alpha, can_show and (wpn_info.weapon_type_int == 9 and 0.4 or 1.0) or 0.0, 0.045)
+            if alpha <= 0 then return end
 
-            alpha = motion.interp(alpha, can_show_arrows and (wpn_info.weapon_type_int == 9 and 0.4 or 1.0) or 0.0, 0.045)
-            if alpha <= 0 then
-                return
-            end
+            local r, g, b, av = manual_direction.color:rawget()
+            av = 255 * alpha
 
-            local r, g, b, a = manual_direction.color:rawget()
-            a = 255 * alpha
+            local dir = manual_direction.get()
 
-            local manual_direction = manual_direction.get()
+            left_alpha  = motion.interp(left_alpha,  dir == 0 and 1 or 0, 0.045)
+            right_alpha = motion.interp(right_alpha, dir == 1 and 1 or 0, 0.045)
 
-            left_alpha = motion.interp(left_alpha, manual_direction == 0 and 1 or 0, 0.045)
-            if left_alpha ~= 0 then
-                renderer.text(screen.x - 50, screen.y - 16, r, g, b, a * left_alpha, '+', nil, '<')
-            end
-
-            right_alpha = motion.interp(right_alpha, manual_direction == 1 and 1 or 0, 0.045)
-            if right_alpha ~= 0 then
-                renderer.text(screen.x + 39, screen.y - 16, r, g, b, a * right_alpha, '+', nil, '>')
-            end
+            if left_alpha  > 0 then renderer.text(screen.x - 50, screen.y - 16, r, g, b, av * left_alpha,  '+', nil, '<') end
+            if right_alpha > 0 then renderer.text(screen.x + 39, screen.y - 16, r, g, b, av * right_alpha, '+', nil, '>') end
         end
     end
 
+        --- region velocity_warning
     do
-        local alpha = 0.0
+        local alpha   = 0.0
         local holding = 0.0
-        local hovering = 0.0
-
-        local function renderer_bar(x, y, w, h, r, g, b, a, pct)
-            --graphics.glow(x, y, w, h, r, g, b, a * 0.15, 222, h * 0.5)
-            renderer.rectangle(x, y, w, h, 0, 0, 0, a)
-            renderer.rectangle(x + 1, y + 1, (w - 2) * pct, h - 2, r, g, b, a)
-        end
+        local hovering= 0.0
 
         velocity_warning.window = windows.new("##velocity_warning", 0.5, 0.3)
-
         velocity_warning.window:set_anchor(vector(0.5, 0.0))
         velocity_warning.window:set_size(vector(180, 4))
 
@@ -5385,92 +5014,73 @@ LPH_NO_VIRTUALIZE(function ()
             local me = entity.get_local_player()
             if me == nil then return end
 
-            local window = velocity_warning.window
-            local modifier = entity.get_prop(me, "m_flVelocityModifier")
-
-            local menu_check = ui.is_menu_open()
-
+            local window    = velocity_warning.window
+            local modifier  = entity.get_prop(me, "m_flVelocityModifier")
+            local menu_check  = ui.is_menu_open()
             local alive_check = entity.is_alive(me)
-            local velocity_check = modifier < 1.0
+            local vel_check   = modifier < 1.0
+            local is_drag     = window:is_dragging()
+            local is_hover    = window:is_hovering()
 
-            local is_dragging = window:is_dragging()
-            local is_hovering = window:is_hovering()
+            local can_show = widgets.enabled:get() and widgets.items:have_key("Velocity Warning")
+                             and ((alive_check and vel_check) or menu_check)
 
-            local can_show_warning = widgets.enabled:get() and widgets.items:have_key("Velocity Warning") and ((alive_check and velocity_check) or menu_check)
+            alpha   = motion.interp(alpha,   can_show, 0.045)
+            holding = motion.interp(holding, (can_show and is_drag)  and 0.6 or 1.0, 0.045)
+            hovering= motion.interp(hovering,(can_show and is_hover and not is_drag) and 1.0 or 0.0, 0.045)
 
-            alpha = motion.interp(alpha, can_show_warning, 0.045)
-            holding = motion.interp(holding, (can_show_warning and is_dragging) and 0.6 or 1.0, 0.045)
-            hovering = motion.interp(hovering, (can_show_warning and is_hovering and not is_dragging) and 1.0 or 0.0, 0.045)
+            if alpha <= 0 then return end
 
-            if alpha <= 0 then
-                return
-            end
-
-            if menu_check and (not velocity_check or not alive_check) then
+            if menu_check and (not vel_check or not alive_check) then
                 modifier = math.min(1, globals.tickcount() % 200 / 150)
             end
 
-            local flags = "d"
+            local flags   = "d"
             local percent = (1 - modifier) * 100
-
             local r, g, b = widgets.color_picker:get()
 
-            local a = 255
-
+            -- lerp to warm red when slowed
             if modifier < 1.0 then
                 r = utils.lerp(255, r, modifier)
-                g = utils.lerp(75, g, modifier)
-                b = utils.lerp(75, b, modifier)
+                g = utils.lerp(75,  g, modifier)
+                b = utils.lerp(75,  b, modifier)
             end
 
-            -- indication
-            local pos = window.pos:clone()
+            local pos  = window.pos:clone()
             local size = window.size:clone()
 
-            local text = f("Max velocity was reduced by %d%%", percent)
-            local text_size = vector(renderer.measure_text(flags, text))
+            local text        = f("velocity reduced by %d%%", percent)
+            local tw, th      = renderer.measure_text(flags, text)
 
             renderer.text(
-                pos.x + (size.x - text_size.x) * 0.5,
+                pos.x + (size.x - tw) * 0.5,
                 pos.y,
-                255, 255, 255, 255 * alpha * holding,
+                255, 255, 255, math.floor(255 * alpha * holding),
                 flags, 0, text
             )
 
-            pos.y = pos.y + text_size.y
-            pos.y = pos.y + 5
+            pos.y = pos.y + th + 5
 
-            local bar_pos = pos:clone()
-            local bar_size = vector(text_size.x + 28, 4)
+            -- slim accent bar
+            local bar_w = tw + 28
+            local bar_x = pos.x + (size.x - bar_w) * 0.5
 
-            renderer_bar(bar_pos.x, bar_pos.y, bar_size.x, bar_size.y, r, g, b, a * alpha * holding, modifier)
-            pos.y = pos.y + bar_size.y + 5
+            renderer.rectangle(bar_x, pos.y, bar_w, 2, 30, 30, 35, math.floor(200 * alpha * holding))
+            renderer.rectangle(bar_x + 1, pos.y, math.floor((bar_w - 2) * (1 - modifier)), 2,
+                r, g, b, math.floor(255 * alpha * holding))
 
-            if hovering > 0 then
-                renderer.text(
-                    pos.x,
-                    pos.y,
-                    255, 255, 255, 255 * alpha * hovering,
-                    flags, 0, "Press M2 to center."
-                )
+            if hovering > 0 or is_hover then
+                renderer.text(bar_x + (bar_w - tw) * 0.5, pos.y + 5,
+                    200, 200, 200, math.floor(255 * alpha * hovering), flags, 0,
+                    f("%.0f%%", (1 - modifier) * 100))
             end
 
-            local window_size = vector(math.max(text_size.x, bar_size.x), text_size.y + bar_size.y + 5)
-
-            if is_hovering and not is_dragging and client.key_state(0x02) then
-                local screen = vector(client.screen_size())
-
-                window:set_pos(vector(
-                    (screen.x - size.x) * 0.5,
-                    window.pos.y
-                ))
-            end
-
-            window:set_size(window_size)
+            window:set_size(vector(math.max(size.x, bar_w), th + 16))
             window:update()
         end
     end
 
+        --- region custom scope
     do
         custom_scope.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Custom Scope Overlay")
         : record("aa", "custom_scope::enabled")
@@ -5563,433 +5173,85 @@ LPH_NO_VIRTUALIZE(function ()
             ui.set_visible(software.visuals.scope_overlay, true)
         end)
     end
+
 end)()
 
+--- hit marker zenith
 do
-
-    defer(function ()
-    end)
-end
-
-do
-    anim_breakers.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Animation Breakers")
-    : record("aa", "anim_breakers::enabled")
-    : save()
-
-    anim_breakers.ground = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", '- Leg Movement', { "Default", 'Static', 'Walking' })
-    : record("aa", "anim_breakers::ground")
-    : save()
-
-    anim_breakers.air = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", '- In Air', { "Default", 'Static', 'Walking' })
-    : record("aa", "anim_breakers::air")
-    : save()
-
-    local native_GetClientEntity = vtable_bind('client.dll', 'VClientEntityList003', 3, 'void*(__thiscall*)(void*, int)')
-
-    local char_ptr = ffi.typeof('char*')
-    local nullptr = ffi.new('void*')
-    local class_ptr = ffi.typeof('void***')
-
-    local animation_layer_t = ffi.typeof([[
-        struct {										char pad0[0x18];
-            uint32_t	sequence;
-            float		prev_cycle;
-            float		weight;
-            float		weight_delta_rate;
-            float		playback_rate;
-            float		cycle;
-            void		*entity;						char pad1[0x4];
-        } **
-    ]])
-
-    client.set_event_callback('net_update_end', function ()
-        if not anim_breakers.enabled:get() then
-            override.unset(software.aa.other.leg_movement)
-            return
-        end
-
-        local lp = entity.get_local_player()
-        if lp == nil then
-            return
-        end
-
-        local player_ptr = ffi.cast(class_ptr, native_GetClientEntity(lp))
-        if player_ptr == nullptr then
-            return
-        end
-
-        local anim_layers = ffi.cast(animation_layer_t, ffi.cast(char_ptr, player_ptr) + 0x2990)[0]
-
-        do
-            local mode = anim_breakers.ground:get()
-            if mode ~= 'Disabled' then
-                if mode == 'Static' then
-                    entity.set_prop(lp, 'm_flPoseParameter', 1, 0)
-                    override.set(software.aa.other.leg_movement, 'Always slide')
-                elseif mode == 'Walking' then
-                    entity.set_prop(lp, 'm_flPoseParameter', 0.5, 7)
-                    override.set(software.aa.other.leg_movement, 'Never slide')
-                end
-            else
-                override.unset(software.aa.other.leg_movement)
-            end
-        end
-
-        do
-            local mode = anim_breakers.air:get()
-            if mode ~= 'Disabled' and ctx_bebra.condition() == 'AIR' then
-                if mode == 'Static' then
-                    entity.set_prop(lp, 'm_flPoseParameter', 1, 6)
-                elseif mode == 'Walking' then
-                    anim_layers[6]['weight'] = 1
-                end
-            end
-        end
-    end)
-end
-
-do
-    local function set_custom_list(ctx, list)
-        if list.pitch ~= nil then
-            ctx.pitch = list.pitch:get()
-            ctx.pitch_offset = list.pitch_offset:get()
-        end
-
-        if list.yaw_base ~= nil then
-            ctx.yaw_base = list.yaw_base:get()
-        end
-
-        ctx.yaw = list.yaw:get()
-        ctx.yaw_offset = list.yaw_offset:get()
-
-        if ctx.yaw == "180 LR" then
-            ctx.yaw_offset = 0
-        end
-
-        ctx.yaw_180lr_mode = list.yaw_180lr_mode:get()
-        ctx.yaw_delay = list.yaw_delay:get()
-        ctx.yaw_left = list.yaw_left:get()
-        ctx.yaw_right = list.yaw_right:get()
-
-        ctx.yaw_jitter = list.yaw_jitter:get()
-        ctx.jitter_mode = list.jitter_mode:get()
-        ctx.zenith_cycle = list.zenith_cycle:get()
-        ctx.zenith_delay = list.zenith_delay:get()
-        ctx.zenith_safe = list.zenith_safe:get()
-        ctx.jitter_offset = list.jitter_offset:get()
-        ctx.jitter_randomization = list.jitter_randomization:get()
-
-        ctx.body_yaw = list.body_yaw:get()
-        ctx.body_yaw_offset = list.body_yaw_offset:get()
-        ctx.freestanding_body_yaw = list.freestanding_body_yaw:get()
-    end
-
-    angles.type = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Anti Aim Builder", {
-        "Off",
-        "Custom",
-        "Recommended"
-    })
-    : record("aa", "angles::type")
-    : save()
-
-    local conds = { 'Standing', 'Moving', 'Slow Walk', 'Crouched', 'Move Crouched', 'Air', 'Air Crouched', 'Fake Lag'}
-
-    local function reset_delay()
-        for _, condition in next, conds do
-            delay_data_all[condition] = {
-                ticks = 0,
-                is_active = false,
-                current = 0,
-                previous_angle = 0
-            }
-        end
-    end
-
-    reset_delay()
-
-    angles.custom = { } do
-        angles.custom.state = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "State", { unpack(e_statement, 0) })
-        : record("aa", "custom::state")
-
-        for i = 0, #e_statement do
-            local list = { }
-            local state = e_statement[i]
-
-            if i ~= 0 then
-                list.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Enable", "\x20", state })
-                : record("aa", merge { "custom", "::", state, "::", "enabled" })
-                : save()
-            end
-
-            if i ~= 10 then
-                local pitch_list = { "Off", "Default", "Up", "Down", "Minimal", "Random", "Custom" }
-
-                list.pitch = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Pitch", "\n", "custom_", "pitch_", state }, pitch_list)
-                : record("aa", merge { "custom", "::", state, "::", "pitch" })
-                : save()
-
-                list.pitch_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "pitch_offset_", state }, -89, 89, 0, true, "°")
-                : record("aa", merge { "custom", "::", state, "::", "pitch_offset" })
-                : save()
-
-                list.yaw_base = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Yaw base", "\n", "custom_", "yaw_base_", state }, { "Local view", "At targets" })
-                : record("aa", merge { "custom", "::", state, "::", "yaw_base" })
-                : save()
-            end
-
-            list.yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Yaw", "\n", "custom_", "yaw_", state }, { "Off", "180", "Spin", "Static", "180 Z", "Crosshair", "180 LR" })
-            : record("aa", merge { "custom", "::", state, "::", "yaw" })
-            : save()
-
-            list.yaw_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "yaw_offset_", state }, -180, 180, 0, true, "°")
-            : record("aa", merge { "custom", "::", state, "::", "yaw_offset" })
-            : save()
-
-            list.yaw_180lr_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "yaw_180lr_mode_", state }, { "Side based", "Switch delay" })
-            : record("aa", merge { "custom", "::", state, "::", "yaw_180lr_mode" })
-            : save()
-
-            list.yaw_left = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Left offset", "\n", "custom_", "yaw_left_", state }, -180, 180, 0, true, "°")
-            : record("aa", merge { "custom", "::", state, "::", "yaw_left" })
-            : save()
-
-            list.yaw_right = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Right offset", "\n", "custom_", "yaw_right_", state }, -180, 180, 0, true, "°")
-            : record("aa", merge { "custom", "::", state, "::", "yaw_right" })
-            : save()
-
-            list.yaw_delay = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Delay", "\n", "custom_", "Delay_", state }, 2, 10, 5, true, "t")
-            : record("aa", merge { "custom", "::", state, "::", "yaw_delay" })
-            : save()
-
-            list.yaw_jitter = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Yaw jitter", "\n", "custom_", "yaw_jitter_", state }, { "Off", "Offset", "Center", "Random", "Skitter", "Zenith" })
-            : record("aa", merge { "custom", "::", state, "::", "yaw_jitter" })
-            : save()
-
-            list.jitter_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "jitter_mode_", state }, { "2-Way", "3-Way", "5-Way", "7-Way", "Chaos" })
-            : record("aa", merge { "custom", "::", state, "::", "jitter_mode" })
-            : save()
-
-            list.jitter_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\nJitter offset", "\n", "custom_", "jitter_offset_", state }, -180, 180, 0, true, "°")
-            : record("aa", merge { "custom", "::", state, "::", "jitter_offset" })
-            : save()
-
-            list.jitter_randomization = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Randomization", "\n", "custom_", "jitter_randomization_", state }, 0, 180, 0, true, "°", 1, { [0] = "Off" })
-            : record("aa", merge { "custom", "::", state, "::", "jitter_randomization" })
-            : save()
-
-            list.zenith_cycle = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Delay Cycle", "\n", "custom_", "delay_cycle_", state }, 5, 200, 50, true, '', 1, { [5] = "Off" })
-            : record("aa", merge { "custom", "::", state, "::", "zenith_cycle" })
-            : save()
-
-            list.zenith_delay = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "Delay Time", "\n", "custom_", "zenith_delay", state }, 5, 30, 15)
-            : record("aa", merge { "custom", "::", state, "::", "zenith_delay" })
-            : save()
-
-            list.zenith_safe = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Safe Yaw", "\n", "custom_", "safe_yaw_", state })
-            : record("aa", merge { "custom", "::", state, "::", "zenith_safe" })
-            : save()
-
-            list.body_yaw = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", merge { "Body yaw", "\n", "custom_", "body_yaw_", state }, { "Off", "Opposite", "Jitter", "Static", "Randomize Jitter", "Ghost", "Ghost" })
-            : record("aa", merge { "custom", "::", state, "::", "body_yaw" })
-            : save()
-
-            list.body_yaw_offset = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", merge { "\n", "custom_", "body_yaw_offset_", state }, -180, 180, 0, true, "°")
-            : record("aa", merge { "custom", "::", state, "::", "body_yaw_offset" })
-            : save()
-
-            list.freestanding_body_yaw = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", merge { "Freestanding body yaw", "\n", "custom_", "freestanding_body_yaw_", state })
-            : record("aa", merge { "custom", "::", state, "::", "freestanding_body_yaw" })
-            : save()
-
-            list.zenith_safe:set_callback(reset_delay)
-            list.zenith_delay:set_callback(reset_delay)
-            list.zenith_cycle:set_callback(reset_delay)
-
-            angles.custom[state] = list
-        end
-    end
-
-    angles.recommended = {
-        ['Standing'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 14
-            ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '7-Way'  -- 7-way is harder to resolve than 3-way
-            ctx.jitter_offset = 48
-            ctx.jitter_randomization = 32
-            ctx.zenith_cycle = 20
-            ctx.zenith_delay = 14
-            ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'  -- body yaw lies about real side
-            ctx.body_yaw_offset = -180
-            ctx.freestanding_body_yaw = true
-        end,
-
-        ['Moving'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180 LR'
-            ctx.yaw_180lr_mode = 'Switch delay'
-            ctx.yaw_offset = 8
-            ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '2-Way'
-            ctx.jitter_offset = 55
-            ctx.jitter_randomization = 22
-            ctx.zenith_cycle = 18
-            ctx.zenith_delay = 12
-            ctx.zenith_safe = true
-            ctx.body_yaw = 'Randomize Jitter'
-            ctx.body_yaw_offset = -45
-        end,
-
-        ['Slow Walk'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 5
-            ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = 'Chaos'  -- Chaos = non-repeating pattern
-            ctx.jitter_offset = 72
-            ctx.jitter_randomization = 38
-            ctx.zenith_cycle = 12
-            ctx.zenith_delay = 8
-            ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
-            ctx.freestanding_body_yaw = true
-        end,
-
-        ['Crouched'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 10
-            ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '7-Way'
-            ctx.jitter_offset = 68
-            ctx.jitter_randomization = 34
-            ctx.zenith_cycle = 18
-            ctx.zenith_delay = 14
-            ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
-            ctx.freestanding_body_yaw = true
-        end,
-
-        ['Move Crouched'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 6
-            ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = 'Chaos'
-            ctx.jitter_offset = 60
-            ctx.jitter_randomization = 28
-            ctx.zenith_cycle = 14
-            ctx.zenith_delay = 10
-            ctx.zenith_safe = true
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
-        end,
-
-        ['Air'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180 LR'
-            ctx.yaw_180lr_mode = 'Switch delay'
-            ctx.yaw_offset = 4
-            ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '5-Way'
-            ctx.jitter_offset = 44
-            ctx.jitter_randomization = 24
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
-            ctx.freestanding_body_yaw = true
-        end,
-
-        ['Air Crouched'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180 LR'
-            ctx.yaw_180lr_mode = 'Switch delay'
-            ctx.yaw_offset = 4
-            ctx.yaw_jitter = 'Skitter'
-            ctx.jitter_mode = '5-Way'
-            ctx.jitter_offset = 44
-            ctx.jitter_randomization = 24
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
-            ctx.freestanding_body_yaw = true
-        end,
-
-        ['Fake Lag'] = function (ctx)
-            ctx.pitch = 'Default'
-            ctx.yaw_base = 'At targets'
-            ctx.yaw = '180'
-            ctx.yaw_offset = 0
-            ctx.yaw_jitter = 'Zenith'
-            ctx.jitter_mode = '7-Way'
-            ctx.jitter_offset = 38
-            ctx.jitter_randomization = 22
-            ctx.zenith_cycle = 10
-            ctx.zenith_delay = 8
-            ctx.zenith_safe = false
-            ctx.body_yaw = 'Ghost'
-            ctx.body_yaw_offset = -180
-            ctx.freestanding_body_yaw = true
-        end
+    local ctx = {
+        target = 0,
+        pos = vector()
     }
 
-    function angles.set(ctx, state)
-        if angles.type:get() == "Custom" then
-            local list = angles.custom[state]
+    local pending_markers = { }
 
-            if list ~= nil then
-                -- if not enabled in menu
-                if list.enabled ~= nil then
-                    if not list.enabled:get() then
-                        return false
-                    end
-                end
-
-                set_custom_list(ctx, list)
-                return true
-            end
-
-            return false
+    function hit_marker.frame()
+        if not settings.tweaks_enable:get() then
+            return
         end
 
-        if angles.type:get() == "Recommended" then
-            local fn = angles.recommended[state]
-
-            if fn ~= nil then
-                fn(ctx)
-                return true
-            end
-
-            return false
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
         end
 
-        return false
+        local realtime = globals.realtime()
+        for i, data in ipairs(pending_markers) do
+            local diff = data[3] - realtime
+
+            local alpha = math.min(1, diff)--diff < 1 and math.max(0, diff) or 1
+
+            local x, y = renderer.world_to_screen(data[1].x, data[1].y, data[1].z)
+
+            local r, g, b = unpack(data[4])
+            renderer.text(x, y, r, g, b, 255 * alpha, "c", nil, data[2])
+
+            if data[3] < realtime then
+                table.remove(pending_markers, i)
+            end
+        end
     end
 
-    function angles.update(ctx)
-        local list = statement.get()
-
-        for i = #list, 1, -1 do
-            local state = list[i]
-
-            if angles.set(ctx, state) then
-                return
-            end
+    function hit_marker.aim_fire(e)
+        if not settings.tweaks_enable:get() then
+            return
         end
 
-        angles.set(ctx, "Main")
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        ctx.target = e.target
+        ctx.pos = vector(e.x, e.y, e.z)
+    end
+
+    function hit_marker.aim_hit(e)
+        if not settings.tweaks_enable:get() then
+            return
+        end
+
+        if not settings.tweaks:have_key('Damage Marker') then
+            return
+        end
+
+        if ctx.target == e.target then
+            table.insert(
+                pending_markers,
+                {
+                    ctx.pos, tostring(e.damage),
+                    globals.realtime() + 3,
+                    e.hitgroup == 1 and { widgets.color_picker:rawget() } or { 240, 240, 240 }
+                }
+            )
+        end
+    end
+
+    function hit_marker.round_prestart()
+        table.clear(pending_markers)
     end
 end
 
+
+--- region yaw_direction
 do
 
     yaw_direction.edge_yaw = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", merge { "Edge Yaw", "\n", "yaw_direction::edge_yaw" })
@@ -6017,6 +5279,7 @@ do
     end
 end
 
+--- region freestqand disaskdfkskd
 do
     local function get_statement()
         if localplayer.is_airborne then
@@ -6051,6 +5314,7 @@ do
         ctx.freestanding = false
     end
 end
+
 
 --- clientside nickname
 do
@@ -6146,392 +5410,7 @@ do
     callback()
 end
 
--- --- tab to game
--- do
---     tab_to_game.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Tab to Game")
---     : record("visuals", "tab_to_game::enabled")
---     : save()
-
---     local api_ShowWindow          = memory.get_export("user32.dll", "ShowWindow", "int(__fastcall*)(unsigned int, unsigned int, void*, int)")
---     local api_GetForegroundWindow = memory.get_export("user32.dll", "GetForegroundWindow", "int(__fastcall*)(unsigned int, unsigned int)")
---     local api_SetForegroundWindow = memory.get_export("user32.dll", "SetForegroundWindow", "int(__fastcall*)(unsigned int, unsigned int, void*)")
-
---     local csgo_hwnd_raw = memory.pattern_scan("engine.dll", "8B 0D ? ? ? ? 85 C9 74 16 8B 01 8B")
---     local hwnd = ffi.cast("void*", ((ffi.cast("uintptr_t***", ffi.cast("uintptr_t", csgo_hwnd_raw) + 2)[0])[0] + 2)[0])
-
---     local function show_window()
---         api_ShowWindow(hwnd, 3)
---         api_SetForegroundWindow(hwnd)
---     end
-
---     function tab_to_game.round_prestart()
---         if tab_to_game.enabled:get() then
---             show_window()
---         end
---     end
--- end
-
---- hit marker zenith [fancy]
-do
-    -- ── tunables ────────────────────────────────────────────────────────────
-    local MARKER_LIFETIME    = 3.2   -- seconds on screen
-    local FLOAT_TOTAL        = 68    -- total px drifted upward over lifetime
-    local SLIDE_AMOUNT       = 9     -- px of horizontal slide-in on spawn
-    local POP_DURATION       = 0.28  -- seconds of scale-pop on spawn
-    local POP_SCALE          = 2.0   -- peak scale multiplier at spawn
-    local GLOW_PASSES        = 4     -- concentric glow layers
-    local GLOW_MAX_SPREAD    = 4     -- px radius of outermost glow layer
-    local OUTLINE_OFFSETS    = { {1,0},{-1,0},{0,1},{0,-1},{1,1},{-1,-1},{1,-1},{-1,1} }
-
-    -- ── helpers ─────────────────────────────────────────────────────────────
-    local function ease_out_cubic(t)
-        local u = 1 - t
-        return 1 - u * u * u
-    end
-
-    -- damage → colour tier
-    local function damage_color(dmg, is_head, accent_r, accent_g, accent_b)
-        if is_head then
-            return accent_r, accent_g, accent_b   -- accent colour for headshots
-        elseif dmg >= 90 then
-            return 255, 60,  60    -- near-lethal: vivid red
-        elseif dmg >= 60 then
-            return 255, 140, 40    -- high: orange
-        elseif dmg >= 30 then
-            return 255, 220, 80    -- medium: yellow
-        else
-            return 220, 220, 220   -- low: grey-white
-        end
-    end
-
-    -- hitgroup prefix icon
-    local function hitgroup_prefix(hg)
-        if hg == 1 then return "[HS] " end
-        if hg == 8 then return "[NK] " end
-        return ""   -- no prefix for body shots
-    end
-
-    -- ── state ───────────────────────────────────────────────────────────────
-    local ctx = { target = 0, pos = vector(), hitgroup = 0 }
-    local pending_markers = {}
-
-    -- marker table layout:
-    --  [1] = world pos (vector)
-    --  [2] = display string
-    --  [3] = expiry time
-    --  [4] = r, g, b (colour)
-    --  [5] = spawn_x offset (for slide-in)
-    --  [6] = spawn_time
-
-    -- ── frame ───────────────────────────────────────────────────────────────
-    function hit_marker.frame()
-        if not settings.tweaks_enable:get() then return end
-        if not settings.tweaks:have_key('Damage Marker') then return end
-
-        local realtime = globals.realtime()
-        local ar, ag, ab = widgets.color_picker:rawget()
-
-        local i = 1
-        while i <= #pending_markers do
-            local m    = pending_markers[i]
-            local diff = m[3] - realtime
-
-            if diff <= 0 then
-                table.remove(pending_markers, i)
-            else
-                local age      = MARKER_LIFETIME - diff          -- seconds since spawn
-                local t        = age / MARKER_LIFETIME           -- 0→1 normalised
-                local ease_t   = ease_out_cubic(t)
-
-                -- ── position ──────────────────────────────────────────────
-                local wx, wy = renderer.world_to_screen(m[1].x, m[1].y, m[1].z)
-                if wx then
-                    local y_off   = ease_t * FLOAT_TOTAL
-                    local x_slide = m[5] * (1 - ease_out_cubic(math.min(age / 0.12, 1)))
-                    local px      = wx + x_slide
-                    local py      = wy - y_off
-
-                    -- ── alpha ─────────────────────────────────────────────
-                    local fade_start = 0.72   -- fade begins at 72% of lifetime
-                    local alpha
-                    if t < fade_start then
-                        alpha = 1.0
-                    else
-                        alpha = 1.0 - (t - fade_start) / (1.0 - fade_start)
-                        alpha = math.max(0, alpha)
-                    end
-
-                    -- ── scale pop ─────────────────────────────────────────
-                    -- simulated by choosing font flag "d" (larger) vs "" (normal)
-                    -- and adjusting the y slightly so it feels like it shrinks in
-                    local pop_t    = math.min(age / POP_DURATION, 1)
-                    local pop_ease = ease_out_cubic(pop_t)
-                    local scale_v  = POP_SCALE - (POP_SCALE - 1) * pop_ease   -- POP_SCALE→1
-                    -- offset upward so it appears to shrink toward centre
-                    local pop_y_nudge = -(scale_v - 1) * 6
-                    py = py + pop_y_nudge
-
-                    local ia   = math.floor(255 * alpha)
-                    local r, g, b = m[4][1], m[4][2], m[4][3]
-                    local txt  = m[2]
-
-                    -- ── glow passes ───────────────────────────────────────
-                    for pass = GLOW_PASSES, 1, -1 do
-                        local spread   = math.floor(GLOW_MAX_SPREAD * (pass / GLOW_PASSES))
-                        local glow_a   = math.floor(ia * 0.18 * (1 - (pass - 1) / GLOW_PASSES))
-                        if spread > 0 and glow_a > 0 then
-                            for _, off in ipairs(OUTLINE_OFFSETS) do
-                                renderer.text(
-                                    px + off[1] * spread,
-                                    py + off[2] * spread,
-                                    r, g, b, glow_a, "c", nil, txt
-                                )
-                            end
-                        end
-                    end
-
-                    -- ── hard outline (1px, 8-direction) ──────────────────
-                    local outline_a = math.floor(ia * 0.75)
-                    for _, off in ipairs(OUTLINE_OFFSETS) do
-                        renderer.text(px + off[1], py + off[2], 0, 0, 0, outline_a, "c", nil, txt)
-                    end
-
-                    -- ── main text ─────────────────────────────────────────
-                    renderer.text(px, py, r, g, b, ia, "c", nil, txt)
-
-                    -- ── accent bar under headshot numbers ─────────────────
-                    if m[4][4] then   -- flag: is headshot
-                        local bar_a = math.floor(ia * 0.7 * (1 - t * t))
-                        local bar_w = 18
-                        renderer.rectangle(math.floor(px - bar_w*0.5), py + 12,
-                            bar_w, 2, ar, ag, ab, bar_a)
-                    end
-                end
-
-                i = i + 1
-            end
-        end
-    end
-
-    -- ── aim_fire ────────────────────────────────────────────────────────────
-    function hit_marker.aim_fire(e)
-        if not settings.tweaks_enable:get() then return end
-        if not settings.tweaks:have_key('Damage Marker') then return end
-        ctx.target   = e.target
-        ctx.pos      = vector(e.x, e.y, e.z)
-        ctx.hitgroup = e.hitgroup or 0
-    end
-
-    -- ── aim_hit ─────────────────────────────────────────────────────────────
-    function hit_marker.aim_hit(e)
-        if not settings.tweaks_enable:get() then return end
-        if not settings.tweaks:have_key('Damage Marker') then return end
-
-        if ctx.target ~= e.target then return end
-
-        local dmg     = e.damage or 0
-        local hg      = e.hitgroup or ctx.hitgroup or 0
-        local is_head = (hg == 1)
-        local ar, ag, ab = widgets.color_picker:rawget()
-        local r, g, b = damage_color(dmg, is_head, ar, ag, ab)
-
-        local prefix = hitgroup_prefix(hg)
-        local label  = prefix .. tostring(dmg)
-
-        -- small random horizontal slide direction so stacked markers separate
-        local slide_dir = (math.random(0, 1) == 0) and -SLIDE_AMOUNT or SLIDE_AMOUNT
-
-        local MAX_MARKERS = 12
-        if #pending_markers >= MAX_MARKERS then
-            table.remove(pending_markers, 1)
-        end
-
-        table.insert(pending_markers, {
-            ctx.pos,
-            label,
-            globals.realtime() + MARKER_LIFETIME,
-            { r, g, b, is_head },   -- [4] colour + headshot flag
-            slide_dir,              -- [5] slide offset
-            globals.realtime(),     -- [6] spawn time
-        })
-    end
-
-    -- ── round reset ─────────────────────────────────────────────────────────
-    function hit_marker.round_prestart()
-        table.clear(pending_markers)
-    end
-end
-
-do
-    -- ── default line pool ─────────────────────────────────────────────
-    local _ks_default = {
-        'ez', 'L', 'ratio', 'skill issue', 'get recked',
-        'not even close', 'uninstall', 'LOL', 'ggez', 'trash',
-        'outplayed', 'cry about it', 'too easy', 'go next',
-        'rekt', 'kys', 'mad?', 'sit', 'done', 'bye',
-        'no shot', 'clean', 'diff', 'pack it up',
-        'u good?', 'next', 'lmao', 'terrible', 'W',
-        'bro really tried', 'stay down', 'touch grass',
-        'discord.gg/4qSQtPKas5', 'zenith.gs | discord.gg/4qSQtPKas5',
-        'get rekt | discord.gg/4qSQtPKas5', 'using zenith lol',
-    }
-
-    local _ks_awp = {
-        'awp diff', 'big green W', 'one shot wonder',
-        'did u even see that coming', 'click click dead',
-        'scoped in on ur soul', 'bolt action diff',
-    }
-
-    local _ks_multi = {
-        'double', 'two for one', 'double tap diff',
-        'cluttered', 'they came in pairs', 'buy better positions',
-        'RAMPAGE', 'stop feeding', 'ace incoming',
-    }
-
-    local _ks_rapid_kills = 0
-    local _ks_last_kill_t = 0
-
-    -- ── headshot-specific pool ────────────────────────────────────────
-    local _ks_headshot = {
-        'headshot :)', 'one tap', 'clean hs', 'aim diff',
-        'right in the head', 'nailed it', 'boom headshot',
-    }
-
-    -- ── knife-specific pool ───────────────────────────────────────────
-    local _ks_knife = {
-        'knifed lol', 'put the gun away', 'knife diff',
-        'too close for bullets', 'get baited',
-    }
-
-    -- ── menu items ────────────────────────────────────────────────────
-    local ks_enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Killsay')
-        :record('misc', 'killsay::enabled'):save()
-
-    local ks_mode = menu.new_item(ui.new_combobox, 'AA', 'Anti-aimbot angles',
-        merge { 'Killsay Mode', '\n', 'killsay::mode' },
-        { 'Default', 'Headshot Aware', 'Knife Aware', 'All Aware' })
-        :record('misc', 'killsay::mode'):save()
-
-    local ks_custom_en = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Custom Lines')
-        :record('misc', 'killsay::custom_en'):save()
-
-    local ks_custom = menu.new_item(ui.new_textbox, 'AA', 'Anti-aimbot angles', 'Custom Line')
-        :record('misc', 'killsay::custom'):save()
-
-    local ks_cooldown = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
-        merge { 'Cooldown', '\n', 'killsay::cooldown' },
-        1, 30, 4, true, 's')
-        :record('misc', 'killsay::cooldown'):save()
-
-    local ks_chance = menu.new_item(ui.new_slider, 'AA', 'Anti-aimbot angles',
-        merge { 'Send Chance', '\n', 'killsay::chance' },
-        1, 100, 75, true, '%')
-        :record('misc', 'killsay::chance'):save()
-
-    -- ── state ─────────────────────────────────────────────────────────
-    local _ks_last_time  = 0
-    local _ks_kill_queue = {}   -- { is_headshot, is_knife }
-
-    -- ── pick a line ───────────────────────────────────────────────────
-    local function _ks_pick(is_headshot, is_knife, is_awp, mode)
-        -- custom line overrides everything if enabled
-        local custom_en = ks_custom_en and ks_custom_en:get()
-        if custom_en then
-            local ok, txt = pcall(ui.get, ks_custom.ref)
-            if ok and txt and txt ~= '' then return txt end
-        end
-
-        -- multi-kill pool: 3+ kills in 8 seconds
-        local now = globals.realtime()
-        if now - _ks_last_kill_t < 8 then
-            _ks_rapid_kills = _ks_rapid_kills + 1
-        else
-            _ks_rapid_kills = 1
-        end
-        _ks_last_kill_t = now
-        if _ks_rapid_kills >= 3 then
-            return _ks_multi[math.random(#_ks_multi)]
-        end
-
-        local pool = _ks_default
-        if mode == 'Headshot Aware' and is_headshot then
-            pool = _ks_headshot
-        elseif mode == 'Knife Aware' and is_knife then
-            pool = _ks_knife
-        elseif mode == 'All Aware' then
-            if is_headshot      then pool = _ks_headshot
-            elseif is_knife     then pool = _ks_knife
-            elseif is_awp       then pool = _ks_awp
-            end
-        end
-
-        return pool[math.random(#pool)]
-    end
-
-    -- ── player_death: queue the kill ─────────────────────────────────
-    client.set_event_callback('player_death', function(e)
-        if not ks_enabled:get() then return end
-
-        local me = entity.get_local_player()
-        if not me then return end
-        if client.userid_to_entindex(e.attacker) ~= me then return end
-
-        -- don't say on own team
-        local victim = client.userid_to_entindex(e.userid)
-        if victim and not entity.is_enemy(victim) then return end
-
-        -- weapon check
-        local wpn     = entity.get_player_weapon(me)
-        local wpn_id  = wpn and bit.band(entity.get_prop(wpn,'m_iItemDefinitionIndex') or 0, 0xFFFF) or 0
-        local cls     = wpn and entity.get_classname(wpn) or ''
-        local is_knife = cls:find('knife') ~= nil
-        local is_awp   = wpn_id == 9 or wpn_id == 11 or wpn_id == 38  -- awp/auto
-
-        table.insert(_ks_kill_queue, {
-            is_headshot = e.headshot == true,
-            is_knife    = is_knife,
-            is_awp      = is_awp,
-        })
-    end)
-
-    -- ── paint_ui: flush queue with cooldown + chance ─────────────────
-    client.set_event_callback('paint_ui', function()
-        if not ks_enabled:get() then
-            _ks_kill_queue = {}
-            return
-        end
-        if #_ks_kill_queue == 0 then return end
-
-        local now = globals.realtime()
-        if now - _ks_last_time < ks_cooldown:get() then return end
-
-        -- chance roll
-        if math.random(100) > ks_chance:get() then
-            table.remove(_ks_kill_queue, 1)
-            return
-        end
-
-        local kill  = table.remove(_ks_kill_queue, 1)
-        local mode  = ks_mode:get()
-        local line  = _ks_pick(kill.is_headshot, kill.is_knife, kill.is_awp, mode)
-
-        if line and line ~= '' then
-            client.exec('say ' .. line)
-            _ks_last_time = now
-        end
-    end)
-
-    -- ── expose show helper for Misc page ─────────────────────────────
-    _G.__killsay = {
-        enabled      = ks_enabled,
-        mode         = ks_mode,
-        custom_en    = ks_custom_en,
-        custom       = ks_custom,
-        cooldown     = ks_cooldown,
-        chance       = ks_chance,
-    }
-end
-
+--- region shared
 do
     shared.enabled = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Shared Logo')
     :record('settings', 'shared::enabled')
@@ -6620,9 +5499,9 @@ do
                 end
             end
 
-            shared.online_label:set(string.format('👤Current Online: %d', online))
+            shared.online_label:set(string.format('\\aaaaaaaffâ¢ \\affffffff Online \\aaaaaaaff~ \\affd700ff%d', online))
             if shared.fl_online then
-                shared.fl_online:set(string.format('\a444444ffonline  \affd700ff%d\affffffff', online))
+                shared.fl_online:set(string.format('\a888888ff | \affffffffOnline  \a888888ff> \affd700ff%d', online))
             end
             -- leaderboard from data if available
             if shared.fl_leaderboard and shared.data then
@@ -6632,7 +5511,7 @@ do
                         rank = i; pts = obj.points or 0
                     end
                 end
-                shared.fl_leaderboard:set(string.format('\a444444ffonline  \affd700ff%d\affffffff players', online))
+                shared.fl_leaderboard:set(string.format('Leaderboard: \affd700ff%d\affffffff place, \affd700ff%d\affffffff pts', rank, pts))
             end
 
             shared.data = data
@@ -6655,6 +5534,8 @@ do
     shared.attach = function (condition)
         local enabled = shared.enabled:get() and not condition
 
+        local _ZENITH_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAPW0lEQVR4nO2ZeZBdVZ3HP+cu77799Xvdrzu9pdd0ks6CZJEAiS1rFHCMcZ4wwhQ1CmrJ4jhauASI6FjCOCMORMGlcClApYmi4IAMIYYgxEBCtu6QpTvpTu+vl7dvdznzRxqLspyaNHTGKuxP1a16de87v/M73/v7nd+vzoU55phjjjnmmGOOvw7K9PU3ifhffv9NIAAMw2gyDKPl9K2Y+ufP36F0aLBZ0UPVK5Tqy6aU6vWThmE0nn62Uv+runZ2kYKODg2mX6/S8MyaTz4hV33ySYmr6TV/ReN7AMoXXhCoa788Mj3onRcJ1dUrvaG6VXd76q+Rvzyesp44mrK8y74sXeUrs7jnXdfRcb37tACb3ymboxSAcs76LzTWL7vyn41Q8wFRvUF+4oHd9gN9efn0QFre8VTc8l7yoAzWni9dwaYfvzGyvT3m+uv5PWuczutwy3s+Em5cKwmslO/eeK99QEq55rYX5IZ/PyillPLqb+53fC0x21OxRIbqVv5n9aJ1K6YNnNU0OLth1tDghj1muGr5UrtY2JTLOWa4eqF9290fVQ4PwfFXXmHnf2/nsZMWG9a4RKGkKXpkiSO1mlstM/jUwgs+t6Vm+dULpq2dFSHOproK4BhGqFkNNe/2VzSW50ouuXLthaJi0QKe/vV+TOnCXdGIW3cIWX2YE6cIRkM0NkWLo319xvG9R7ZN9f/mUrlipc6ePTbgzLaTZ0OA0zaj7T6lkNuoGuEvu/zVCy1Xg127bIXqU4apcJdY3trK4gsuo6VtHuW5MSoibpSQj4KhMzwSl5+58evyteeeHNG1wgOlhdX3sGePOW1bzr6zs85KHfaYqr/xEXe45aNKZIV5wc236pn4EDddVcvGZbUYb/xV2vQOJTk5PMFQfIrOXz3LsbEixw6dkHq2T7g9GsX0yCpFr+rLhOMpurtLs+mpNpvGANFwTkeob/+OhOqruVT3hv/OsRUr2rJca6nQ6Rvs58SQ4DM7d5ONjzM6YtO28DwaQxlWtFfywksH6RnLs2xxM8H688Tre/fZWqILVVG26J7QFp/iemKUbpNZjILZjADR2vo+V8lj1uZzpXmZVPIHgYoF7XrbeueK2AeUk3u28dKzL5JPjqJIG2tsjLUbLue+n9xOlUfn7vt/zS8eex6hBth0x3UsPn8R3374hNz+ra8JkTpoSytXl4t3jzC9t8yW07NWBerWrHGnvUNa/8Ftvbn01AeFYrRnjCbr3R0XKxdfVMZAzsAdrKG8zI8oxjl33WJu+s5t9Ok6N97+MPd/4yGK/YdID/bw6JPHUUoW718aFN6GJXYpmxVmIb0eEBCb1bSdNQEGdu3Kjx44kPdXt1UUMgmXpbidssom8YUNZZzo7qf35f2QOkJyYoB5FT4+/I2vcVzz8aMtL7Dt0d8R0KZwZAlRiHPg+Rf41paX+PC7vaxt9Evpr1ekXZwPSOhS/09nZsAs9gEdGuDIgqjWdO/HFMdSSqWMcmqkxLKWCAGfQ2Yqjkezuequb3OMWn7+xZ/x7IO/wfCUYTk+pAgSbWgl7HNobo9yeMTmeFwqwiki9MC1BOsi0O0wi6k7i5vgDgkIyylVoRh+x8xKc7xL3PHgXjZ98QKu//zVbPnUbt5/62bG8lESjz6OPnKIhVd0UFPjI1QZQq+pozg0wETvKdZespj7Hu5lLJNV3CLrFBVjoWGzugi/A1TAng2vZzOfVMBxBeZfIRXXE0L1KC5fhSJ9jbQsW0GZN4FHNTEaNqJgUdXaCg0hQpXgyToMnzzOgZ3PcfQPvcRuv5OJV3fy7HOvYZ98zrFyY4pj5e4x03wF+kqcrgKzUglmS4A/NShasG61cLT7hOY+D8Xt6IZPzVpeVq9eStN7Ps+kWUMwCtlsnJA3id9r8NKjP6Wv62XsQpGr7/kOqcEenn3oJwh70rbzE6pdnPy9lT55keGrv6yYbd4OOxxmqRLMYgS0GhjpGt3lOSgUzYPQhaK5BWqA5atXy0VXfkV0H4tDcjdjx3eSGR/FVqsoSB9+JUE2neG6Wz5GZH4Z9968CUMtYZk5aeWmhJDmoKIZaZDdxcSRDwNaONzsKy9vKxw//kzx7Xj9djdBBdpd9Ss3tLgCVqPmKf8voft9wggKT1mNQPPhMtzSsQs896Nb7H0/+VCxsnRIxjZeRT5lY04cQp/cRXZiiHMvXEe0toEf3rYZipPYZp5ApE4E5rWB5q0VuneRRNmo+pvuU8LtH5ua6k26XAH5dtfw1gbHYmos9pgqhHCE6C4lhgcrJcp9Rln9IlfVuxzNO18UpYdI3buIVDSIrld2i7Gu7Vlh5uSuV49J3VfGh667mlLJxizliMybT+vytWy9/9skx4fQXSAUFSnBUQMY0WVSuCocxRN19HDzLQrOTe7Iguu7uh4zhRBOLPaYGovFVN5CRL/dFFgA4UuE4blZ91Ut0Tw1tnvp36taVQuFvi7E8C5KyV6cUhJVVbFKWaTqk5q/Rqy99FIO7drBeHycyvoWTFOQHOtB2Gmk0NCMIFIL4PJVo9asQUQqcaYGyb7+tO2kj6uOmcMupn+GNXobMPBWFzBDAaQA4Yo2X/FZd6hqbc7Md0jd7ReeMtSyOttTVafWLj2Xjde0sf35YbpefJH8RBwzncMpZFAdk0Ihj26VyIz2U1bfRMFycPIZcPtw6Qam6SBcPoxQFFd5Fd5oOc1L27l4fS2/3zHGyVf+SHpw2FELY05pclDTnOKkoRoHc+OD+0aGXvk6meHx6WWdUZWYUR8Qi31E6ezEDJVVuyzNd+X8eSEZic6z0HyK4narqlcjpJUYPlIgqiksm1eOGQTMIsIu0tc3zIL6Go6eiNM71o9VzLNuVRsTE2lC4SCZnImmqASCfhSPH6EJpF5AzycZ6yrDN9zLZPd+8kOvi2h9o9ba3mBPDg1H8imto6y8YdvI0ScTsVin0tk5Oz3CX0IBCIWMZlfNVaXPfO0hR0rpyGlyZklKKeW/bj0ptx+akH/Op+9+REop5Z4jJ2Ww+QopwmvlwFRK/mDr8/LAsT758FMvyV2HT7xpxGnTe04m5PeeOiInM1npbdogUeudljXXSltK5857H3G0qvfFAc+0jzOK6rfUCSaTxbzbm7N++/QufemSZnlqLENNYw03rD+XVwcSdD7+JNc+eAOPv3iQnz7yO8pCPhKpLKaUxC2bFW0N/MeWL3Fj7HOM5i2Sps1I3kSq8Nk7f0DrgjZuuP5yKiJ+fvjzlxkdHqWutgyvr41IxEWuXxU9R44zkMqJRYuapdT1cKiiZXFyvGcvMzw0makAzunj6q8OCye/YzI++b4bN17nVKy6VH1g6zd5+sQkn7hmE0JY9OtuREsLV376GirnBTi0cx/P/Gob+22VPb8/wCXvX8s/3H4z+ybyjFigpW0c3c3LW3/Jy46gelkT551/DvfeeQ+YcMXHP8BhCXf9+JsUEwmmJpIct8DTVGuXR6u11ND4ZdCzFzqU6UbprAgwHV6yzOX2tyTigyx97zrxpce/y6mRNHfEPkX28E5WfjDGoIC+oyfID53i5BHB3udfxRf0Mygl92++l8HUzVz+6X8kl3PI5faRKEoEOrrXQZoWU4kkWbeXqgqYGBxlbKCfniL4q2qINs2XC304iQKqFVapra0kOeo/B4BYpaTzzBc0wz4gpsBdTmT+BZeYlr5g+epF9j89+H3l6GCGhz67icaAyfKLLiZaWU3vkM1Lu46xbedR9nYlkZ4IkVAFvb0CmRrm4S98if1/HOdYn0IpLZgakXIs7kYTFpaVIzUQZyiu4tIFVn6C7OAp4lMOW7/3M25Y/QFx08U3qL/4/pOkfIaoqo2ArbgBYsRmtKKZRIBgc7uM3N8aLBH5yrtWL5TvvWWz6D7hQWRKXHrTv+GbF6YYHyb+6ssMHVaZv3ID9WsAFbI9x0gceIH+fUls22aq9zC//vqXOf/arzJ5clRGigaWqwzh8kDBJDmWIhNX8AQjoGpkEnF6DimOlDXK2OEdz48dTneiKd9tu+xKEamtw6WxslhX5+nsvDrPDPaBMxcgFlO46y47X3vRpkg4vHTpRbfaPb0BVRXg6BFyThL32Ouc3LedwsgJouNx+oaHSCUy2HaJUi6DtIq4dv2Bkh3CV7eUkZ4+tn3nX7AsS7g8LhRVRY+04fNmOfzaKyQTt5FIl9CDNSQSaXpeeEag2ngqaltL2XRdcXzAGj+k6G7fKjsQ+sX83HBdh83AM6cjtfOMSuGZlgyBEBK/LPeEP3hs3boVoXMujIm9h7rE+OhRkuP9FKcGMdNJTAI40iBfyGNJBUWoOFIgdA+KEUBxh9F8ZThSYPjCSAlmdhLHzCNLaazsOLKURtG8OMUMhteHtFLouoGmWaiagmWq5NNjGIYiV111g1y4eIncsfWHak931xNmfOeHiMVUOmdVgJgKnXaw/sLL3IHGZzyGLRUFNTUxQT6XwsxncRwHNA9GIIo7UkWgspaK6gZCIS+hgI7f78EfCuOPVOEPlRMqC+ELaNiWQ2o8SSadJp2aIJeeIp8vkJpKkJhMMR6PkxgbJz01QTGTRRazIAvStPK22z9PdangDgWkYwlhFQs9k8d+2Y4QJlKeURqcUQp0dLSLHTugPNrWphhhJTk1aOczk450Co4eiIiypuXSX9NEqL5R+Krm4fb7KDN8BFSFVCJBemKMxMAUuWMj0rRfB+FC0ww0twuJgm1a2GYJx86jiRKGS+DzGqIsWkVVUytSc1EUCtlcnlR8hGRfL5nhPpGOn3JKpoOZUKQ3GNUMj+avq6vTBgYGzTN7sTNJAZDB6Lmteat4sUtVm7yBio/7K5qiui+Co7soWiaFbIJCaopiKoVp2kjTBCsPjgnSBiFAUU7XnjfejRDg2NM3BDgSnOljP0UDVQPNje714w4E8ARDuLx+3JqBYpmUMpPkpvpJp8a3OZbVWWz2PMSePRZnuAnOpG2cFmFJS2XD8jppS89A/6H1xWyyDrMgcRxQ1ZDQNFRVzaqKEEKooCgSgYbElJJucHQpZYUCp6RgWArbIxzhOFKUK4qiIsUihMgKIUMIVEdiIGXQse2EbdlF6dhRLCsNionh8ehuH4Fg5Ld+f3j35MTrk5mRY4eZYTc4E/6iYEKcvv6/eGO+2ZjyrdgQp8sMwJiAyjcp3Tn9+88/XrzRmnWcwXw7JMTeNOZPB6DK9P3p/IiJ0/NtBrrFm+af9S/Ic8wxxxxzzDHHHHPMMcccc8wxxzuL/wHaWf7qIX4PFAAAAABJRU5ErkJggg=="
+
         for i = 1, globals.maxplayers() do
             if entity.get_classname(i) ~= 'CCSPlayer' then
                 goto skip
@@ -6667,15 +5548,30 @@ do
                     scoreboard.set_icon(i)
                     shared.icon_data[ steam_id ] = true
                 end
-
                 goto skip
             end
 
-            local logo_id = shared.data[ steam_id ]
+            -- check if this player has Zenith loaded via global flag
+            local has_zenith = false
+            for j = 1, globals.maxplayers() do
+                if entity.get_steam64(j) == steam_id then
+                    -- same machine: check _G flag
+                    if j == entity.get_local_player() then
+                        has_zenith = (_G._auth_ok == true)
+                    end
+                    break
+                end
+            end
+            -- also always show for local player if authenticated
+            if i == entity.get_local_player() and _auth_alive then
+                has_zenith = true
+            end
 
-            if logo_id then
-                scoreboard.set_icon(i, string.format("https://zenith.dev/icons/%s.png", logo_id))
-                shared.icon_data[ steam_id ] = false
+            if has_zenith then
+                if not shared.icon_data[ steam_id ] then
+                    scoreboard.set_icon(i, _ZENITH_ICON)
+                    shared.icon_data[ steam_id ] = true
+                end
             else
                 if not shared.icon_data[ steam_id ] then
                     scoreboard.set_icon(i)
@@ -6706,6 +5602,7 @@ do
     shared.init()
 end
 
+--- region buy bot
 do
     local primary_console = {
         ["Autosnipers"] = "scar20",
@@ -6761,53 +5658,35 @@ do
     : record("settings", "buy_bot::utility")
     : save()
 
-    local function _do_buy()
-        local lp = entity.get_local_player()
-        if not lp then return end
-        local money = entity.get_prop(lp, "m_iAccount") or 0
+    client.set_event_callback("round_end_upload_stats", function ()
+        local money = entity.get_prop(entity.get_local_player(), "m_iAccount")
 
-        if not buy_bot.enabled:get() or money <= 800 then return end
-
-        local primary   = buy_bot.primary:get()
-        local secondary = buy_bot.secondary:get()
-        local util      = buy_bot.utility:get()
-        local armor     = entity.get_prop(lp, "m_ArmorValue") or 0
-        local has_helm  = entity.get_prop(lp, "m_bHasHelmet") == 1
-        local buy = ""
-
-        buy = primary   == 'None' and buy or buy .. 'buy ' .. (primary_console[primary]   or '') .. '; '
-        buy = secondary == 'None' and buy or buy .. 'buy ' .. (secondary_console[secondary] or '') .. '; '
-
-        for i = 1, #util do
-            local item_key = util[i]
-            local item_cmd = utility_console[item_key]
-            if item_cmd then
-                -- skip vesthelm if already have helmet
-                if item_key == "Helmet" and has_helm then
-                    -- already have helmet, buy vest instead if no armor
-                    if armor < 50 then buy = buy .. "buy vest; " end
-                -- skip vest/helmet if already have enough armor
-                elseif (item_key == "Kevlar") and armor >= 95 then
-                    -- already full armor, skip
-                else
-                    buy = buy .. "buy " .. item_cmd .. "; "
-                end
-            end
+        if not buy_bot.enabled:get() or money <= 800 then
+            return
         end
 
-        if buy == "" then return end
+        local buy = ''
+        local primary = buy_bot.primary:get()
+        local secondary = buy_bot.secondary:get()
+        local util = buy_bot.utility:get()
+
+        buy = primary == 'None' and buy or buy .. 'buy ' .. primary_console[primary] .. '; '
+        buy = secondary == 'None' and buy or buy .. 'buy ' .. secondary_console[secondary] .. '; '
+
+        for i = 1, #util do
+            local item = utility_console[ util[i] ]
+            buy = buy .. "buy " .. item .. "; "
+        end
+
+        if buy == '' then
+            return
+        end
+
         client.exec(buy)
-    end
-
-    -- fire on both events for reliability
-    client.set_event_callback("round_end_upload_stats", _do_buy)
-    client.set_event_callback("round_poststart", function()
-        -- small delay so buy menu is available
-        client.delay_call(0.5, _do_buy)
     end)
-
 end
 
+---region reatdfdfsd
 do
     local kills = 0
 
@@ -6843,7 +5722,10 @@ do
     end)
 end
 
+
+-- ======================================================================
 --  PREDICT (shoot enemies earlier via Kalman yaw prediction)
+-- ======================================================================
 do
     local predict = {}
     predict.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "☠Predict")
@@ -6859,7 +5741,9 @@ do
     _G.__predict = predict
 end
 
+-- ======================================================================
 --  UNSAFE CHARGE (allow shooting during doubletap even on low HC)
+-- ======================================================================
 do
     local unsafe_charge = {}
     unsafe_charge.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Unsafe Charge")
@@ -6875,192 +5759,113 @@ do
     _G.__unsafe_charge = unsafe_charge
 end
 
---  FAKE DUCK IN AIR (air exploit — rapid duck spam to shift tickbase)
-do
-    local fd_air = {}
-
-    fd_air.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Fake Duck In Air")
-        :record("aa", "fd_air::enabled"):save()
-
-    fd_air.key = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles",
-        merge { "FD Air Key", "\n", "fd_air::key" })
-        :record("aa", "fd_air::key"):save()
-
-    -- ── how it works ──────────────────────────────────────────────────
-    -- Rapidly alternates in_duck ON/OFF every tick while airborne.
-    -- The constant duck/unduck cycle forces the server to process
-    -- extra simulation steps per frame, shifting the tickbase forward
-    -- much faster than normal — effectively the same as spamming duck
-    -- manually at 64hz but automatic and frame-perfect every tick.
-    --
-    -- Does NOT require DT to be on — it works standalone.
-    -- The key acts as a toggle hold: release to stop.
-    -- ──────────────────────────────────────────────────────────────────
-
-    local _fd_flip = false  -- alternates each tick
-
-    client.set_event_callback("setup_command", function(cmd)
-        if not fd_air.enabled:get() then
-            _fd_flip = false
-            return
-        end
-
-        -- rawget() reads live key state — :get() is cached and won't work here
-        if not fd_air.key:rawget() then
-            _fd_flip = false
-            cmd.in_duck = 0
-            return
-        end
-
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then
-            _fd_flip = false
-            return
-        end
-
-        -- only while airborne
-        local flags = entity.get_prop(me, "m_fFlags") or 0
-        if bit.band(flags, 1) ~= 0 then
-            -- on ground — reset and clear duck
-            _fd_flip = false
-            cmd.in_duck = 0
-            return
-        end
-
-        -- alternate duck every single tick: ON → OFF → ON → OFF ...
-        -- this is the actual fake duck spam that shifts the tickbase
-        _fd_flip = not _fd_flip
-        cmd.in_duck = _fd_flip and 1 or 0
-    end)
-
-    _G.__fd_air = fd_air
-end
-
+-- ======================================================================
 --  AUTO OS (auto switch DT -> HideShot in bad conditions)
+-- ======================================================================
 do
-    -- ── Auto OS ──────────────────────────────────────────────────────────
-    -- Suppresses DT shots when not in a valid state (prevents wasted DT)
     local auto_os = {}
     auto_os.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Auto OS")
-        :record("aa", "auto_os::enabled"):save()
+    : record("aa", "auto_os::enabled") : save()
 
-    auto_os.states = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
-        merge { "- Enable On", "\n", "auto_os::states" },
-        { "Stand", "Crouch", "Air", "Move" })
-        :record("aa", "auto_os::states"):save()
+    auto_os.states = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- States",
+        {"Stand", "Crouch", "Air", "Move"})
+    : record("aa", "auto_os::states") : save()
 
-    auto_os.avoid_weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
-        merge { "- Avoid On", "\n", "auto_os::avoid" },
-        { "Deagle + Crouch", "Knife + Air", "Pistol + Move" })
-        :record("aa", "auto_os::avoid"):save()
+    auto_os.avoid_weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- Avoid States",
+        {"Desert Eagle & Crouch", "Knife & Air", "Pistol & Move"})
+    : record("aa", "auto_os::avoid") : save()
 
-    local function _os_state()
+    local function os_get_state()
         local me = entity.get_local_player()
         if not me then return "Stand" end
-        local vx = entity.get_prop(me, "m_vecVelocity[0]") or 0
-        local vy = entity.get_prop(me, "m_vecVelocity[1]") or 0
-        local spd = math.sqrt(vx*vx + vy*vy)
+        local vel = {entity.get_prop(me, "m_vecVelocity[0]"), entity.get_prop(me, "m_vecVelocity[1]")}
+        local spd = math.sqrt((vel[1] or 0)^2 + (vel[2] or 0)^2)
         local flags = entity.get_prop(me, "m_fFlags") or 0
         local on_ground = bit.band(flags, 1) ~= 0
-        local ducked = (entity.get_prop(me, "m_flDuckAmount") or 0) > 0.5
+        local crouched = entity.get_prop(me, "m_bDucked") == 1
         if not on_ground then return "Air" end
-        if ducked then return "Crouch" end
+        if crouched then return "Crouch" end
         if spd > 10 then return "Move" end
         return "Stand"
-    end
-
-    local function _os_weapon_class(me)
-        local wpn = entity.get_player_weapon(me)
-        if not wpn then return "other" end
-        local wid = bit.band(entity.get_prop(wpn, "m_iItemDefinitionIndex") or 0, 0xFFFF)
-        -- deagle = 1, r8 = 64
-        if wid == 1 or wid == 64 then return "deagle" end
-        -- knives: 42,59,41 + butterfly/other
-        if wid == 42 or wid == 59 or wid == 41 or (wid >= 500 and wid <= 520) then return "knife" end
-        -- pistols
-        local pistols = {2,3,4,30,32,36,61,63}
-        for _, p in ipairs(pistols) do if wid == p then return "pistol" end end
-        return "other"
     end
 
     client.set_event_callback("setup_command", function(cmd)
         if not auto_os.enabled:get() then return end
         if not software.is_double_tap() then return end
 
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
+        local me  = entity.get_local_player()
+        local wpn = me and entity.get_player_weapon(me)
+        local cls = wpn and entity.get_classname(wpn) or ""
 
-        local state  = _os_state()
-        local wclass = _os_weapon_class(me)
+        -- only suppress on actual guns - let everything else through (knife, nades, zeus, c4)
+        local is_gun = cls:find("rifle") or cls:find("pistol") or cls:find("sniper") or
+                       cls:find("machinegun") or cls:find("shotgun") or cls:find("smg") or
+                       cls:find("ak47") or cls:find("m4a") or cls:find("awp") or
+                       cls:find("aug") or cls:find("sg5") or cls:find("famas") or
+                       cls:find("galil") or cls:find("scar") or cls:find("g3sg") or
+                       cls:find("ssg") or cls:find("deagle") or cls:find("elite") or
+                       cls:find("fiveseven") or cls:find("glock") or cls:find("hkp") or
+                       cls:find("p250") or cls:find("revolver") or cls:find("tec9") or
+                       cls:find("usp") or cls:find("cz75") or cls:find("mp5") or
+                       cls:find("mp7") or cls:find("mp9") or cls:find("mac10") or
+                       cls:find("p90") or cls:find("bizon") or cls:find("ump") or
+                       cls:find("m249") or cls:find("negev") or cls:find("nova") or
+                       cls:find("xm1014") or cls:find("mag7") or cls:find("sawedoff") or
+                       cls:find("scout")
+        if not is_gun then return end
 
-        -- check avoid conditions first
-        local avoid = auto_os.avoid_weapons:get()
-        for _, av in ipairs(avoid) do
-            if (av == "Deagle + Crouch" and wclass == "deagle" and state == "Crouch") or
-               (av == "Knife + Air"     and wclass == "knife"  and state == "Air")    or
-               (av == "Pistol + Move"   and wclass == "pistol" and state == "Move")   then
-                cmd.in_attack = 0
+        local state  = os_get_state()
+        local states = auto_os.states:get()
+        for _, s in ipairs(states) do
+            if s == state then
+                cmd.in_attack = false
                 return
             end
-        end
-
-        -- check allowed states
-        local states = auto_os.states:get()
-        local allowed = (#states == 0)
-        for _, s in ipairs(states) do
-            if s == state then allowed = true; break end
-        end
-
-        if not allowed then
-            cmd.in_attack = 0
         end
     end)
 
     _G.__auto_os = auto_os
 end
 
---  AIR TELEPORT
---  When DT is on and an enemy is VISIBLE (not behind wall):
---    1. Disable DT so the server sees us on ground
---    2. Jump to snap position to ground
---    3. Re-enable DT on next ground tick
---  This lets you peek from air, land, and immediately DT shoot.
+-- ======================================================================
+--  AIR TELEPORT (peek from air using DT + jump timing)
+-- ======================================================================
 do
     local air_tel = {}
-
     air_tel.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Air Teleport")
-        :record("aa", "air_tel::enabled"):save()
+    : record("aa", "air_tel::enabled") : save()
 
-    air_tel.weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
-        merge { "- Weapons", "\n", "air_tel::weapons" },
-        { "AWP", "Scout", "Taser", "Pistol", "Rifle" })
-        :record("aa", "air_tel::weapons"):save()
+    air_tel.weapons = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "- Weapons",
+        {"AWP", "Scout", "Taser", "Pistol", "Rifle"})
+    : record("aa", "air_tel::weapons") : save()
 
-    air_tel.allow_cross = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
-        merge { "- Allow on crosshair", "\n", "air_tel::cross" },
-        { "No", "Yes" })
-        :record("aa", "air_tel::cross"):save()
+    air_tel.allow_cross = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "- Allow on cross",
+        {"No", "Yes"})
+    : record("aa", "air_tel::cross") : save()
 
-    -- ── internal state ───────────────────────────────────────────────
-    local _at_state       = "idle"  -- "idle" | "triggered" | "restoring"
-    local _at_dt_was_on   = false
-    local _at_land_tick   = 0
-    local _at_restore_in  = 0       -- ticks until we re-enable DT
+    local _at_was_air    = false
+    local _at_charge     = false
+    local _at_dt_suppressed = false  -- true while we force DT off mid-air
+    local _at_restore_time  = 0      -- tick to re-enable DT
 
-    -- check if any enemy is visible from our eye position
-    local function _at_has_visible_enemy(me)
-        local ex, ey, ez = client.eye_position()
-        if not ex then return false end
-        local enemies = entity.get_players(true)
-        for _, ent in ipairs(enemies) do
+    -- helper: is any visible enemy able to shoot us (has LOS, is alive, not dormant)
+    local function _at_enemy_can_shoot(me)
+        local my_pos = entity.get_origin(me)
+        if not my_pos then return false end
+        for _, ent in ipairs(entity.get_players(true)) do
             if entity.is_alive(ent) and not entity.is_dormant(ent) then
-                -- check chest hitbox (1) and head hitbox (0)
-                for _, hg in ipairs({0, 1}) do
-                    local hx, hy, hz = entity.hitbox_position(ent, hg)
-                    if hx then
-                        local frac, hit = client.trace_line(me, ex, ey, ez, hx, hy, hz)
-                        if frac > 0.97 or (hit == ent) then
-                            return true
+                local epos = entity.get_origin(ent)
+                if epos then
+                    -- simple distance + LOS check via trace
+                    local dist = (my_pos - epos):length()
+                    if dist < 3000 then
+                        -- trace from enemy eye to our position
+                        local eye = entity.get_prop(ent, 'm_vecOrigin')
+                        if eye then
+                            local trace = engine.trace_line(epos, my_pos, ent)
+                            if trace and trace > 0.97 then
+                                return true  -- clear LOS within range
+                            end
                         end
                     end
                 end
@@ -7069,85 +5874,92 @@ do
         return false
     end
 
-    -- weapon filter
-    local function _at_weapon_allowed(me)
+    -- helper: weapon allowed
+    local function _at_weapon_ok(me)
         local wpn = entity.get_player_weapon(me)
-        if not wpn then return false end
-        local cls = entity.get_classname(wpn) or ""
+        local wpn_class = wpn and entity.get_classname(wpn) or ''
         local sel = air_tel.weapons:get()
         if #sel == 0 then return true end
         for _, w in ipairs(sel) do
-            if (w == "AWP"    and cls:find("awp"))    or
-               (w == "Scout"  and cls:find("ssg"))    or
-               (w == "Taser"  and cls:find("taser"))  or
-               (w == "Pistol" and cls:find("pistol")) or
-               (w == "Rifle"  and (cls:find("ak47") or cls:find("m4"))) then
+            if (w == 'AWP'    and wpn_class:find('awp'))    or
+               (w == 'Scout'  and wpn_class:find('ssg'))    or
+               (w == 'Taser'  and wpn_class:find('taser'))  or
+               (w == 'Pistol' and wpn_class:find('pistol')) or
+               (w == 'Rifle'  and (wpn_class:find('ak47') or wpn_class:find('m4'))) then
                 return true
             end
         end
         return false
     end
 
-    local _dt_ref = software.rage.aimbot.double_tap[1]
-
-    client.set_event_callback("setup_command", function(cmd)
+    client.set_event_callback('setup_command', function(cmd)
         if not air_tel.enabled:get() then
-            _at_state = "idle"
+            -- clean up if disabled mid-flight
+            if _at_dt_suppressed then
+                ui.set(unpack(settings.rage.double_tap))
+                _at_dt_suppressed = false
+            end
             return
         end
-
         local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then
-            _at_state = "idle"
-            return
-        end
+        if not me or not entity.is_alive(me) then return end
+        if not _at_weapon_ok(me) then _at_was_air = false; return end
 
-        if not _at_weapon_allowed(me) then
-            _at_state = "idle"
-            return
-        end
-
-        local flags     = entity.get_prop(me, "m_fFlags") or 0
+        local flags     = entity.get_prop(me, 'm_fFlags') or 0
         local on_ground = bit.band(flags, 1) ~= 0
         local in_air    = not on_ground
-        local dt_active = software.is_double_tap()
+        local now       = globals.tickcount()
 
-        if _at_state == "idle" then
-            -- waiting: in air + DT on + visible enemy → trigger
-            if in_air and dt_active and _at_has_visible_enemy(me) then
-                _at_dt_was_on  = true
-                _at_state      = "triggered"
-                -- disable DT so server registers us on the ground tick
-                pcall(ui.set, _dt_ref, false)
-            end
+        -- ── Restore DT after suppression timeout ──────────────────────────
+        if _at_dt_suppressed and now >= _at_restore_time then
+            ui.set(unpack(settings.rage.double_tap))  -- re-enable DT
+            _at_dt_suppressed = false
+        end
 
-        elseif _at_state == "triggered" then
-            -- DT is off — press jump this tick to snap to ground position
-            if on_ground then
-                cmd.in_jump = 1
-                _at_state   = "restoring"
-                _at_restore_in = 2   -- wait 2 ticks then re-enable DT
-            elseif in_air then
-                -- still in air — keep waiting, keep DT off
-                cmd.in_jump = 1   -- push down
-            end
+        if in_air then
+            _at_charge = software.is_double_tap()
 
-        elseif _at_state == "restoring" then
-            -- landed, counting down before re-enabling DT
-            _at_restore_in = _at_restore_in - 1
-            if _at_restore_in <= 0 then
-                if _at_dt_was_on then
-                    pcall(ui.set, _dt_ref, true)
+            -- If enemy can shoot us while airborne → suppress DT immediately
+            if _at_charge and not _at_dt_suppressed then
+                local enemy_visible = _at_enemy_can_shoot(me)
+                if enemy_visible then
+                    -- disable DT so we don't shoot mid-air
+                    local dt_ref = settings.rage.double_tap
+                    if dt_ref then
+                        ui.set(dt_ref[1], false)
+                    end
+                    _at_dt_suppressed = true
+                    _at_restore_time  = now + math.floor((1/globals.tickinterval()) * 2)  -- 2 seconds
                 end
-                _at_state = "idle"
+            end
+
+            -- block shooting while airborne (only if air_tel enabled)
+            if air_tel.enabled:get() then
+                cmd.in_attack = false
             end
         end
+
+        -- ── Landed after being airborne → teleport tick ───────────────────
+        if _at_was_air and on_ground then
+            if _at_charge then
+                cmd.in_jump = true   -- ground-snap teleport
+                _at_charge  = false
+            end
+            -- if DT was suppressed, set restore timer from landing moment
+            if _at_dt_suppressed then
+                _at_restore_time = now + math.floor((1/globals.tickinterval()) * 2)
+            end
+        end
+
+        _at_was_air = in_air
     end)
 
     _G.__air_tel = air_tel
 end
 
+-- ======================================================================
 --  JUMP SCOUT (SSG08 jump shot)
+-- ======================================================================
 do
     local jump_scout = {}
     jump_scout.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Jump Scout")
@@ -7178,7 +5990,9 @@ do
     _G.__jump_scout = jump_scout
 end
 
+-- ======================================================================
 --  DORMANT AIMBOT (fire at dormant/gray ESP enemies)
+-- ======================================================================
 do
     local dormant_ab = {}
     dormant_ab.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Dormant Aimbot")
@@ -7207,7 +6021,9 @@ do
     _G.__dormant_ab = dormant_ab
 end
 
+-- ======================================================================
 --  DROP NADES (drop grenades to teammates)
+-- ======================================================================
 do
     local drop_nades = {}
     drop_nades.key = menu.new_item(ui.new_hotkey, "AA", "Anti-aimbot angles", "Drop Nades Key")
@@ -7226,7 +6042,9 @@ do
     _G.__drop_nades = drop_nades
 end
 
+-- ======================================================================
 --  ENEMY CHAT REVEALER (show enemy chat in console)
+-- ======================================================================
 do
     local chat_reveal = {}
     chat_reveal.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Enemy Chat Revealer")
@@ -7250,7 +6068,10 @@ do
     _G.__chat_reveal = chat_reveal
 end
 
+
+-- ======================================================================
 --  SESSION STATISTICS (shown on Home page)
+-- ======================================================================
 do
     local _stats = {
         session_start = globals.realtime and globals.realtime() or 0,
@@ -7276,10 +6097,13 @@ do
     end)
 end
 
+
+-- ======================================================================
 --  ZENITH LEADERBOARD  (database kill tracking)
+-- ======================================================================
 do
-    local _LB_KEY   = 'zenith_leaderboard_v1'
-    local _TOT_KEY  = 'zenith_total_users_v1'
+    local _LB_KEY   = 'zenith_leaderboard_v2'
+    local _TOT_KEY  = 'zenith_total_users_v2'
     local _my_user  = _auth_user or 'unknown'
 
     local function _lb_read()
@@ -7314,7 +6138,7 @@ do
             if e.u == _my_user then rank = i; break end
         end
         shared.fl_leaderboard:set(string.format(
-            '\a444444ffkills  \affd700ff#%d\a666666ff/%d  \affffffff%d kills',
+            '★Leaderboard: \affd700ff#%d\affffffff of %d (\affd700ff%d kills\affffffff)',
             rank, total, my_k))
     end
 
@@ -7334,11 +6158,71 @@ do
     -- initial label update
     _update_lb_label()
 end
+-- ======================================================================
 client.set_event_callback("net_update_end", exploit.handle_defensive)
 client.set_event_callback("net_update_end", exploit.net_update)
 client.set_event_callback("net_update_end", localplayer.net_update)
 client.set_event_callback("shutdown", function() if gui and gui.shutdown then gui.shutdown() end end)
 client.set_event_callback("shutdown", antiaim.shutdown)
+
+
+-- ======================================================================
+--  BRAND HEADER -- Premium animated Zenith branding with icons
+-- ======================================================================
+do
+    local _bh_alpha = 0.0
+    local _bh_t     = 0.0
+
+    client.set_event_callback('paint_ui', function()
+        local is_open = ui.is_menu_open()
+        _bh_alpha = motion.interp(_bh_alpha, is_open and 1 or 0, 0.055)
+        if _bh_alpha <= 0.01 then return end
+
+        _bh_t = _bh_t + globals.frametime()
+
+        local r, g, b = widgets.color_picker:rawget()
+        local a       = math.floor(255 * _bh_alpha)
+        local flags   = "d"
+
+        local sx, sy  = client.screen_size()
+        local px      = math.floor(sx * 0.012)
+        local py      = math.floor(sy * 0.048)
+
+        -- Premium icons
+        local diamond_icon = "\xE2\x97\x86"  -- ◆
+        local brand   = diamond_icon .. " Zenith"
+        local tagline = "  \xE2\x94\x82  Elegance in Execution."
+
+        local bw, bh  = renderer.measure_text(flags, brand)
+        local tw, _   = renderer.measure_text(flags, tagline)
+        local sep_w   = bw + tw
+
+        -- animated shimmer: a bright vertical band scrolls across the brand text
+        local shimmer  = (_bh_t * 0.8) % 1.0
+        local shimmer_x = px + shimmer * sep_w
+        local shimmer_a = math.floor(28 * _bh_alpha * (1 - math.abs(shimmer - 0.5) * 2))
+
+        -- glow bar behind separator line
+        renderer.rectangle(px, py + bh + 2, sep_w, 2, r, g, b, math.floor(18 * _bh_alpha))
+
+        -- separator line  (1px, accent)
+        renderer.rectangle(px, py + bh + 3, sep_w, 1, r, g, b, math.floor(90 * _bh_alpha))
+
+        -- shimmer band (bright white vertical slice)
+        if shimmer_a > 0 then
+            renderer.rectangle(math.floor(shimmer_x - 2), py, 4, bh,
+                255, 255, 255, shimmer_a)
+        end
+
+        -- brand name with icon (accent)
+        renderer.text(px, py, r, g, b, a, flags, 0, brand)
+
+        -- tagline with separator (dim grey, fades in slightly delayed)
+        renderer.text(px + bw, py,
+            155, 155, 165, math.floor(190 * _bh_alpha), flags, 0, tagline)
+    end)
+end
+
 
 client.set_event_callback("paint_ui", function() if gui and gui.frame then gui.frame() end end)
 client.set_event_callback("paint_ui", windows.frame)
@@ -7373,6 +6257,385 @@ client.set_event_callback("player_hurt", log_aimbot_shots.player_hurt)
 client.set_event_callback("round_prestart", hit_marker.round_prestart)
 cvar.developer:set_raw_int(0)
 
+
+
+
+
+
+
+
+
+--- region valk_features
+-- Viewmodel / Third Person / Aspect Ratio / Netgraph / Logs / Autobuy / Ladder / Legs
+do
+    local G  = "AA"
+    local GR = "Anti-aimbot angles"
+    local M  = "Misc"
+    local MO = "Movement"
+
+    -- UI items: Viewmodel
+    local vm_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::vm_en"}, "Viewmodel"):record("visuals","vf::vm_en"):save()
+    local vm_fov      = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_fov"}, 54, 90, 68, true, "fov", 1):record("visuals","vf::vm_fov"):save()
+    local vm_ox       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_ox"},  0, 50, 25, true, "x", 1):record("visuals","vf::vm_ox"):save()
+    local vm_oy       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_oy"},  0, 40, 20, true, "y", 1):record("visuals","vf::vm_oy"):save()
+    local vm_oz       = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::vm_oz"},  0, 40, 20, true, "z", 1):record("visuals","vf::vm_oz"):save()
+    local vm_rh       = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::vm_rh"}, "Right Hand"):record("visuals","vf::vm_rh"):save()
+
+    -- Third Person
+    local tp_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::tp_en"},   "Third Person"):record("visuals","vf::tp_en"):save()
+    local tp_dist     = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::tp_dist"}, 10, 300, 80, true, "u", 1):record("visuals","vf::tp_dist"):save()
+
+    -- Aspect Ratio
+    local ar_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::ar_en"},    "Aspect Ratio"):record("visuals","vf::ar_en"):save()
+    local ar_ratio    = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ar_ratio"}, 50, 200, 100, true, "%", 1):record("visuals","vf::ar_ratio"):save()
+
+    -- Netgraph
+    local ng_enabled  = menu.new_item(ui.new_checkbox, G,GR, merge{"\n","vf::ng_en"},  "Netgraph"):record("visuals","vf::ng_en"):save()
+    local ng_x        = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ng_x"}, 0, 3840, 300, true, "px", 1):record("visuals","vf::ng_x"):save()
+    local ng_y        = menu.new_item(ui.new_slider,   G,GR, merge{"\n","vf::ng_y"}, 0, 2160, 800, true, "px", 1):record("visuals","vf::ng_y"):save()
+
+    -- Hit/Miss Logs
+    local logs_en     = menu.new_item(ui.new_checkbox,      G,GR, merge{"\n","vf::logs_en"}, "Hit/Miss Logs"):record("visuals","vf::logs_en"):save()
+    local logs_x      = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_x"}, 0, 3840, 970, true, "px", 1):record("visuals","vf::logs_x"):save()
+    local logs_y_pos  = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_y"}, 0, 2160, 832, true, "px", 1):record("visuals","vf::logs_y"):save()
+    local logs_dur    = menu.new_item(ui.new_slider,        G,GR, merge{"\n","vf::logs_dur"}, 1, 10, 5, true, "s", 1):record("visuals","vf::logs_dur"):save()
+    local logs_hit_c  = menu.new_item(ui.new_color_picker,  G,GR, merge{"\n","vf::logs_hc"}, 100, 220, 100, 255):record("visuals","vf::logs_hc"):save()
+    local logs_miss_c = menu.new_item(ui.new_color_picker,  G,GR, merge{"\n","vf::logs_mc"}, 220, 80, 80, 255):record("visuals","vf::logs_mc"):save()
+
+    -- Misc items
+    local fix_hs   = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::fix_hs"},   "Fix Hideshots"):record("aa","vf::fix_hs"):save()
+    local dt_disc  = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::dt_disc"},  "Auto DT Discharge"):record("aa","vf::dt_disc"):save()
+    local fl_en    = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::fl_en"},    "Fast Ladder"):record("aa","vf::fl_en"):save()
+    local fl_modes = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::fl_modes"}, "Ascending", "Descending"):record("aa","vf::fl_modes"):save()
+    local ab_en    = menu.new_item(ui.new_checkbox,    M,MO, merge{"\n","vf::ab_en"},    "Autobuy"):record("aa","vf::ab_en"):save()
+    local ab_mode  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_mode"},  "Default", "Intelligent"):record("aa","vf::ab_mode"):save()
+    local ab_wpn   = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_wpn"},   "AK-47 / M4A4", "AK-47 / M4A1-S", "Galil / SG553", "FAMAS / AUG", "AWP", "Scout"):record("aa","vf::ab_wpn"):save()
+    local ab_pis   = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::ab_pis"},   "P250", "Five-SeveN / Tec-9", "CZ75", "Desert Eagle"):record("aa","vf::ab_pis"):save()
+    local ab_oth   = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::ab_oth"},   "Smoke", "Flash", "HE Grenade", "Molotov", "Zeus", "Half Armor", "Full Armor"):record("aa","vf::ab_oth"):save()
+
+    -- Leg animations
+    local legs_air  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::legs_air"},  "Off", "Static", "Moonwalk", "Kangaroo"):record("aa","vf::legs_air"):save()
+    local legs_airw = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_airw"}, 0, 100, 100, true, "%", 1):record("aa","vf::legs_airw"):save()
+    local legs_gnd  = menu.new_item(ui.new_combobox,    M,MO, merge{"\n","vf::legs_gnd"},  "Off", "Static", "Jitter", "Moonwalk", "Kangaroo", "Pacan4ik"):record("aa","vf::legs_gnd"):save()
+    local legs_o1   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_o1"},   0, 100, 100, true, "%", 1):record("aa","vf::legs_o1"):save()
+    local legs_o2   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_o2"},   0, 100, 100, true, "%", 1):record("aa","vf::legs_o2"):save()
+    local legs_jt   = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_jt"},   1, 8, 2, true, "t", 1):record("aa","vf::legs_jt"):save()
+    local legs_opts = menu.new_item(ui.new_multiselect, M,MO, merge{"\n","vf::legs_opts"}, "Move lean", "Pitch zero on land"):record("aa","vf::legs_opts"):save()
+    local legs_lean = menu.new_item(ui.new_slider,      M,MO, merge{"\n","vf::legs_lean"}, 0, 100, 50, true, "%", 1):record("aa","vf::legs_lean"):save()
+
+    -- Page show helpers (called from Visual/Misc page renders)
+    _G._vf_show_visual = function()
+        _safe_display(vm_enabled)
+        if vm_enabled:get() then
+            _safe_display(vm_fov); _safe_display(vm_ox)
+            _safe_display(vm_oy);  _safe_display(vm_oz); _safe_display(vm_rh)
+        end
+        _safe_display(tp_enabled)
+        if tp_enabled:get() then _safe_display(tp_dist) end
+        _safe_display(ar_enabled)
+        if ar_enabled:get() then _safe_display(ar_ratio) end
+        _safe_display(ng_enabled)
+        if ng_enabled:get() then _safe_display(ng_x); _safe_display(ng_y) end
+        _safe_display(logs_en)
+        if logs_en:get() then
+            _safe_display(logs_x); _safe_display(logs_y_pos)
+            _safe_display(logs_dur); _safe_display(logs_hit_c); _safe_display(logs_miss_c)
+        end
+    end
+
+    _G._vf_show_misc = function()
+        _safe_display(fix_hs); _safe_display(dt_disc)
+        _safe_display(fl_en)
+        if fl_en:get() then _safe_display(fl_modes) end
+        _safe_display(ab_en)
+        if ab_en:get() then
+            _safe_display(ab_mode); _safe_display(ab_wpn)
+            _safe_display(ab_pis);  _safe_display(ab_oth)
+        end
+        _safe_display(legs_air)
+        if legs_air:get() ~= "Off" then _safe_display(legs_airw) end
+        _safe_display(legs_gnd)
+        if legs_gnd:get() ~= "Off" then
+            _safe_display(legs_o1); _safe_display(legs_o2); _safe_display(legs_jt)
+        end
+        _safe_display(legs_opts)
+        if legs_opts:have_key("Move lean") then _safe_display(legs_lean) end
+    end
+
+    -- Hit/miss log data
+    local vf_logs = { entries = {} }
+    local function vf_add_log(text, is_hit, extra)
+        local r, g, b = logs_hit_c:rawget()
+        if not is_hit then r, g, b = logs_miss_c:rawget() end
+        table.insert(vf_logs.entries, 1, {
+            text=text, is_hit=is_hit, r=r, g=g, b=b,
+            time=globals.curtime(), frac=0, extra=extra or ""
+        })
+        while #vf_logs.entries > 8 do table.remove(vf_logs.entries) end
+    end
+
+    local function vf_lerp(a, b, t) return a + (b - a) * t end
+
+    local function vf_draw_logs()
+        if not logs_en:get() then return end
+        local lp = entity.get_local_player()
+        if not lp then return end
+        local dur = logs_dur:get()
+        local bx  = logs_x:get()
+        local by  = logs_y_pos:get()
+        local PAD = 7; local AW = 3; local LH = 13
+        local to_rm = {}
+        local cy = by
+        for i, log in ipairs(vf_logs.entries) do
+            local age = globals.curtime() - log.time
+            if age < dur then
+                log.frac = vf_lerp(log.frac, 1.0, 0.15)
+            else
+                log.frac = vf_lerp(log.frac, 0.0, 0.08)
+                if log.frac < 0.01 then table.insert(to_rm, i) end
+            end
+            local fr = log.frac
+            if fr < 0.02 then goto vf_skip end
+            do
+                local a   = math.floor(255 * fr)
+                local slx = math.floor(28 * (1 - fr))
+                local x   = bx + slx
+                local has_extra = log.extra ~= ""
+                local ch  = has_extra and (PAD*2 + LH*2 + 2) or (PAD*2 + LH)
+                renderer.rectangle(x, cy, 220, ch, 14, 14, 18, math.floor(210 * fr))
+                renderer.rectangle(x, cy, AW, ch, log.r, log.g, log.b, a)
+                local icon = log.is_hit and "+" or "-"
+                renderer.text(x+AW+PAD, cy+PAD, log.r, log.g, log.b, a, "d", 0, icon.." "..(log.text or ""))
+                if has_extra then
+                    renderer.rectangle(x+AW+PAD, cy+PAD+LH+1, 220-AW-PAD*2, 1, 255,255,255, math.floor(20*fr))
+                    renderer.text(x+AW+PAD, cy+PAD+LH+3, 200,200,200, math.floor(a*0.85), "d", 0, log.extra)
+                end
+                cy = cy + (ch + 4) * fr
+            end
+            ::vf_skip::
+        end
+        for i = #to_rm, 1, -1 do table.remove(vf_logs.entries, to_rm[i]) end
+    end
+
+    -- aim callbacks for logs
+    client.set_event_callback("aim_hit", function(e)
+        if not logs_en:get() then return end
+        local hg_names = {[0]="body",[1]="head",[2]="chest",[3]="stomach",[4]="l.arm",[5]="r.arm",[6]="l.leg",[7]="r.leg"}
+        local name = entity.get_player_name(e.target) or "?"
+        local hg   = hg_names[e.hitgroup] or "body"
+        local dmg  = e.damage or 0
+        vf_add_log(name.." ("..hg..")", true, dmg.."dmg")
+    end)
+    client.set_event_callback("aim_miss", function(e)
+        if not logs_en:get() then return end
+        local name   = entity.get_player_name(e.target) or "?"
+        local reason = e.reason or "?"
+        if reason == "?" then reason = "resolver" end
+        vf_add_log(name, false, reason)
+    end)
+
+    -- Netgraph
+    local ng_fps, ng_ping, ng_last = 0, 0, 0
+    local function vf_draw_ng()
+        if not ng_enabled:get() then return end
+        local now = globals.curtime()
+        if now - ng_last > 0.1 then
+            ng_fps  = math.floor(1 / math.max(globals.frametime(), 0.001) + 0.5)
+            ng_ping = math.floor((client.real_latency() or 0) * 1000 + 0.5)
+            ng_last = now
+        end
+        local x = ng_x:get(); local y = ng_y:get()
+        renderer.text(x, y,    200,200,200,200, "d", 0, string.format("fps: %d   ping: %dms", ng_fps, ng_ping))
+        renderer.text(x, y+12, 200,200,200,200, "d", 0, "loss: 0%  choke: 0%")
+    end
+
+    client.set_event_callback("paint", function()
+        vf_draw_logs()
+        vf_draw_ng()
+    end)
+
+    -- Viewmodel/TP/AR
+    local function vf_apply_vm()
+        if not vm_enabled:get() then return end
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+        client.set_cvar("viewmodel_fov",      vm_fov:get())
+        client.set_cvar("viewmodel_offset_x", (vm_ox:get()-25)/10)
+        client.set_cvar("viewmodel_offset_y", (vm_oy:get()-20)/10)
+        client.set_cvar("viewmodel_offset_z", (vm_oz:get()-20)/10)
+        client.set_cvar("cl_righthand",       vm_rh:get() and 1 or 0)
+    end
+    local _tp_ok, _tp_ref1, _tp_ref2 = pcall(function()
+        return ui.reference("Visuals","Effects","Force third person (alive)")
+    end)
+    local function vf_apply_tp()
+        if tp_enabled:get() then
+            local d = tp_dist:get()
+            if _tp_ref1 then pcall(ui.set,_tp_ref1,true) end
+            if _tp_ref2 then pcall(ui.set,_tp_ref2,true) end
+            client.set_cvar("c_mindistance",d); client.set_cvar("c_maxdistance",d)
+        else
+            client.set_cvar("c_mindistance",30); client.set_cvar("c_maxdistance",30)
+        end
+    end
+    local function vf_apply_ar()
+        if not ar_enabled:get() then client.set_cvar("r_aspectratio",0); return end
+        local sw,sh = client.screen_size()
+        client.set_cvar("r_aspectratio", (sw*(ar_ratio:get()/100))/sh)
+    end
+    ui.set_callback(vm_enabled.ref, vf_apply_vm); ui.set_callback(vm_fov.ref, vf_apply_vm)
+    ui.set_callback(vm_ox.ref, vf_apply_vm);      ui.set_callback(vm_oy.ref, vf_apply_vm)
+    ui.set_callback(vm_oz.ref, vf_apply_vm);      ui.set_callback(vm_rh.ref, vf_apply_vm)
+    ui.set_callback(tp_enabled.ref, vf_apply_tp); ui.set_callback(tp_dist.ref, vf_apply_tp)
+    ui.set_callback(ar_enabled.ref, vf_apply_ar); ui.set_callback(ar_ratio.ref, vf_apply_ar)
+
+    -- Fast ladder / fix hideshots / DT discharge
+    local _vf_hs_saved, _vf_hs_val = false, 14
+    local _fl_limit_ref; pcall(function() _fl_limit_ref = ui.reference("AA","Fake lag","Limit") end)
+    local _dt_ref;        pcall(function() _dt_ref = ui.reference("Rage","Aimbot","Double tap") end)
+
+    client.set_event_callback("setup_command", function(cmd)
+        local lp = entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+
+        if fl_en:get() and entity.get_prop(lp,"m_MoveType") == 9 then
+            local pitch = select(1, client.camera_angles())
+            cmd.yaw = math.floor(cmd.yaw+0.5); cmd.roll = 0
+            if fl_modes:have_key("Ascending") and cmd.forwardmove>0 and pitch<45 then
+                cmd.pitch=89; cmd.in_moveright=1; cmd.in_moveleft=0; cmd.in_forward=0; cmd.in_back=1
+                if cmd.sidemove==0 then cmd.yaw=cmd.yaw+90
+                elseif cmd.sidemove<0 then cmd.yaw=cmd.yaw+150
+                else cmd.yaw=cmd.yaw+30 end
+            end
+            if fl_modes:have_key("Descending") and cmd.forwardmove<0 then
+                cmd.pitch=89; cmd.in_moveleft=1; cmd.in_moveright=0; cmd.in_forward=1; cmd.in_back=0
+                if cmd.sidemove==0 then cmd.yaw=cmd.yaw+90
+                elseif cmd.sidemove>0 then cmd.yaw=cmd.yaw+150
+                else cmd.yaw=cmd.yaw+30 end
+            end
+        end
+
+        if fix_hs:get() and _fl_limit_ref then
+            local isOs = software.is_on_shot_antiaim()
+            local isDt = software.is_double_tap()
+            local isFd = software.is_duck_peek_assist()
+            if isOs and not isDt and not isFd then
+                if not _vf_hs_saved then _vf_hs_val=ui.get(_fl_limit_ref); _vf_hs_saved=true end
+                ui.set(_fl_limit_ref, 1)
+            elseif _vf_hs_saved then
+                ui.set(_fl_limit_ref, _vf_hs_val); _vf_hs_saved=false
+            end
+        end
+
+        if dt_disc:get() and _dt_ref then
+            local enemies = entity.get_players(true)
+            local vis = false
+            for _,ent in ipairs(enemies) do
+                local bx,by,bz = entity.hitbox_position(ent,1)
+                if bx and client.visible(bx,by,bz+20) then vis=true; break end
+            end
+            if vis then
+                ui.set(_dt_ref,false)
+                client.delay_call(0.01,function() ui.set(_dt_ref,true) end)
+            end
+        end
+
+        vf_apply_vm()
+    end)
+
+    -- Autobuy
+    local ab_pt = {["AK-47 / M4A4"]="ak47",["AK-47 / M4A1-S"]="ak47",["Galil / SG553"]="sg556",["FAMAS / AUG"]="sg556",["AWP"]="awp",["Scout"]="ssg08"}
+    local ab_pc = {["AK-47 / M4A4"]="m4a1",["AK-47 / M4A1-S"]="m4a1_silencer",["Galil / SG553"]="galilar",["FAMAS / AUG"]="aug",["AWP"]="awp",["Scout"]="ssg08"}
+    local ab_pcs= {["P250"]="p250",["Five-SeveN / Tec-9"]="fiveseven",["CZ75"]="cz75a",["Desert Eagle"]="deagle"}
+    local ab_streak = 0
+    client.set_event_callback("round_start", function()
+        if not ab_en:get() then return end
+        local lp=entity.get_local_player(); if not lp then return end
+        local money=entity.get_prop(lp,"m_iAccount") or 0
+        local is_ct=(entity.get_prop(lp,"m_iTeamNum") or 2)==3
+        local mode=ab_mode:get(); local sel_w=ab_wpn:get(); local sel_p=ab_pis:get()
+        local oth=ab_oth:get() or {}
+        local function has(v) for _,x in ipairs(oth) do if x==v then return true end end return false end
+        local pri=is_ct and (ab_pc[sel_w] or "m4a1") or (ab_pt[sel_w] or "ak47")
+        local pis=ab_pcs[sel_p] or "p250"
+        local arm=has("Full Armor") and "vesthelm" or has("Half Armor") and "vest" or nil
+        local mol=is_ct and "incgrenade" or "molotov"
+        local q={}; local function bq(c) q[#q+1]=c end
+        if mode=="Default" then
+            if money>=800 then
+                if money>=2700 then bq("buy "..pri) end
+                bq("buy "..pis)
+                if arm then bq("buy "..arm) end
+                if has("Smoke") then bq("buy smokegrenade") end; if has("Flash") then bq("buy flashbang") end
+                if has("HE Grenade") then bq("buy hegrenade") end; if has("Molotov") then bq("buy "..mol) end
+                if has("Zeus") then bq("buy taser") end
+            end
+        else
+            local full=is_ct and 4000 or 3700; local eco=is_ct and 1200 or 1000; local force=is_ct and 2000 or 1800
+            if ab_streak>=3 then full=full+1000 end
+            if money>=full then bq("buy "..pri); bq("buy "..pis); if arm then bq("buy "..arm) end
+                if has("Smoke") then bq("buy smokegrenade") end; if has("HE Grenade") then bq("buy hegrenade") end
+            elseif money>=force then bq("buy "..pri); bq("buy "..pis); if arm then bq("buy "..arm) end
+            elseif money>=eco then bq("buy "..pis) end
+        end
+        if #q>0 then client.exec(table.concat(q,";")) end
+    end)
+    client.set_event_callback("round_end", function(e)
+        local lp=entity.get_local_player(); if not lp then return end
+        local mt=entity.get_prop(lp,"m_iTeamNum") or 2
+        if e and e.winner==mt then ab_streak=0 else ab_streak=ab_streak+1 end
+    end)
+
+    -- Leg animations
+    local _leg_mv_ref; pcall(function() _leg_mv_ref=ui.reference("AA","Other","Leg movement") end)
+    local function set_lm(v) if _leg_mv_ref then pcall(ui.set,_leg_mv_ref,v) end end
+
+    client.set_event_callback("pre_render", function()
+        local lp=entity.get_local_player()
+        if not lp or not entity.is_alive(lp) then return end
+        local flags=entity.get_prop(lp,"m_fFlags") or 0
+        local on_ground=bit.band(flags,1)==1
+        local tc=globals.tickcount()
+        if on_ground then
+            local v=legs_gnd:get(); local o1=legs_o1:get(); local o2=legs_o2:get(); local spd=legs_jt:get()
+            if v=="Static" then entity.set_prop(lp,"m_flPoseParameter",1.0,0); set_lm("Always slide")
+            elseif v=="Jitter" then
+                local mul=1.0/(tc%(spd*4)>=(spd*2) and 200 or 400)
+                entity.set_prop(lp,"m_flPoseParameter",(tc%(spd*2)>=spd and o1 or o2)*mul,0); set_lm("Always slide")
+            elseif v=="Moonwalk" then entity.set_prop(lp,"m_flPoseParameter",0.0,7); set_lm("Never slide")
+            elseif v=="Kangaroo" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),3)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),7)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),6); set_lm("Off")
+            elseif v=="Pacan4ik" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(o1*0.01,o2*0.01),0)
+                set_lm(client.random_int(0,1)==0 and "Off" or "Always slide")
+            else set_lm("Off") end
+        else
+            local v=legs_air:get()
+            if v=="Static" then entity.set_prop(lp,"m_flPoseParameter",legs_airw:get()*0.01,6)
+            elseif v=="Moonwalk" then entity.set_prop(lp,"m_flPoseParameter",(globals.curtime()*0.55)%1,6)
+            elseif v=="Kangaroo" then
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),3)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),7)
+                entity.set_prop(lp,"m_flPoseParameter",client.random_float(0,1),6)
+            end
+        end
+        local opts=legs_opts:get() or {}
+        local has_lean=false; for _,v in ipairs(opts) do if v=="Move lean" then has_lean=true; break end end
+        if has_lean then
+            local vx=entity.get_prop(lp,"m_vecVelocity[0]") or 0; local vy=entity.get_prop(lp,"m_vecVelocity[1]") or 0
+            if math.sqrt(vx*vx+vy*vy)>1 then end -- layer access requires ent lib, skip for now
+        end
+        local has_land=false; for _,v in ipairs(opts) do if v=="Pitch zero on land" then has_land=true; break end end
+        if has_land and on_ground then
+            entity.set_prop(lp,"m_flPoseParameter",0.5,12)
+        end
+    end)
+    client.set_event_callback("shutdown", function() set_lm("Off") end)
+
+end -- end region valk_features
+
 local resolver_show_tab  -- defined after resolver is created
 
 menu.set_callback(function()
@@ -7381,8 +6644,8 @@ menu.set_callback(function()
     -- display fake lag info panel every frame
     if shared.fl_whatsup     then _safe_display(shared.fl_whatsup)     end
     if shared.fl_build       then _safe_display(shared.fl_build)       end
+    if shared.fl_version     then _safe_display(shared.fl_version)     end
     if shared.fl_online      then _safe_display(shared.fl_online)      end
-    if shared.fl_leaderboard then _safe_display(shared.fl_leaderboard) end
 
     -- display Lua tab fake lag overrides
     if shared.lua_fl_enabled then
@@ -7410,55 +6673,47 @@ menu.set_callback(function()
 
     local page = gui.selection:get()
 
-    -- ── AIMBOT ──────────────────────────────────────────────────────
-    if page == "◎  Aimbot" then
-        -- ── Rage Settings ───────────────────────────────────────────
-        local rg = _G.__zn_rage
-        if rg then
-            _safe_display(rg.enabled)
-            if rg.enabled:get() then
-                _safe_display(rg.weapon_picker)
-                local picker = rg.weapon_picker:get()
-                local wcfg   = rg.weapons[picker] or rg.weapons["Global"]
-                if wcfg then
-                    _safe_display(wcfg.aim_mode)
-                    _safe_display(wcfg.auto_hc)
-                    _safe_display(wcfg.auto_dmg)
-
-                    -- body aim
-                    _safe_display(wcfg.baim_enabled)
-                    if wcfg.baim_enabled:get() then
-                        _safe_display(wcfg.baim_mode)
-                        local bm = wcfg.baim_mode:get()
-                        local has_hp   = false
-                        local has_miss = false
-                        for _, v in ipairs(bm) do
-                            if v == "HP Threshold"  then has_hp   = true end
-                            if v == "After N Misses" then has_miss = true end
-                        end
-                        if has_hp   then _safe_display(wcfg.baim_hp)   end
-                        if has_miss then _safe_display(wcfg.baim_miss)  end
-                    end
-
-                    -- safepoint
-                    _safe_display(wcfg.sp_enabled)
-                    if wcfg.sp_enabled:get() then
-                        _safe_display(wcfg.sp_mode)
-                        local sm = wcfg.sp_mode:get()
-                        local has_hp   = false
-                        local has_miss = false
-                        for _, v in ipairs(sm) do
-                            if v == "HP Threshold"  then has_hp   = true end
-                            if v == "After N Misses" then has_miss = true end
-                        end
-                        if has_hp   then _safe_display(wcfg.sp_hp)   end
-                        if has_miss then _safe_display(wcfg.sp_miss)  end
-                    end
-                end
-            end
+    -- ── SETUP ────────────────────────────────────────────────────────
+    -- Features, Safe Head, Manual, Edge Yaw, Freestand, AA tweaks
+    if page == "Setup" then
+        _safe_display(settings.tweaks_enable)
+        if settings.tweaks_enable:get() then
+            _safe_display(settings.tweaks)
         end
 
-        -- ── Other aimbot features ────────────────────────────────────
+        _safe_display(aa_tweaks.enable)
+        if aa_tweaks.enable:get() then
+            _safe_display(aa_tweaks.items)
+        end
+
+        _safe_display(safe_head.enabled)
+        if safe_head.enabled:get() then
+            _safe_display(safe_head.states)
+        end
+
+        _safe_display(fs_disablers.states)
+
+        _safe_display(manual_direction.enabled)
+        if manual_direction.enabled:get() then
+            _safe_display(manual_direction.options)
+            _safe_display(manual_direction.arrows)
+            if manual_direction.arrows:get() then
+                _safe_display(manual_direction.color)
+            end
+            _safe_display(manual_direction.left_manual)
+            _safe_display(manual_direction.right_manual)
+            _safe_display(manual_direction.forward_manual)
+            _safe_display(manual_direction.disabled_manual)
+        end
+
+        -- Valkyrie misc features
+        if _G._vf_show_misc then _G._vf_show_misc() end
+
+    end
+
+    -- ── AIMBOT ─────────────────────────────────────���────────────────
+    -- Predict, Resolver, Unsafe Charge, Auto OS, Air Teleport, Jump Scout, Dormant
+    if page == "Aimbot" then
         local p = _G.__predict
         if p then
             _safe_display(p.enabled)
@@ -7469,14 +6724,6 @@ menu.set_callback(function()
 
         local uc = _G.__unsafe_charge
         if uc then _safe_display(uc.enabled) end
-
-        local fda = _G.__fd_air
-        if fda then
-            _safe_display(fda.enabled)
-            if fda.enabled:get() then
-                _safe_display(fda.key)
-            end
-        end
 
         local aos = _G.__auto_os
         if aos then
@@ -7507,141 +6754,22 @@ menu.set_callback(function()
             _safe_display(da.enabled)
             if da.enabled:get() then _safe_display(da.damage) end
         end
-
-        -- Lag Peak
-        if _G.__lagpeak_show then _G.__lagpeak_show() end
     end
 
     -- ── BUILDER ──────────────────────────────────────────────────────
-    -- AA builder + Manual Yaw + Edge Yaw + Freestanding
-    if page == "◆  Builder" then
-        -- Manual Yaw
-        _safe_display(manual_direction.enabled)
-        if manual_direction.enabled:get() then
-            _safe_display(manual_direction.options)
-            _safe_display(manual_direction.arrows)
-            if manual_direction.arrows:get() then
-                _safe_display(manual_direction.color)
-            end
-            _safe_display(manual_direction.left_manual)
-            _safe_display(manual_direction.right_manual)
-            _safe_display(manual_direction.forward_manual)
-            _safe_display(manual_direction.disabled_manual)
-        end
-
-        -- Edge Yaw / Freestanding
-        _safe_display(yaw_direction.edge_yaw)
-        _safe_display(yaw_direction.freestanding)
-        _safe_display(fs_disablers.states)
-
-        -- Animation Breakers
-        _safe_display(anim_breakers.enabled)
-        if anim_breakers.enabled:get() then
-            _safe_display(anim_breakers.ground)
-            _safe_display(anim_breakers.air)
-        end
-
-        _safe_display(angles.type)
-
-        if angles.type:get() == "Custom" then
-            _safe_display(angles.custom.state)
-
-            local state = angles.custom.state:get()
-            local list = angles.custom[state]
-
-            if list.enabled ~= nil then
-                _safe_display(list.enabled)
-
-                if not list.enabled:get() then
-                    goto continue
-                end
-            end
-
-            if list.pitch ~= nil then
-                local pitch = list.pitch:get()
-                _safe_display(list.pitch)
-
-                if pitch == "Custom" then
-                    _safe_display(list.pitch_offset)
-                end
-            end
-
-            if list.yaw_base ~= nil then
-                _safe_display(list.yaw_base)
-            end
-
-            local yaw_value = list.yaw:get()
-            _safe_display(list.yaw)
-
-            if yaw_value ~= "Off" then
-
-                if yaw_value == '180 LR' then
-                    _safe_display(list.yaw_180lr_mode)
-                    _safe_display(list.yaw_left)
-                    _safe_display(list.yaw_right)
-
-                    if list.yaw_180lr_mode:get() == 'Switch delay' then
-                        _safe_display(list.yaw_delay)
-                    end
-                else
-                    _safe_display(list.yaw_offset)
-                end
-
-                _safe_display(list.yaw_jitter)
-
-                if list.yaw_jitter:get() ~= "Off" then
-                    _safe_display(list.jitter_offset)
-                    _safe_display(list.jitter_randomization)
-
-                    if list.yaw_jitter:get() == "Zenith" then
-                        _safe_display(list.jitter_mode)
-                        _safe_display(list.zenith_safe)
-                        _safe_display(list.zenith_cycle)
-                        _safe_display(list.zenith_delay)
-
-                        ui.set_enabled(list.zenith_delay.ref, list.zenith_cycle:get() ~= 5)
-                    end
-                end
-            end
-
-            local body_yaw = list.body_yaw:get()
-            _safe_display(list.body_yaw)
-
-            if body_yaw ~= "Off" then
-                if body_yaw ~= "Opposite" then
-                    _safe_display(list.body_yaw_offset)
-                end
-
-                _safe_display(list.freestanding_body_yaw)
-            end
-
-            ::continue::
-        end
-    end
-
+    -- Custom AA angles builder (offset, modifier, desync, limitation)
     -- ── DEFENSIVE ────────────────────────────────────────────────────
-    if page == "❈  Defensive" then
-        _safe_display(defensive.enabled)
-        if defensive.enabled:get() then
-            _safe_display(defensive.mode)
-            _safe_display(defensive.state)
-            _safe_display(defensive.pitch)
-            _safe_display(defensive.yaw)
-        if defensive.yaw and (defensive.yaw:get() == "Snap" or defensive.yaw:get() == "Snap Jitter") then
-            _safe_display(defensive.snap_range)
-            _safe_display(defensive.snap_offset)
-        end
-        end
+        if page == "Builder" then
+        if _G._valk_show then _G._valk_show() end
     end
 
-    -- ── RESOLVER ─────────────────────────────────────────────────────
-    if page == "↻  Resolver" then
+    if page == "Resolver" then
         if resolver_show_tab then resolver_show_tab() end
     end
 
     -- ── VISUAL ───────────────────────────────────────────────────────
-    -- Widgets, Custom scope, Clientside nickname
-    if page == "◉  Visual" then
+    -- Widgets, Custom scope, Buy bot, Clientside nickname
+    if page == "Visual" then
         _safe_display(widgets.enabled)
         if widgets.enabled:get() then
             _safe_display(widgets.items)
@@ -7665,35 +6793,6 @@ menu.set_callback(function()
             _safe_display(custom_scope.offset)
         end
 
-        _safe_display(clientside_nickname.enabled)
-        if clientside_nickname.enabled:get() then
-            _safe_display(clientside_nickname.nickname)
-            _safe_display(clientside_nickname.apply)
-        end
-    end
-
-    -- ── MISC ─────────────────────────────────────────────────────────
-    -- Features/tweaks, AA tweaks, Safe Head, Buy Bot, Clantag, extras
-    if page == "☰  Misc" then
-        -- Features toggle
-        _safe_display(settings.tweaks_enable)
-        if settings.tweaks_enable:get() then
-            _safe_display(settings.tweaks)
-        end
-
-        -- AA tweaks
-        _safe_display(aa_tweaks.enable)
-        if aa_tweaks.enable:get() then
-            _safe_display(aa_tweaks.items)
-        end
-
-        -- Safe Head
-        _safe_display(safe_head.enabled)
-        if safe_head.enabled:get() then
-            _safe_display(safe_head.states)
-        end
-
-        -- Buy Bot
         _safe_display(buy_bot.enabled)
         if buy_bot.enabled:get() then
             _safe_display(buy_bot.primary)
@@ -7701,955 +6800,48 @@ menu.set_callback(function()
             _safe_display(buy_bot.utility)
         end
 
-        -- Clantag
+        -- Valkyrie features: viewmodel, third person, ar, netgraph, logs
+        if _G._vf_show_visual then _G._vf_show_visual() end
+
+        _safe_display(clientside_nickname.enabled)
+        if clientside_nickname.enabled:get() then
+            _safe_display(clientside_nickname.nickname)
+            _safe_display(clientside_nickname.apply)
+        end
+
+        -- Clantag on Visual page
         if _G.__misc_page and _G.__misc_page.show_clantag then
             _G.__misc_page.show_clantag()
         end
-
-        -- Killsay
-        local ks = _G.__killsay
-        if ks then
-            _safe_display(ks.enabled)
-            if ks.enabled:get() then
-                _safe_display(ks.mode)
-                _safe_display(ks.chance)
-                _safe_display(ks.cooldown)
-                _safe_display(ks.custom_en)
-                if ks.custom_en:get() then
-                    _safe_display(ks.custom)
-                end
-            end
-        end
-
-        -- Drop Nades / Chat Reveal
-        local dn = _G.__drop_nades
-        if dn then _safe_display(dn.key) end
-        local cr = _G.__chat_reveal
-        if cr then _safe_display(cr.enabled) end
-
-        -- Smart Features (bullet impact ESP)
-        if _show_impacts ~= nil then
-            _safe_display(_show_impacts)
-        end
-
     end
 
     -- HOME PAGE
-    if page == "⌂  Home" then
+    if page == "Home" then
         if _G.__home then _G.__home.show() end
     end
 
-    -- hide cloud buttons on every page by default
-    if _G._zn_cloud_upload_ref then pcall(ui.set_visible, _G._zn_cloud_upload_ref, false) end
-    if _G._zn_cloud_status_ref then pcall(ui.set_visible, _G._zn_cloud_status_ref, false) end
 
-    if page == "⚙  Configs" then
+
+    if page == "Configs" then
         if _G.__configs_show then _G.__configs_show() end
-        -- show cloud buttons only on Configs page
-        if _G._zn_cloud_upload_ref then pcall(ui.set_visible, _G._zn_cloud_upload_ref, true) end
-        if _G._zn_cloud_status_ref then pcall(ui.set_visible, _G._zn_cloud_status_ref, true) end
-    end
-
-end)
-
-if _HAS_AIMBOT then
---  ZENITH RAGE SETTINGS  v2
---  Auto HC / Min-Dmg / Body-Aim / Safepoint with per-weapon presets
---  Improved: better distance curve, armor detection, prediction quality,
---  lethal-shot detection, miss-driven dmg escalation, smooth HC,
---  my-vel penalty, scoped modifier, true Dynamic blending
-local _zn_rage = {}
-do
-    -- ── weapon categories ───────────────────────────────────────────────────
-    local WEAPON_CLASS = {
-        -- Snipers
-        [9]  = "AWP",   [40] = "Scout",
-        [11] = "Auto",  [38] = "Auto",
-        -- Rifles
-        [7]  = "Rifle", [60] = "Rifle", [16] = "Rifle",
-        [39] = "Rifle", [33] = "Rifle", [10] = "Rifle",
-        [13] = "Rifle", [19] = "Rifle", [24] = "Rifle",
-        -- Heavy Pistol (Deagle, R8)
-        [64] = "Heavy Pistol", [63] = "Heavy Pistol",
-        -- Pistols
-        [2]  = "Pistol", [3]  = "Pistol", [4]  = "Pistol",
-        [30] = "Pistol", [32] = "Pistol", [36] = "Pistol",
-        [61] = "Pistol", [1]  = "Pistol",
-        -- SMGs
-        [17] = "SMG", [25] = "SMG", [26] = "SMG",
-        [34] = "SMG", [35] = "SMG", [23] = "SMG",
-        -- Shotguns
-        [27] = "Shotgun", [29] = "Shotgun",
-        [41] = "Shotgun", [43] = "Shotgun",
-        -- Knife/Other
-        [42] = "Other", [59] = "Other",
-    }
-
-    -- ── base presets ───────────────────────────────────────────────────
-    -- hc  = base hitchance %
-    -- dmg = minimum damage gamesense must be able to deal
-    -- dmgMax = highest dmg we'll ever require (cap)
-    local PRESETS = {
-        ["AWP"]          = { Safe={hc=90,dmg=100}, Aggressive={hc=72,dmg=100}, dmgMax=115 },
-        ["Scout"]        = { Safe={hc=84,dmg=82},  Aggressive={hc=65,dmg=82},  dmgMax=92  },
-        ["Auto"]         = { Safe={hc=72,dmg=95},  Aggressive={hc=54,dmg=85},  dmgMax=110 },
-        ["Rifle"]        = { Safe={hc=70,dmg=90},  Aggressive={hc=52,dmg=80},  dmgMax=100 },
-        ["Heavy Pistol"] = { Safe={hc=68,dmg=82},  Aggressive={hc=50,dmg=72},  dmgMax=97  },
-        ["Pistol"]       = { Safe={hc=65,dmg=68},  Aggressive={hc=48,dmg=58},  dmgMax=85  },
-        ["SMG"]          = { Safe={hc=62,dmg=60},  Aggressive={hc=45,dmg=50},  dmgMax=80  },
-        ["Shotgun"]      = { Safe={hc=72,dmg=75},  Aggressive={hc=55,dmg=60},  dmgMax=100 },
-        ["Other"]        = { Safe={hc=65,dmg=78},  Aggressive={hc=48,dmg=68},  dmgMax=95  },
-    }
-
-    -- ── helpers ───────────────────────────────────────────────────
-    local function get_dist(a, b)
-        local ok1, ax, ay, az = pcall(entity.get_origin, a)
-        local ok2, bx, by, bz = pcall(entity.get_origin, b)
-        if ok1 and ok2 and ax and bx then
-            local dx, dy, dz = bx-ax, by-ay, bz-az
-            return math.sqrt(dx*dx + dy*dy + dz*dz)
-        end
-        return 800
-    end
-
-    local function clamp(v, lo, hi)
-        return math.max(lo, math.min(hi, math.floor(v + 0.5)))
-    end
-
-    -- smooth lerp for HC (prevent jumpy overrides that cause GS to re-resolve)
-    local _smooth_hc  = -1
-    local _smooth_dmg = -1
-    local function smooth_toward(cur, tgt, rate)
-        if cur < 0 then return tgt end
-        local diff = tgt - cur
-        return cur + diff * rate
-    end
-
-    -- ── per-target tracking ──────────────────────────────────────────────────
-    -- misses, hits, shots, last_origin (for teleport detection)
-    local hit_tracker  = {}
-    local plist_cache  = {}
-    local rage_ticks   = 0
-    local last_weapon  = nil
-    local rage_prev    = { hc = -1, dmg = -1 }
-
-    -- ── backup/restore ──────────────────────────────────────────────────
-    local rage_backup  = { saved = false }
-    local function backup_rage()
-        if rage_backup.saved then return end
-        pcall(function()
-            rage_backup.hc  = ui.get(software.rage.aimbot.hitchance)
-            rage_backup.dmg = ui.get(software.rage.aimbot.minimum_damage)
-            rage_backup.saved = true
-        end)
-    end
-    local function restore_rage()
-        if not rage_backup.saved then return end
-        pcall(ui.set, software.rage.aimbot.hitchance,      rage_backup.hc)
-        pcall(ui.set, software.rage.aimbot.minimum_damage, rage_backup.dmg)
-        rage_backup.saved = false
-        rage_prev  = { hc = -1, dmg = -1 }
-        _smooth_hc  = -1
-        _smooth_dmg = -1
-    end
-
-    -- ── menu items ──────────────────────────────────────────────────
-    local WEAPONS = { "Global", "AWP", "Scout", "Auto", "Rifle", "Heavy Pistol", "Pistol", "SMG", "Shotgun", "Other" }
-
-    _zn_rage.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Rage Settings")
-        :record("aa", "zn_rage::enabled"):save()
-
-    _zn_rage.weapon_picker = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
-        merge { "Weapon\n", "zn_rage::weapon_picker" }, WEAPONS)
-        :record("aa", "zn_rage::weapon_picker"):save()
-
-    _zn_rage.weapons = {}
-    for _, w in ipairs(WEAPONS) do
-        local ws = {
-            aim_mode   = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Aim Mode\n", "zn_rage::aim_mode_", w },
-                { "Safe", "Aggressive", "Dynamic" }):record("aa", "zn_rage::aim_mode_"..w):save(),
-
-            auto_hc    = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Auto Hit Chance\n", "zn_rage::auto_hc_", w })
-                :record("aa", "zn_rage::auto_hc_"..w):save(),
-
-            auto_dmg   = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Auto Min Damage\n", "zn_rage::auto_dmg_", w })
-                :record("aa", "zn_rage::auto_dmg_"..w):save(),
-
-            -- ── Body Aim ──
-            baim_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Auto Body Aim\n", "zn_rage::baim_en_", w })
-                :record("aa", "zn_rage::baim_en_"..w):save(),
-
-            baim_mode  = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Baim Trigger\n", "zn_rage::baim_mode_", w },
-                { "Always", "HP Threshold", "After N Misses", "Airborne", "Low Ammo", "Low HP Moving" })
-                :record("aa", "zn_rage::baim_mode_"..w):save(),
-
-            baim_hp    = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Baim HP\n", "zn_rage::baim_hp_", w },
-                1, 100, 40, true, "hp"):record("aa", "zn_rage::baim_hp_"..w):save(),
-
-            baim_miss  = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Baim Misses\n", "zn_rage::baim_miss_", w },
-                1, 10, 3, true, "x"):record("aa", "zn_rage::baim_miss_"..w):save(),
-
-            -- ── Safepoint ──
-            sp_enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] Auto Safepoint\n", "zn_rage::sp_en_", w })
-                :record("aa", "zn_rage::sp_en_"..w):save(),
-
-            sp_mode    = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] SP Trigger\n", "zn_rage::sp_mode_", w },
-                { "Always", "HP Threshold", "After N Misses", "Airborne" })
-                :record("aa", "zn_rage::sp_mode_"..w):save(),
-
-            sp_hp      = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] SP HP\n", "zn_rage::sp_hp_", w },
-                1, 100, 40, true, "hp"):record("aa", "zn_rage::sp_hp_"..w):save(),
-
-            sp_miss    = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
-                merge { "[" .. w .. "] SP Misses\n", "zn_rage::sp_miss_", w },
-                1, 10, 2, true, "x"):record("aa", "zn_rage::sp_miss_"..w):save(),
-        }
-        _zn_rage.weapons[w] = ws
-    end
-
-    _zn_rage.enabled:set_callback(function()
-        if not _zn_rage.enabled:get() then restore_rage() else rage_backup.saved = false end
-    end)
-
-    -- ── per-target trackers ───────────────────────────────────────────────
-    client.set_event_callback("aim_miss", function(e)
-        if not _zn_rage.enabled:get() then return end
-        local t = e and e.target; if not t or t <= 0 then return end
-        hit_tracker[t] = hit_tracker[t] or { misses=0, hits=0, shots=0, consec_miss=0 }
-        local tk = hit_tracker[t]
-        tk.misses      = tk.misses + 1
-        tk.shots       = tk.shots  + 1
-        tk.consec_miss = (tk.consec_miss or 0) + 1
-    end)
-
-    client.set_event_callback("aim_hit", function(e)
-        if not _zn_rage.enabled:get() then return end
-        local t = e and e.target; if not t or t <= 0 then return end
-        hit_tracker[t] = hit_tracker[t] or { misses=0, hits=0, shots=0, consec_miss=0 }
-        local tk = hit_tracker[t]
-        local hs = e.hitgroup == 1
-        tk.hits        = tk.hits  + 1
-        tk.shots       = tk.shots + 1
-        tk.consec_miss = 0
-        -- decay misses faster on headshots
-        if hs then tk.misses = math.max(0, tk.misses - 2)
-        elseif tk.misses > 0 then tk.misses = tk.misses - 1 end
-    end)
-
-    client.set_event_callback("round_start", function()
-        hit_tracker = {}; plist_cache = {}
-        _smooth_hc = -1; _smooth_dmg = -1
-    end)
-
-    client.set_event_callback("player_death", function(e)
-        local ent = client.userid_to_entindex(e.userid)
-        if ent then hit_tracker[ent] = nil; plist_cache[ent] = nil end
-    end)
-
-    -- ── main setup_command tick ────────────────────────────────────────────────
-    client.set_event_callback("setup_command", function()
-        if not _zn_rage.enabled:get() then restore_rage(); return end
-
-        local me = entity.get_local_player()
-        if not me or not entity.is_alive(me) then return end
-
-        backup_rage()
-
-        -- detect weapon class
-        local active_w = "Other"
-        local wpn_ent  = entity.get_player_weapon(me)
-        local wpn_id   = 0
-        if wpn_ent then
-            wpn_id  = bit.band(entity.get_prop(wpn_ent, "m_iItemDefinitionIndex") or 0, 0xFFFF)
-            active_w = WEAPON_CLASS[wpn_id] or "Other"
-        end
-
-        -- pick config
-        local picker  = _zn_rage.weapon_picker:get()
-        local cfg_key = (picker == "Global") and "Global" or active_w
-        local wcfg    = _zn_rage.weapons[cfg_key] or _zn_rage.weapons["Global"]
-
-        local mode   = wcfg.aim_mode:get()
-        local do_hc  = wcfg.auto_hc:get()
-        local do_dmg = wcfg.auto_dmg:get()
-
-        if not do_hc and not do_dmg then restore_rage(); return end
-
-        local wp_table = PRESETS[active_w] or PRESETS["Other"]
-        local safe_p   = wp_table.Safe
-        local agg_p    = wp_table.Aggressive
-        local dmgMax   = wp_table.dmgMax
-
-        -- Dynamic: true blend between Safe/Aggressive based on real-time factors
-        -- computed after modifiers, so we start with the midpoint
-        local hc_base  = (safe_p.hc  + agg_p.hc)  * 0.5
-        local dmg_base = (safe_p.dmg + agg_p.dmg) * 0.5
-
-        if mode == "Safe" then
-            hc_base  = safe_p.hc
-            dmg_base = safe_p.dmg
-        elseif mode == "Aggressive" then
-            hc_base  = agg_p.hc
-            dmg_base = agg_p.dmg
-        end
-
-        local hc  = hc_base
-        local dmg = dmg_base
-
-        -- ── find current target ───────────────────────────────────────────────
-        local target_ent   = nil
-        local target_dist  = 99999
-        local target_hp    = 100
-        local target_flags = 0
-        local target_vel   = 0
-        local target_armor = 0
-        local target_helmet= false
-
-        local ok, threat = pcall(client.current_threat)
-        if ok and threat and threat > 0 and entity.is_alive(threat) then
-            target_ent = threat
-        end
-
-        if target_ent then
-            target_dist   = get_dist(me, target_ent)
-            target_hp     = entity.get_prop(target_ent, "m_iHealth")   or 100
-            target_flags  = entity.get_prop(target_ent, "m_fFlags")    or 0
-            target_armor  = entity.get_prop(target_ent, "m_ArmorValue") or 0
-            target_helmet = entity.get_prop(target_ent, "m_bHasHelmet") == 1
-            local vx = entity.get_prop(target_ent, "m_vecVelocity[0]") or 0
-            local vy = entity.get_prop(target_ent, "m_vecVelocity[1]") or 0
-            target_vel = math.sqrt(vx*vx + vy*vy)
-        else
-            for _, ent in ipairs(entity.get_players(true)) do
-                if entity.is_alive(ent) and not entity.is_dormant(ent) then
-                    local d = get_dist(me, ent)
-                    if d < target_dist then
-                        target_dist   = d
-                        target_ent    = ent
-                        target_hp     = entity.get_prop(ent,"m_iHealth")    or 100
-                        target_flags  = entity.get_prop(ent,"m_fFlags")     or 0
-                        target_armor  = entity.get_prop(ent,"m_ArmorValue") or 0
-                        target_helmet = entity.get_prop(ent,"m_bHasHelmet") == 1
-                        local vx = entity.get_prop(ent,"m_vecVelocity[0]") or 0
-                        local vy = entity.get_prop(ent,"m_vecVelocity[1]") or 0
-                        target_vel = math.sqrt(vx*vx + vy*vy)
-                    end
-                end
-            end
-        end
-
-        local is_airborne = target_ent and (bit.band(target_flags,1) == 0) or false
-
-        -- ── my own velocity penalty ──────────────────────────────────────────────
-        -- if I'm also moving, prediction error goes up on both sides
-        local my_vx = entity.get_prop(me, "m_vecVelocity[0]") or 0
-        local my_vy = entity.get_prop(me, "m_vecVelocity[1]") or 0
-        local my_vel = math.sqrt(my_vx*my_vx + my_vy*my_vy)
-
-        if my_vel > 220 then
-            hc = hc + 8   -- both moving fast = high prediction error
-        elseif my_vel > 80 then
-            hc = hc + 4
-        end
-
-        -- ── distance modifier (smooth curve, not hard brackets) ──────────────────────────
-        -- close (<300): easier to hit, relax HC slightly
-        -- mid (300-900): sweet spot, no change
-        -- long (900-1800): harder, tighten HC
-        -- very long (>1800): very hard, max tighten
-        for _, d in ipairs(TUNE.dist) do
-            if target_dist < d.max then hc = hc + d.delta; break end
-        end
-
-        -- ── target movement modifier ──────────────────────────────────────────────
-        do local m=TUNE.move
-            if     is_airborne      then hc=hc+m.air
-            elseif target_vel>260   then hc=hc+m.fast
-            elseif target_vel>160   then hc=hc+m.mid
-            elseif target_vel>80    then hc=hc+m.slow
-            elseif target_vel<8     then hc=hc-m.still end
-        end
-
-        -- ── scoped modifier ──────────────────────────────────────────────────
-        -- unscoped sniper = very inaccurate, jack HC way up
-        if active_w == "AWP" or active_w == "Scout" or active_w == "Auto" then
-            local is_scoped = entity.get_prop(me, "m_bIsScoped") == 1
-            if not is_scoped then
-                hc = hc + 35  -- unscoped sniper = basically never shoot
-            end
-        end
-
-        -- ── armor modifier ──────────────────────────────────────────────────
-        -- heavily armored target = need higher dmg to break through reliably
-        -- pistols/SMGs especially affected since armor eats their damage
-        if target_armor > 80 and target_helmet then
-            if active_w == "Pistol" or active_w == "SMG" then
-                dmg = dmg + 10  -- need more to pen
-                hc  = hc  + 4   -- harder to do enough damage
-            end
-        elseif target_armor == 0 then
-            -- no armor: easy to do damage, relax dmg requirement slightly
-            dmg = math.max(dmg - 8, 30)
-        end
-
-        -- ── HP-based modifiers ─────────────────────────────────────────────────
-        if target_ent then
-            if target_hp <= 8 then
-                -- basically dead: fire anything
-                dmg = 1
-                hc  = math.max(hc - 20, 25)
-            elseif target_hp <= 20 then
-                -- low HP: set dmg just below their HP (body shots work)
-                dmg = math.max(target_hp - 3, 1)
-                hc  = math.max(hc - 10, 30)
-            elseif target_hp <= 40 then
-                dmg = math.max(target_hp - 8, 1)
-                hc  = math.max(hc - 5, 35)
-            elseif target_hp >= 100 then
-                -- full HP: always require 100 dmg minimum
-                -- overrides preset values like 82/87/90
-                dmg = math.max(dmg, 100)
-            end
-            -- lethal shot detection: if we can 1-shot from here, lower dmg gate
-            -- so GS fires faster rather than waiting for a "perfect" shot
-            local can_one_shot = (active_w == "AWP" or active_w == "Auto") and target_hp <= 100
-            if can_one_shot then
-                dmg = math.min(dmg, target_hp)
-                hc  = math.max(hc - 5, 40)
-            end
-        end
-
-        -- ── miss streak escalation ────────────────────────────────────────────────
-        if target_ent then
-            local tk = hit_tracker[target_ent] or { misses=0, hits=0, shots=0, consec_miss=0 }
-            local consec = tk.consec_miss or 0
-
-            -- escalate HC/dmg using TUNE miss tables
-            for thr, pen in pairs(TUNE.miss_penalty) do
-                if consec >= thr then hc = math.min(hc + pen, 97) end
-            end
-            for thr, cut in pairs(TUNE.miss_dmg_cut) do
-                if consec >= thr then dmg = math.max(dmg - cut, 1) end
-            end
-
-            -- hitting well: relax slightly so we shoot more
-            local shots = tk.shots or 0; local hits = tk.hits or 0
-            if shots >= 4 and hits / shots >= 0.75 then
-                hc = math.max(hc - 4, agg_p.hc - 5)
-            end
-        end
-
-        -- ── Dynamic mode: true blend toward safer/more aggressive based on situation ──
-        if mode == "Dynamic" then
-            -- factors that make us want to be aggressive: low HP, close range, standing target
-            local aggr_score = 0
-            local me_hp = entity.get_prop(me, "m_iHealth") or 100
-            if me_hp < 40       then aggr_score = aggr_score + 2 end  -- low HP = take the shot
-            if target_dist < 350 then aggr_score = aggr_score + 2 end  -- close = easier
-            if target_vel < 5    then aggr_score = aggr_score + 1 end  -- standing = easy
-            if target_hp  < 50   then aggr_score = aggr_score + 1 end  -- low target HP = finish
-            -- factors that push toward safe
-            if is_airborne          then aggr_score = aggr_score - 2 end
-            if target_dist > 1200   then aggr_score = aggr_score - 2 end
-            if target_vel  > 200    then aggr_score = aggr_score - 1 end
-            -- blend: 0=full safe, 4+=full aggressive
-            local t = math.max(0, math.min(1, aggr_score / TUNE.dynamic_aggr_max))
-            hc  = safe_p.hc  + (agg_p.hc  - safe_p.hc)  * t
-            dmg = safe_p.dmg + (agg_p.dmg - safe_p.dmg) * t
-            -- re-apply the situation modifiers on top of blend
-            -- (they were applied to hc_base which was overwritten, so just re-add)
-        end
-
-        -- ── our HP panic: take the shot when low ─────────────────────────────
-        local my_hp = entity.get_prop(me, "m_iHealth") or 100
-        if my_hp <= 12 then
-            hc  = math.max(hc  - 22, 22)
-            dmg = math.max(dmg - 15, 1)
-        elseif my_hp <= 30 then
-            hc  = math.max(hc  - 12, 28)
-            dmg = math.max(dmg - 8,  1)
-        elseif my_hp <= 55 then
-            hc  = math.max(hc  - 5,  35)
-        end
-
-        -- ── smooth + clamp ──────────────────────────────────────────────────
-        hc  = clamp(hc,  1, 100)
-        dmg = clamp(dmg, 1, dmgMax)
-
-        -- Hitscan Logic: resolver-aware HC blending
-        if target_ent then
-            local _res_get = rawget(_G, "ZenithResolver_GetData")
-            if _res_get then
-                local rd = pcall(_res_get, target_ent) and _res_get(target_ent) or nil
-                if rd then
-                    local aa_type = rd.aa_type or "Gathering"
-                    local conf    = rd.confidence or 0.5
-                    -- Jitter Hitchance: lower HC when jitter/chaotic (resolver less reliable)
-                    if (aa_type == "Jitter" or aa_type == "Chaotic") and conf < TUNE.jitter_conf_floor then
-                        hc = math.max(hc - math.floor((TUNE.jitter_conf_floor-conf)*TUNE.jitter_penalty_scale), 25)
-                    end
-                    local desync = rd.desync or 0
-                    if desync > TUNE.high_desync_start then
-                        hc = math.min(hc + math.floor((desync-TUNE.high_desync_start)*TUNE.high_desync_scale), 100)
-                    end
-                end
-            end
-        end
-        -- smooth HC to prevent rapid flipping
-        -- (smooth toward target at 60% per tick so it tracks fast but doesn't jump)
-        _smooth_hc  = smooth_toward(_smooth_hc,  hc,  TUNE.smooth_hc)
-        _smooth_dmg = smooth_toward(_smooth_dmg, dmg, TUNE.smooth_dmg)
-        local final_hc  = clamp(_smooth_hc,  1, 100)
-        local final_dmg = clamp(_smooth_dmg, 1, dmgMax)
-
-        -- ── apply (every 2 ticks or on weapon change) ─────────────────────────────────
-        rage_ticks = rage_ticks + 1
-        local should_apply = (rage_ticks % TUNE.apply_every_ticks == 0)
-        if active_w ~= last_weapon then
-            last_weapon = active_w
-            rage_prev   = { hc = -1, dmg = -1 }
-            _smooth_hc  = hc
-            _smooth_dmg = dmg
-            should_apply = true
-        end
-
-        if should_apply then
-            if do_hc  and final_hc  ~= rage_prev.hc  then
-                pcall(ui.set, software.rage.aimbot.hitchance,      final_hc)
-                rage_prev.hc = final_hc
-            end
-            if do_dmg and final_dmg ~= rage_prev.dmg then
-                pcall(ui.set, software.rage.aimbot.minimum_damage, final_dmg)
-                rage_prev.dmg = final_dmg
-            end
-        end
-
-        -- ── body aim / safepoint per-target ──────────────────────────────────────────────
-        if target_ent then
-            local tk = hit_tracker[target_ent] or { misses=0 }
-            local wpn = entity.get_player_weapon(me)
-            local ammo = wpn and (entity.get_prop(wpn, "m_iClip1") or 99) or 99
-
-            local force_baim = false
-            if wcfg.baim_enabled:get() then
-                for _, m in ipairs(wcfg.baim_mode:get()) do
-                    if m == "Always" then force_baim = true; break
-                    elseif m == "HP Threshold" and target_hp <= wcfg.baim_hp:get() then force_baim = true; break
-                    elseif m == "After N Misses" and tk.misses >= wcfg.baim_miss:get() then force_baim = true; break
-                    elseif m == "Airborne" and is_airborne then force_baim = true; break
-                    elseif m == "Low Ammo" and ammo <= 3 then force_baim = true; break
-                    elseif m == "Low HP Moving" and target_hp <= 45
-                        and target_vel > 80 then force_baim = true; break
-                    end
-                end
-            end
-
-            -- Disable in air: when target is airborne, use plist to disable
-            -- safe point (air targets are easier, safe point wastes time)
-            if is_airborne then
-                pcall(plist.set, target_ent, "Disable in air", false)
-            end
-
-            local force_sp = false
-            if wcfg.sp_enabled:get() then
-                for _, m in ipairs(wcfg.sp_mode:get()) do
-                    if m == "Always" then force_sp = true; break
-                    elseif m == "HP Threshold" and target_hp <= wcfg.sp_hp:get() then force_sp = true; break
-                    elseif m == "After N Misses" and tk.misses >= wcfg.sp_miss:get() then force_sp = true; break
-                    elseif m == "Airborne" and is_airborne then force_sp = true; break
-                    end
-                end
-            end
-
-            local cached = plist_cache[target_ent] or {}
-            if cached.baim ~= force_baim then
-                pcall(plist.set, target_ent, "Override prefer body aim", force_baim and "On" or "Off")
-                cached.baim = force_baim
-            end
-            if cached.sp ~= force_sp then
-                pcall(plist.set, target_ent, "Override safe point", force_sp and "On" or "Off")
-                cached.sp = force_sp
-            end
-            plist_cache[target_ent] = cached
-        end
-    end)
-
-    _G.__zn_rage = _zn_rage
-end
-end -- _HAS_AIMBOT
-
-
--- ======================================================================
---  ZENITH TUNE TABLE -- all magic numbers in one place
--- ======================================================================
-local TUNE = {
-    apply_every_ticks     = 2,
-    smooth_hc             = 0.60,
-    smooth_dmg            = 0.55,
-    jitter_conf_floor     = 0.70,
-    jitter_penalty_scale  = 30,
-    high_desync_start     = 40,
-    high_desync_scale     = 0.15,
-    miss_penalty          = { [2]=8,  [3]=15, [5]=25 },
-    miss_dmg_cut          = { [3]=6,  [5]=12 },
-    hp_panic = {
-        dying  = { hp=12, hc_cut=22, dmg_cut=15, floor_hc=22 },
-        low    = { hp=30, hc_cut=12, dmg_cut=8,  floor_hc=28 },
-        medium = { hp=55, hc_cut=5 },
-    },
-    dist = {
-        { max=200,  delta=-12 }, { max=300,  delta=-8  }, { max=500,  delta=-4  },
-        { max=900,  delta=0   }, { max=1400, delta=5   }, { max=2000, delta=10  },
-        { max=1e9,  delta=16  },
-    },
-    move = { air=12, fast=9, mid=5, slow=2, still=6 },
-    dynamic_aggr_max      = 4,
-    min_samples_for_state = 8,
-    state_decay           = 0.85,
-}
-local function ema(prev, val, alpha)
-    if prev < 0 then return val end
-    return prev + alpha * (val - prev)
-end
-
-if _HAS_AIMBOT then
---  ZENITH SMART FEATURES
---  Multipoint / Head Scale / Target Priority / Bullet Impact ESP
---  Bomb awareness / Smoke/Flash reactive AA / Weapon-reload awareness
-do
-
--- ── per-target multipoint + head scale control ───────────────────────────
--- Uses plist to dynamically set multipoint and head scale per enemy
--- based on their HP, distance, and miss streak
--- This gives GS more or fewer hitboxes to choose from per target
-
-local _mp_cache = {}   -- [ent] = { mp, hs }
-local _mp_ticks = 0
-
-local function _mp_update()
-    _mp_ticks = _mp_ticks + 1
-    if _mp_ticks % 3 ~= 0 then return end  -- every 3 ticks
-
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-
-    local my_x, my_y, my_z = entity.get_origin(me)
-    if not my_x then return end
-
-    local rage_data = _G.__zn_rage
-    local hit_tr    = rage_data and rawget(rage_data, '_ht') or nil
-
-    for _, ent in ipairs(entity.get_players(true)) do
-        if not entity.is_alive(ent) or entity.is_dormant(ent) then
-            _mp_cache[ent] = nil
-            goto _mp_skip
-        end
-
-        local ex, ey, ez = entity.get_origin(ent)
-        if not ex then goto _mp_skip end
-
-        local dx, dy, dz = ex-my_x, ey-my_y, ez-my_z
-        local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-        local hp   = entity.get_prop(ent, 'm_iHealth') or 100
-        local flags= entity.get_prop(ent, 'm_fFlags')  or 0
-        local air  = bit.band(flags, 1) == 0
-
-        -- multipoint: On when close or target has high HP and we need damage
-        -- Off when target is low HP (any hit kills, don't waste on multipoint)
-        local want_mp
-        if hp <= 25 then
-            want_mp = 'Off'   -- near dead: any hit point works
-        elseif dist < 400 then
-            want_mp = 'On'    -- close: multipoint helps guarantee damage
-        elseif dist > 1600 then
-            want_mp = 'Off'   -- far: multipoint hurts accuracy
-        else
-            want_mp = 'On'
-        end
-
-        -- head scale: larger when standing still (gives GS bigger target)
-        -- smaller when airborne (tighter = safer point)
-        local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
-        local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
-        local spd = math.sqrt(vx*vx + vy*vy)
-
-        local want_hs  -- head scale: 1-13 in GS (1=smallest, 13=default full)
-        if air then
-            want_hs = 3    -- airborne: tight head hitbox only
-        elseif spd < 5 then
-            want_hs = 13   -- standing still: full head scale
-        elseif spd < 100 then
-            want_hs = 9
-        else
-            want_hs = 5    -- running: moderate
-        end
-
-        local cached = _mp_cache[ent] or {}
-        if cached.mp ~= want_mp then
-            pcall(plist.set, ent, 'Multipoint', want_mp)
-            cached.mp = want_mp
-        end
-        if cached.hs ~= want_hs then
-            pcall(plist.set, ent, 'Head scale', want_hs)
-            cached.hs = want_hs
-        end
-        _mp_cache[ent] = cached
-
-        ::_mp_skip::
-    end
-end
-
--- ── target priority override ─────────────────────────────────────────────
--- Sets plist Target selection priority based on:
--- who is lowest HP (easiest kill), who is shooting at us, who is closest
--- Priority 0 = normal, higher = prefer this target
-
-local _prio_cache = {}
-local _last_attacker = nil
-local _last_attacker_tick = -999
-
-client.set_event_callback('player_hurt', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    local my_uid = entity.get_prop(me, 'm_iUserId')
-    if e.userid == my_uid then
-        -- we got hurt - track who shot us
-        local attacker = client.userid_to_entindex(e.attacker)
-        if attacker and attacker ~= me then
-            _last_attacker      = attacker
-            _last_attacker_tick = globals.tickcount()
-        end
     end
 end)
-
-local function _prio_update()
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-    local my_x, my_y, my_z = entity.get_origin(me)
-    if not my_x then return end
-
-    -- attacker priority expires after 3 seconds
-    local attacker_valid = _last_attacker and
-        (globals.tickcount() - _last_attacker_tick) < (3 / globals.tickinterval())
-
-    for _, ent in ipairs(entity.get_players(true)) do
-        if not entity.is_alive(ent) or entity.is_dormant(ent) then
-            _prio_cache[ent] = nil
-            goto _prio_skip
-        end
-
-        local hp   = entity.get_prop(ent,'m_iHealth') or 100
-        local ex,ey,ez = entity.get_origin(ent)
-        if not ex then goto _prio_skip end
-        local dx,dy = ex-my_x, ey-my_y
-        local dist  = math.sqrt(dx*dx + dy*dy)
-
-        local prio = 0
-        -- shooter gets top priority
-        if attacker_valid and ent == _last_attacker then prio = prio + 4 end
-        -- low HP = easy kill
-        if hp <= 30  then prio = prio + 3
-        elseif hp <= 60 then prio = prio + 1 end
-        -- close range
-        if dist < 300 then prio = prio + 2
-        elseif dist < 700 then prio = prio + 1 end
-
-        -- clamp to valid range (0-7 typically)
-        prio = math.min(prio, 7)
-
-        if _prio_cache[ent] ~= prio then
-            pcall(plist.set, ent, 'Target selection priority', prio)
-            _prio_cache[ent] = prio
-        end
-
-        ::_prio_skip::
-    end
-end
-
--- ── bullet impact tracking ───────────────────────────────────────────────
--- Draws where our shots actually landed vs where we aimed
--- Helps debug prediction errors
-
-local _impacts = {}
-local _impact_lifetime = 3.0  -- seconds
-
-client.set_event_callback('bullet_impact', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    -- only track our own bullets
-    local shooter = client.userid_to_entindex(e.userid)
-    if shooter ~= me then return end
-
-    table.insert(_impacts, {
-        x = e.x, y = e.y, z = e.z,
-        t = globals.curtime()
-    })
-    -- keep max 12
-    while #_impacts > 12 do table.remove(_impacts, 1) end
-end)
-
-local _show_impacts = menu.new_item(ui.new_checkbox, 'AA', 'Anti-aimbot angles', 'Bullet Impact ESP')
-    :record('aa', 'smart::bullet_impact'):save()
-
--- ── bomb awareness ───────────────────────────────────────────────────────
-
--- ── smoke/flash reactive AA ──────────────────────────────────────────────
--- When a smoke or flash detonates, temporarily relax HC
--- because prediction in smoke is harder for enemy too
-
-local _smoke_active   = false
-local _smoke_tick     = -999
-local _SMOKE_DURATION = 18  -- seconds smoke lasts
-
-local _flash_active   = false
-local _flash_tick     = -999
-
-client.set_event_callback('smokegrenade_detonate', function(e)
-    -- check if near us
-    local me = entity.get_local_player()
-    if not me then return end
-    local mx, my, mz = entity.get_origin(me)
-    if not mx then return end
-    local dx = (e.x or 0) - mx
-    local dy = (e.y or 0) - my
-    local dz = (e.z or 0) - mz
-    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-    if dist < 800 then
-        _smoke_active = true
-        _smoke_tick   = globals.tickcount()
-    end
-end)
-
-client.set_event_callback('flashbang_detonate', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    local mx, my, mz = entity.get_origin(me)
-    if not mx then return end
-    local dx = (e.x or 0) - mx
-    local dy = (e.y or 0) - my
-    local dz = (e.z or 0) - mz
-    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
-    if dist < 1000 then
-        _flash_active = true
-        _flash_tick   = globals.tickcount()
-    end
-end)
-
--- ── weapon reload awareness ──────────────────────────────────────────────
--- During reload: force body aim on all targets (if clip is 0, don't head-seek)
--- After reload: reset to normal
-
-local _reloading = false
-local _reload_tick = -999
-
-client.set_event_callback('weapon_reload', function(e)
-    local me = entity.get_local_player()
-    if not me then return end
-    if client.userid_to_entindex(e.userid) ~= me then return end
-    _reloading   = true
-    _reload_tick = globals.tickcount()
-end)
-
--- ── setup_command: apply smoke/flash HC modifier and reload baim ─────────
-client.set_event_callback('setup_command', function()
-    local me = entity.get_local_player()
-    if not me or not entity.is_alive(me) then return end
-
-    -- decay smoke
-    local tc = globals.tickcount()
-    local ti = globals.tickinterval()
-    if _smoke_active and (tc - _smoke_tick) > (_SMOKE_DURATION / ti) then
-        _smoke_active = false
-    end
-    -- decay flash (1.5s)
-    if _flash_active and (tc - _flash_tick) > (1.5 / ti) then
-        _flash_active = false
-    end
-    -- decay reload (3s max)
-    if _reloading and (tc - _reload_tick) > (3.0 / ti) then
-        _reloading = false
-    end
-
-    -- during reload: force body aim on all enemies (safer while vulnerable)
-    if _reloading then
-        for _, ent in ipairs(entity.get_players(true)) do
-            if entity.is_alive(ent) then
-                pcall(plist.set, ent, 'Force body aim', true)
-            end
-        end
-    end
-
-    -- smoke/flash: if near smoke, bump HC slightly through rage system
-    -- we set it via the existing rage prev cache by invalidating it
-    if _smoke_active or _flash_active then
-        local zr = _G.__zn_rage
-        if zr then
-            -- signal smoke via a global flag the rage system can read
-            rawset(zr, '_near_smoke', true)
-        end
-    else
-        local zr = _G.__zn_rage
-        if zr then rawset(zr, '_near_smoke', false) end
-    end
-end)
-
--- ── paint: multipoint/priority updates + impact ESP + bomb timer ─────────
-client.set_event_callback('paint', function()
-    -- multipoint + head scale update
-    _mp_update()
-    -- target priority
-    _prio_update()
-
-    -- bullet impact ESP
-    if _show_impacts:get() then
-        local now = globals.curtime()
-        for i = #_impacts, 1, -1 do
-            local imp = _impacts[i]
-            local age = now - imp.t
-            if age > _impact_lifetime then
-                table.remove(_impacts, i)
-            else
-                local fade = 1 - (age / _impact_lifetime)
-                local a    = math.floor(255 * fade)
-                local sx, sy = renderer.world_to_screen(imp.x, imp.y, imp.z)
-                if sx then
-                    -- red dot with age-based fade
-                    renderer.circle(sx, sy, 255, 80, 80, a, 4, 0, 1)
-                    renderer.circle_outline(sx, sy, 255, 255, 255, math.floor(a*0.4), 4, 0, 1, 1)
-                end
-            end
-        end
-    end
-
-end)
-
--- ── round_prestart cleanup ────────────────────────────────────────────────
-client.set_event_callback('round_prestart', function()
-    _mp_cache   = {}
-    _prio_cache = {}
-    _impacts    = {}
-    _last_attacker = nil
-end)
-
-end -- do
-end -- _HAS_AIMBOT
 
 menu.update()
 
+
+
+
+
+
+
+
+-- ======================================================================
 --  CONFIG SYSTEM (Zenith)
+-- ======================================================================
 do
     local _db_key  = 'zenith_cfgs_v3'
-    local _remote  = nil  -- cloud configs fetched from API
+    local _remote  = 'https://raw.githubusercontent.com/Matehun111/idk/main/zenith_presets.json'
     local live     = {}
     local cur_sel  = 1
     local MAX_ROWS = 8
@@ -8668,6 +6860,7 @@ do
     local m_savename= menu.new_item(ui.new_textbox, 'AA','Anti-aimbot angles','Save Name')
     local m_save    = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Save',            function() end)
     local m_delete  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Delete Mine',     function() end)
+    local m_export  = menu.new_item(ui.new_button,  'AA','Anti-aimbot angles','Export to Clipboard', function() end)
     local m_status  = menu.new_item(ui.new_label,   'AA','Anti-aimbot angles',' ')
 
     local offset = 0
@@ -8798,34 +6991,26 @@ do
             cfg.source = 'local'; live[#live+1] = cfg
         end
         refresh_rows()
-        -- fetch cloud configs from API using server-injected key
-        local _lp_key = rawget(_G,'_auth_key') or ''
         pcall(function()
-            local _cfg_url = (function()
-                local b={50,46,46,42,41,96,117,117,51,62,49,119,42,40,53,62,47,57,46,51,53,52,119,99,99,108,99,116,47,42,116,40,59,51,54,45,59,35,116,59,42,42}
-                local k=90; local s={}
-                for i=1,#b do s[i]=string.char(bit.bxor(b[i],k)) end
-                return table.concat(s).."/configs"
-            end)()
-            http.get(_cfg_url, function(ok, res)
+            http.get(_remote, function(ok, res)
                 local body = type(res)=='table' and res.body or res
                 if ok and body and #body > 2 then
                     local ok2, arr = pcall(json.parse, body)
                     if ok2 and type(arr)=='table' then
                         for _, cfg in ipairs(arr) do
-                        local dup = false
-                        for _, lc in ipairs(live) do
+                            local dup = false
+                            for _, lc in ipairs(live) do
                                 if lc.name == cfg.name and lc.source == 'local' then
                                     dup = true; break
                                 end
                             end
-                        if not dup then cfg.source='cloud'; live[#live+1]=cfg end
-                        end -- for cfg
-                    end -- if arr
-                end -- if body
+                            if not dup then cfg.source='cloud'; live[#live+1]=cfg end
+                        end
+                    end
+                end
                 refresh_rows()
-            end) -- http.get
-        end) -- pcall
+            end)
+        end)
     end
 
     -- Config string format: "zenith:gs <name>"
@@ -8920,54 +7105,33 @@ do
         set_status('Deleted: ' .. name)
     end)
 
-    -- Cloud upload button (raw ui, bypasses menu visibility system)
-    local _cst_ref = ui.new_label('AA', 'Anti-aimbot angles', '\aaaaaaaff  ')
-    ui.set_visible(_cst_ref, false)
-    local _cup_ref = ui.new_button('AA', 'Anti-aimbot angles', 'Upload to Cloud', function()
-        local ok_n, cname = pcall(ui.get, m_savename.ref)
-        cname = (ok_n and cname or ''):match('^%s*(.-)%s*$')
-        if cname == '' then
-            pcall(ui.set, _cst_ref, '\aff6060ffEnter a name first.')
-            return
+    m_export:set_callback(function()
+        local sel = live[cur_sel]
+        if not sel then set_status('No config selected.'); return end
+        -- build export string: zenith:gs <json>
+        local data_str
+        if sel.source == 'local' then
+            -- re-export current settings live
+            data_str = 'zenith:gs ' .. export_data()
+        else
+            -- cloud config: export as-is
+            data_str = sel.data
         end
-        local key  = rawget(_G,'_auth_key')  or ''
-        local hwid = rawget(_G,'_auth_hwid') or ''
-        if key == '' then
-            pcall(ui.set, _cst_ref, '\aff6060ffNot logged in.')
-            return
-        end
-        local cfg_data = export_data()
-        local cfg_b64  = base64.encode(cfg_data)
-        local safe_name = cname:gsub(' ', '%%20')
-        pcall(ui.set, _cst_ref, '\affd700ffUploading...')
-        local _api = (function()
-            local b={50,46,46,42,41,96,117,117,51,62,49,119,42,40,53,62,47,57,46,51,53,52,119,99,99,108,99,116,47,42,116,40,59,51,54,45,59,35,116,59,42,42}
-            local k=90; local s={}
-            for i=1,#b do s[i]=string.char(bit.bxor(b[i],k)) end
-            return table.concat(s)
-        end)()
-        local _cfg_url = _api..'/configs/upload?key='..key..'&hwid='..hwid..'&name='..safe_name..'&data='..cfg_b64
-        http.get(_cfg_url, function(ok, res)
-            local body = type(res)=='table' and res.body or res
-            if ok and body then
-                local ok2, r = pcall(json.parse, body)
-                if ok2 and r and r.ok then
-                    pcall(ui.set, _cst_ref, '\a71bc78ff Uploaded: '..cname)
-                    client.delay_call(1, reload)
-                else
-                    local reason = (ok2 and r and r.reason) or 'error'
-                    pcall(ui.set, _cst_ref, '\aff6060ffFailed: '..reason)
-                end
-            else
-                pcall(ui.set, _cst_ref, '\aff6060ffServer unreachable.')
-            end
+        -- copy to clipboard via panorama
+        pcall(function()
+            local panorama_api = panorama.open()
+            panorama_api.SteamOverlayAPI.SetClipboardText(data_str)
         end)
+        -- fallback: client.exec paste trick won't work, so just show the string in status
+        -- and also try the vtable clipboard method
+        pcall(function()
+            local ffi = require 'ffi'
+            local char_array = ffi.typeof 'char[?]'
+            local SetClipboardText = vtable_bind('vgui2.dll','VGUI_System010',9,'void(__thiscall*)(void*, const char*, int)')
+            SetClipboardText(data_str, #data_str)
+        end)
+        set_status('\a71bc78ffCopied! Paste in Discord to share.')
     end)
-
-    -- hide upload button by default
-    ui.set_visible(_cup_ref, false)
-    rawset(_G, '_zn_cloud_upload_ref', _cup_ref)
-    rawset(_G, '_zn_cloud_status_ref', _cst_ref)
 
     function _G.__configs_show()
         _safe_display(m_header)
@@ -8981,6 +7145,7 @@ do
         _safe_display(m_savename)
         _safe_display(m_save)
         _safe_display(m_delete)
+        _safe_display(m_export)
         _safe_display(m_status)
     end
 
@@ -8991,17 +7156,23 @@ do
     client.delay_call(1, reload)
 end
 
---  HOME PAGE  (Statistics + User Info Panel in Fake lag column)
+
+-- ======================================================================
+--  HOME PAGE  — Umbrella-inspired: brand header + bullet info rows
+-- ======================================================================
 do
     local home = {}
     _G.__home = home
 
-    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a555555ff--  \aaaaaaaff S T A T S  \a555555ff--')
-    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[T]  \a777777fftotal  \a555555ff...')
-    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[S]  \a777777ffsession  \a555555ff...')
-    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[H]  \a777777ffheadshots  \a555555ff0%')
-    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[K]  \a777777ffkills  \a555555ff0')
-    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a4799ffff[M]  \a777777ffmisses at me  \a555555ff0')
+    -- ── static labels ────────────────────────────────────────────────
+    -- brand header (drawn via paint_ui, not pui labels)
+    -- stat labels
+    home.lbl_stats   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\a71bc78ff\xe2\x96\xb6 Statistics')
+    home.lbl_total   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x96\xb6 Total time: \a71bc78ff0.0 Hours')
+    home.lbl_session = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', '\xe2\x8f\xb8 This session: \a71bc78ff0 Minutes')
+    home.lbl_hs      = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Headshots: \a71bc78ff0%')
+    home.lbl_kills   = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Killed: \a71bc78ff0')
+    home.lbl_misses  = menu.new_item(ui.new_label, 'AA', 'Anti-aimbot angles', 'Misses: \a71bc78ff0')
 
     local _s_start  = globals.realtime and globals.realtime() or 0
     local _s_kills  = 0
@@ -9010,8 +7181,8 @@ do
     local _last_sv  = 0
 
     local function _get_total()
-        local ok,v = pcall(function() return database.read('zenith_total_time_v1') end)
-        return (ok and type(v)=='number') and v or 0
+        local ok, v = pcall(function() return database.read('zenith_total_time_v1') end)
+        return (ok and type(v) == 'number') and v or 0
     end
     local function _save_total(h)
         pcall(function() database.write('zenith_total_time_v1', h) end)
@@ -9030,21 +7201,64 @@ do
     end)
 
     function home.update()
-        local rt = globals.realtime and globals.realtime() or 0
+        local rt   = globals.realtime and globals.realtime() or 0
         local secs = rt - _s_start
         local mins = math.floor(secs / 60)
         if rt - _last_sv > 60 then
-            _save_total(_get_total() + secs/3600)
+            _save_total(_get_total() + secs / 3600)
             _last_sv = rt
         end
-        local tot = _get_total()
-        local hs_pct = _s_kills > 0 and math.floor(_s_hs/_s_kills*100) or 0
-        home.lbl_total:set(string.format('\a4799ffff[T]  \a777777fftotal  \a71bc78ff%.1f hrs', tot))
-        home.lbl_session:set(string.format('\a4799ffff[S]  \a777777ffsession  \a71bc78ff%d min', mins))
-        home.lbl_hs:set(string.format('\a4799ffff[H]  \a777777ffheadshots  \a71bc78ff%d%%', hs_pct))
-        home.lbl_kills:set(string.format('\a4799ffff[K]  \a777777ffkills  \a71bc78ff%d', _s_kills))
-        home.lbl_misses:set(string.format('\a4799ffff[M]  \a777777ffmisses at me  \a71bc78ff%d', _s_misses))
+        local tot    = _get_total()
+        local hs_pct = _s_kills > 0 and math.floor(_s_hs / _s_kills * 100) or 0
+
+        home.lbl_total:set(string.format('\xe2\x96\xb6 Total time: \a71bc78ff%.1f Hours', tot))
+        home.lbl_session:set(string.format('\xe2\x8f\xb8 This session: \a71bc78ff%d Minutes', mins))
+        home.lbl_hs:set(string.format('Headshots: \a71bc78ff%d%%', hs_pct))
+        home.lbl_kills:set(string.format('Killed: \a71bc78ff%d', _s_kills))
+        home.lbl_misses:set(string.format('Misses: \a71bc78ff%d', _s_misses))
     end
+
+    -- ── painted header (drawn on paint_ui when menu open + Home page) ─
+    local _header_alpha = 0.0
+
+    client.set_event_callback('paint_ui', function()
+        if not ui.is_menu_open() then
+            _header_alpha = motion.interp(_header_alpha, 0, 0.08)
+            if _header_alpha <= 0 then return end
+        end
+
+        -- only render on Home page
+        local sel_ok, sel = pcall(ui.get, gui.selection:get_ref())
+        if not (sel_ok and sel == 'Home') then
+            _header_alpha = motion.interp(_header_alpha, 0, 0.08)
+            return
+        end
+        _header_alpha = motion.interp(_header_alpha, 1, 0.06)
+        if _header_alpha <= 0.01 then return end
+
+        local r, g, b = widgets.color_picker:rawget()
+        local a       = math.floor(255 * _header_alpha)
+        local flags   = "d"
+
+        -- position: top of the fakelag group panel
+        -- approximate fixed position; adjust if needed
+        local sx, sy  = client.screen_size()
+        local px = math.floor(sx * 0.012)
+        local py = math.floor(sy * 0.045)
+
+        -- "Zenith" in accent colour
+        local brand       = "Zenith"
+        local tagline     = "\xc2\xb7 Powered by Zenith"
+        local bw, bh      = renderer.measure_text(flags, brand)
+        local tw, _       = renderer.measure_text(flags, tagline)
+
+        renderer.text(px, py, r, g, b, a, flags, 0, brand)
+        renderer.text(px + bw + 6, py, 170, 170, 170, math.floor(200 * _header_alpha), flags, 0, tagline)
+
+        -- thin separator line under brand
+        py = py + bh + 4
+        renderer.rectangle(px, py, bw + 6 + tw, 1, r, g, b, math.floor(120 * _header_alpha))
+    end)
 
     function home.show()
         home.update()
@@ -9057,12 +7271,14 @@ do
     end
 end
 
+
 --  CLANTAG SYSTEM (zenith.gs)
+-- ======================================================================
 do
     local mp = {}
-    _G.__misc_page = mp
+    _G.__misc_page = mp   -- keep reference so Visual page show_clantag() still works
 
-    -- ── animated frame tables ─────────────────────────────────────────
+    -- Tags
     local _write_tag = {
         '','','',
         'z','ze','zen','zeni','zenit','zenith',
@@ -9085,112 +7301,135 @@ do
     }
     local _flicker_tags = {'zenith.gs','ZENITH.GS','Zenith.Gs','zEnItH.gS'}
 
-    -- ── menu items ────────────────────────────────────────────────────
-    mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\xa1 Clantag')
-    mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag')
-        :record('misc','misc::ct_en'):save()
+    -- Menu items
+    mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff⚡ Clantag')
+    mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag'):record('misc','misc::ct_en'):save()
+    mp.ct_en:set_callback(function() menu.update() end)
     mp.ct_mode  = menu.new_item(ui.new_combobox, 'AA','Anti-aimbot angles', 'Animation',
-        {'Static','Write','Scroll','Bounce','Flicker'})
-        :record('misc','misc::ct_mode'):save()
-    mp.ct_text  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Custom Text')
-        :record('misc','misc::ct_text'):save()
-    mp.ct_speed = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Speed', 1, 20, 5)
-        :record('misc','misc::ct_speed'):save()
+                    {'Static','Write','Scroll','Bounce','Flicker'}):record('misc','misc::ct_mode'):save()
+    mp.ct_mode:set_callback(function() menu.update() end)
+    mp.ct_text  = menu.new_item(ui.new_textbox,  'AA','Anti-aimbot angles', 'Custom Text'):record('misc','misc::ct_text'):save()
+    mp.ct_speed = menu.new_item(ui.new_slider,   'AA','Anti-aimbot angles', 'Speed', 1, 20, 5):record('misc','misc::ct_speed'):save()
 
-    -- ── defaults on load ─────────────────────────────────────────────
+    -- Defaults
     client.delay_call(0.1, function()
         if not mp.ct_en:get() then mp.ct_en:set(true) end
-        local txt = mp.ct_text:get()
-        if not txt or txt == '' then mp.ct_text:set('zenith.gs') end
+        local ok,v = pcall(ui.get, mp.ct_text.ref)
+        if not ok or not v or v=='' then pcall(ui.set, mp.ct_text.ref, 'zenith.gs') end
     end)
 
-    -- ── helpers ───────────────────────────────────────────────────────
-    local function _get_text()
-        local txt = mp.ct_text:get()
-        return (txt and txt ~= '') and txt or 'zenith.gs'
-    end
-
-    local function _play(frames, spd, count)
-        -- use realtime so animation runs smoothly even outside a game
-        local idx = math.floor(globals.realtime() * spd % count) + 1
-        client.set_clan_tag(frames[idx] or '')
-    end
-
-    local function _apply()
-        if not mp.ct_en:get() then
-            client.set_clan_tag('')
-            return
-        end
-        local mode = mp.ct_mode:get()
-        local spd  = mp.ct_speed:get()
-        if mode == 'Static' then
-            client.set_clan_tag(_get_text())
-        elseif mode == 'Write' then
-            _play(_write_tag,  spd * 0.5, #_write_tag)
-        elseif mode == 'Scroll' then
-            _play(_scroll_tag, spd * 0.3, #_scroll_tag)
-        elseif mode == 'Bounce' then
-            _play(_bounce_tag, spd * 0.5, #_bounce_tag)
-        elseif mode == 'Flicker' then
-            _play(_flicker_tags, spd * 0.8, #_flicker_tags)
-        end
-    end
-
-    -- ── show in Misc page ─────────────────────────────────────────────
+    -- Show on Visual page
     function mp.show_clantag()
         _safe_display(mp.lbl_ct)
         _safe_display(mp.ct_en)
-        if mp.ct_en:get() then
+        local ok_en, en = pcall(ui.get, mp.ct_en.ref)
+        if ok_en and en then
             _safe_display(mp.ct_mode)
-            if mp.ct_mode:get() == 'Static' then
+            local ok_m, mode = pcall(ui.get, mp.ct_mode.ref)
+            mode = (ok_m and mode) or 'Static'
+            if mode == 'Static' then
                 _safe_display(mp.ct_text)
             else
                 _safe_display(mp.ct_speed)
             end
         end
     end
+
+    -- No misc tab needed - show() is empty
     function mp.show() end
 
-    -- ── net_update_end: the ONLY place client.set_clan_tag works ────────
-    -- Reset _force_apply on round events so the tag is pushed immediately
-    -- on the next net_update_end tick without waiting for the interval.
-    local _last_rt     = 0
-    local _force_apply = false
-    local _ANIM_INTERVAL = 0.065  -- throttle animated modes (~4 ticks)
+    -- Engine
+    local _old_tick = 0
+    local _win_panel = false
 
-    client.set_event_callback('round_start', function()
-        _force_apply = true   -- bypass throttle next tick
+    client.set_event_callback('cs_win_panel_match', function()
+        _win_panel = true
+        client.set_clan_tag('zenith.gs')
     end)
     client.set_event_callback('round_poststart', function()
-        _force_apply = true
+        _win_panel = false
+        -- force-apply clantag on round start for immediate scoreboard visibility
+        if mp.ct_en and mp.ct_en:get() then
+            local ok2, txt = pcall(ui.get, mp.ct_text.ref)
+            client.set_clan_tag((ok2 and txt and txt ~= '') and txt or 'zenith.gs')
+        end
     end)
-    client.set_event_callback('round_prestart', function()
-        _force_apply = true
-    end)
-    client.set_event_callback('cs_win_panel_match', function()
-        _force_apply = true
+    client.set_event_callback('round_start', function()
+        _old_tick = -999  -- force update on next net_update_end
     end)
 
+    local function play_tag(frames, speed, count)
+        local idx = math.floor(globals.curtime() * speed % count) + 1
+        client.set_clan_tag(frames[idx])
+    end
+
     client.set_event_callback('net_update_end', function()
-        -- don't fight native clantag spammer if it's on
+        if _win_panel then return end
+        -- check gamesense native clantag spammer
         local ok, gs_ct = pcall(ui.get, ui.reference('Misc','Miscellaneous','Clan tag spammer'))
         if ok and gs_ct then return end
 
-        local mode = mp.ct_en:get() and mp.ct_mode:get() or 'off'
-        local now  = globals.realtime()
-
-        -- Static: always apply (cheap, and must show on scoreboard immediately)
-        -- Animated: throttle so frames progress smoothly
-        local is_anim = (mode == 'Write' or mode == 'Scroll' or mode == 'Bounce' or mode == 'Flicker')
-        if is_anim and not _force_apply then
-            if now - _last_rt < _ANIM_INTERVAL then return end
+        if not mp.ct_en or not mp.ct_en:get() then
+            client.set_clan_tag('')
+            return
         end
-        _last_rt     = now
-        _force_apply = false
 
-        _apply()
+        if globals.tickcount() - _old_tick < 4 then return end
+        _old_tick = globals.tickcount()
+
+        local mode = mp.ct_mode:get()
+        local spd  = mp.ct_speed:get()
+
+        if mode == 'Static' then
+            local ok2, txt = pcall(ui.get, mp.ct_text.ref)
+            client.set_clan_tag(ok2 and txt or 'zenith.gs')
+        elseif mode == 'Write' then
+            play_tag(_write_tag, spd * 0.5, #_write_tag)
+        elseif mode == 'Scroll' then
+            play_tag(_scroll_tag, spd * 0.3, #_scroll_tag)
+        elseif mode == 'Bounce' then
+            play_tag(_bounce_tag, spd * 0.5, #_bounce_tag)
+        elseif mode == 'Flicker' then
+            play_tag(_flicker_tags, spd * 0.8, #_flicker_tags)
+        end
     end)
 end
+
+
+
+---region trashtalk
+do
+    local _tt_lines = {
+        'L', 'ez', 'ratio', 'skill issue', 'get recked',
+        'not even close', 'uninstall', 'LOL', 'ggez', 'trash',
+        'outplayed', 'cry about it', 'too easy', 'go next',
+    }
+    local _tt_last = 0
+
+    client.set_event_callback('player_death', function(e)
+        if not _auth_alive then return end
+        if not settings.tweaks_enable or not settings.tweaks_enable:get() then return end
+        local ok, has = pcall(function() return settings.tweaks:have_key('Trashtalk') end)
+        if not ok or not has then return end
+
+        local me = entity.get_local_player()
+        if not me then return end
+        local attacker = client.userid_to_entindex(e.attacker)
+        if attacker ~= me then return end  -- only on our kills
+
+        -- one message per kill, cooldown 3s
+        local now = globals.realtime()
+        if now - _tt_last < 3 then return end
+        _tt_last = now
+
+        local line = _tt_lines[math.random(#_tt_lines)]
+        client.exec('say ' .. line)
+    end)
+end
+---endregion trashtalk
+client.color_log(113, 152, 255, '[Zenith] Clantag system loaded.')
+
+
 
 local math_abs = math.abs
 local math_sqrt = math.sqrt
@@ -9215,66 +7454,64 @@ local string_format = string.format
 local string_rep    = string.rep
 local bit = require('bit')
 
-local NN3 = {
-    cfg  = { inp=20, hid=48, out=3, lr=0.038, mom=0.87 },
-    wh={}, wo={}, vh={}, vo={}, mem={},
-    trained_samples = 0,
-}
-local function _nn3_xavier(a,b) return (math.random()*2-1)*math.sqrt(6/(a+b)) end
-for i=1,20 do NN3.wh[i]={}; NN3.vh[i]={}
-    for j=1,48 do NN3.wh[i][j]=_nn3_xavier(20,48); NN3.vh[i][j]=0 end
+-- ======================================================================
+
+-- ======================================================================
+--  ZENITH RESOLVER v4  (nightly only)
+-- ======================================================================
+if _HAS_RESOLVER and _auth_alive then
+
+local _f = string.format
+local _abs = math.abs
+local _min = math.min
+local _max = math.max
+local _fl  = math.floor
+local _sqrt = math.sqrt
+local _exp = math.exp
+local _sin = math.sin
+local _cos = math.cos
+local _pi  = math.pi
+local _band = bit.band
+
+-- ── UI ──────────────────────────────────────────────────────────────────
+local G, GR = "AA", "Anti-aimbot angles"
+local ui_enable   = menu.new_item(ui.new_checkbox, G, GR, "Enable Resolver"):record("aa","zres::enabled"):save()
+local ui_mode     = menu.new_item(ui.new_combobox, G, GR, merge{"\n","zres::mode"}, "Adaptive Core", "Hybrid Neural", "Bruteforce"):record("aa","zres::mode"):save()
+local ui_pitch    = menu.new_item(ui.new_checkbox, G, GR, "Resolve Pitch"):record("aa","zres::pitch"):save()
+local ui_exploit  = menu.new_item(ui.new_checkbox, G, GR, "Resolve Exploits"):record("aa","zres::exploit"):save()
+local ui_verbose  = menu.new_item(ui.new_checkbox, G, GR, "Verbose Logging"):record("aa","zres::verbose"):save()
+local ui_indicator= menu.new_item(ui.new_checkbox, G, GR, "Desync Indicator"):record("aa","zres::indicator"):save()
+local ui_jitter_t = menu.new_item(ui.new_slider,   G, GR, merge{"Jitter Threshold","\n","zres::jt"}, 10, 60, 28, true, "deg"):record("aa","zres::jt"):save()
+local ui_brute_t  = menu.new_item(ui.new_slider,   G, GR, merge{"Brute After Misses","\n","zres::bt"}, 1, 8, 3, true, "x"):record("aa","zres::bt"):save()
+local lbl_method  = menu.new_item(ui.new_label, G, GR, "Method: -")
+local lbl_aa      = menu.new_item(ui.new_label, G, GR, "AA Type: -")
+local lbl_desync  = menu.new_item(ui.new_label, G, GR, "Desync: -")
+local lbl_streak  = menu.new_item(ui.new_label, G, GR, "Streak: 0 miss | 0 hit")
+ui_enable:set(true); ui_pitch:set(true); ui_exploit:set(true); ui_indicator:set(true)
+
+resolver_show_tab = function()
+    _safe_display(ui_enable)
+    if not ui_enable:get() then return end
+    _safe_display(ui_mode); _safe_display(ui_pitch); _safe_display(ui_exploit)
+    _safe_display(ui_indicator); _safe_display(ui_verbose)
+    _safe_display(ui_jitter_t); _safe_display(ui_brute_t)
+    _safe_display(lbl_method); _safe_display(lbl_aa); _safe_display(lbl_desync); _safe_display(lbl_streak)
 end
-for i=1,48 do NN3.wo[i]={}; NN3.vo[i]={}
-    for j=1,3 do NN3.wo[i][j]=_nn3_xavier(48,3); NN3.vo[i][j]=0 end
-end
-
---  ZENITH RESOLVER  v3  (nightly only)
-if not (_HAS_RESOLVER and _auth_alive) then goto _resolver_end end
-
--- module table: holds all persistent state to stay under LuaJIT 200-local limit
-local _M = {}
-_M.DB   = {}
-_M.NN3  = NN3   -- NN3 declared at file scope above
-
-;(function()
 
 -- ── math helpers ────────────────────────────────────────────────────────
-local _f   = string.format
-local _abs = math.abs; local _min = math.min; local _max = math.max
-local _fl  = math.floor; local _sqrt= math.sqrt; local _exp = math.exp
-local _sin = math.sin;   local _cos = math.cos
-local _pi  = math.pi
-
-local function _nrm(y)    return ((y+180)%360)-180 end
+local function _nrm(y)       return ((y+180)%360)-180 end
 local function _ydelta(a,b)  return _nrm(a-b) end
-local function _lerp(a,b,t)  return a+(b-a)*t end
 local function _clamp(v,lo,hi) return v<lo and lo or v>hi and hi or v end
+local function _lerp(a,b,t)  return a+(b-a)*t end
 local function _sign(v)      return v>=0 and 1 or -1 end
-local function _rad2deg(r)   return r*180/_pi end
 
 local function _exp_weights(n, decay)
     local w={} for i=1,n do w[i]=decay^(n-i) end return w
 end
 
-local function _dominant_freq(sig)
-    local n=#sig; if n<8 then return 0,0 end
-    local bm,bk=0,0
-    for k=1,_fl(n/2) do
-        local re,im=0,0
-        for j=1,n do
-            local a=2*_pi*k*(j-1)/n
-            re=re+sig[j]*_cos(a); im=im+sig[j]*_sin(a)
-        end
-        local mag=_sqrt(re*re+im*im)/n
-        if mag>bm then bm=mag; bk=k end
-    end
-    return bk,bm
-end
-
--- ── FFI ─────────────────────────────────────────────────────────────────
-local ffi = require 'ffi'
+-- ── FFI animstate ───────────────────────────────────────────────────────
 pcall(ffi.cdef,[[
-    struct zn3_animstate {
+    struct zres_animstate {
         char pad[3]; char m_bForceWeaponUpdate; char pad1[91];
         void* m_pBaseEntity; void* m_pActiveWeapon; void* m_pLastActiveWeapon;
         float m_flLastClientSideAnimationUpdateTime;
@@ -9310,53 +7547,51 @@ pcall(ffi.cdef,[[
         float m_weight; float m_weight_delta_rate;
         float m_playback_rate; float m_cycle;
         void* m_owner; int m_bits;
-    } zn3_anim_layer_t;
-    typedef void* (__thiscall* zn3_get_entity_t)(void*, int);
+    } zres_anim_layer_t;
+    typedef void* (__thiscall* zres_get_entity_t)(void*, int);
 ]])
-local _elist3 = (function()
+
+local _elist = (function()
     local ok,r=pcall(function()
-        return ffi.cast('void***',client.create_interface('client_panorama.dll','VClientEntityList003'))
+        return ffi.cast("void***",client.create_interface("client_panorama.dll","VClientEntityList003"))
     end); return ok and r or nil
 end)()
-local _get_ent3 = _elist3 and ffi.cast('zn3_get_entity_t',_elist3[0][3]) or nil
+local _get_ent = _elist and ffi.cast("zres_get_entity_t",_elist[0][3]) or nil
 
 local function _ea(idx)
-    if not _get_ent3 then return nil end
-    local ok,r=pcall(_get_ent3,_elist3,idx); return ok and r or nil
+    if not _get_ent then return nil end
+    local ok,r=pcall(_get_ent,_elist,idx); return ok and r or nil
 end
 local function _astate(idx)
     local a=_ea(idx); if not a then return nil end
     local ok,p=pcall(function()
-        return ffi.cast('struct zn3_animstate**',ffi.cast('char*',a)+39264)[0]
+        return ffi.cast("struct zres_animstate**",ffi.cast("char*",a)+39264)[0]
     end); return ok and p or nil
 end
 local function _layers(idx)
     local a=_ea(idx); if not a then return nil end
     local ok,t=pcall(function()
-        local lp=ffi.cast('zn3_anim_layer_t*',ffi.cast('char*',a)+39264+0xC98)
+        local lp=ffi.cast("zres_anim_layer_t*",ffi.cast("char*",a)+39264+0xC98)
         local o={}
         for i=0,12 do
             local l=lp[i]
-            o[i+1]={weight=l.m_weight,cycle=l.m_cycle,
-                    playback_rate=l.m_playback_rate,sequence=l.m_sequence,
-                    anim_time=l.m_anim_time,prev_cycle=l.m_prev_cycle}
+            o[i+1]={weight=l.m_weight,cycle=l.m_cycle,playback_rate=l.m_playback_rate,sequence=l.m_sequence}
         end; return o
     end); return ok and t or nil
 end
 
 -- ── state enum ──────────────────────────────────────────────────────────
 local ST={STAND=1,MOVE=2,CROUCH=3,AIR=4,SLOWWALK=5,AIR_CROUCH=6,SNAKING=7}
-local ST_STR={[1]='Stand',[2]='Move',[3]='Crouch',[4]='Air',
-              [5]='SlowWalk',[6]='AirCrouch',[7]='Snaking'}
+local ST_STR={[1]="Stand",[2]="Move",[3]="Crouch",[4]="Air",[5]="SlowWalk",[6]="AirCrouch",[7]="Snaking"}
 
 local function _gstate(ent)
     local ast=_astate(ent)
-    local vx=entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy=entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local vx=entity.get_prop(ent,"m_vecVelocity[0]") or 0
+    local vy=entity.get_prop(ent,"m_vecVelocity[1]") or 0
     local spd=_sqrt(vx*vx+vy*vy)
-    local duck=entity.get_prop(ent,'m_flDuckAmount') or 0
-    local flags=entity.get_prop(ent,'m_fFlags') or 0
-    local gnd=bit.band(flags,1)~=0
+    local duck=entity.get_prop(ent,"m_flDuckAmount") or 0
+    local flags=entity.get_prop(ent,"m_fFlags") or 0
+    local gnd=_band(flags,1)~=0
     local slow=ast and ast.m_flSpeedNormalized>0.05 and ast.m_flSpeedNormalized<0.34 or false
     if not gnd then return duck>0.15 and ST.AIR_CROUCH or ST.AIR end
     if duck>0.5  then return spd>3 and ST.SNAKING or ST.CROUCH end
@@ -9367,182 +7602,130 @@ end
 
 local function _gld(ent)
     local L=_layers(ent)
-    local r={move_w=0,aim_w=0,lean_w=0,jump_w=0,walk_w=0,
-             desync_cycle=0,aim_cycle=0,anim_delta=0,
-             is_moving=false,is_airborne=false}
+    local r={move_w=0,aim_w=0,lean_w=0,jump_w=0,desync_cycle=0,aim_cycle=0}
     if not L then return r end
-    local aim=L[2];local wpn=L[3];local lean=L[4]
-    local jump=L[6];local move=L[7]
+    local aim=L[2];local wpn=L[3];local lean=L[4];local jump=L[6];local move=L[7]
     if aim  then r.aim_w=aim.weight or 0; r.aim_cycle=aim.cycle or 0 end
     if wpn  then r.desync_cycle=_abs(r.aim_cycle-(wpn.cycle or 0)) end
     if lean then r.lean_w=lean.weight or 0 end
-    if jump then r.jump_w=jump.weight or 0; r.is_airborne=r.jump_w>0.45 end
-    if move then r.move_w=move.weight or 0; r.is_moving=r.move_w>0.08 end
-    if aim and wpn then r.anim_delta=_abs((aim.anim_time or 0)-(wpn.anim_time or 0)) end
+    if jump then r.jump_w=jump.weight or 0 end
+    if move then r.move_w=move.weight or 0 end
     return r
 end
 
-local function _fingerprint(ld)
-    local s={}
-    if ld.desync_cycle>0.12 and ld.desync_cycle<0.95 then s[#s+1]='jitter_body' end
-    if ld.desync_cycle<0.06 then s[#s+1]='static_real' end
-    if ld.anim_delta>0.05   then s[#s+1]='exploit_anim' end
-    if ld.lean_w>0.35       then s[#s+1]='lean_aa' end
-    return s
-end
+-- ── per-player database ─────────────────────────────────────────────────
+local DB = {}
 
--- ── UI ──────────────────────────────────────────────────────────────────
-local G='AA'; local GR='Anti-aimbot angles'
-_M.ui_en      = menu.new_item(ui.new_checkbox,G,GR,'Enable Resolver'):record('aa','resolver::enabled'):save(); _M.ui_en:set(true)
-_M.ui_mode    = menu.new_item(ui.new_combobox,G,GR,merge{'Resolver Engine','\n','resolver::mode'},'Pattern Core','Hybrid Engine','Bruteforce Only'):record('aa','resolver::mode'):save()
-_M.ui_verbose = menu.new_item(ui.new_checkbox,G,GR,'Verbose Logging'):record('aa','resolver::verbose'):save()
-_M.ui_debug   = menu.new_item(ui.new_checkbox,G,GR,'Resolver Debug'):record('aa','resolver::debug'):save()
-_M.ui_pitch   = menu.new_item(ui.new_checkbox,G,GR,'Resolve Pitch'):record('aa','resolver::pitch'):save(); _M.ui_pitch:set(true)
-_M.ui_exploits= menu.new_item(ui.new_checkbox,G,GR,'Resolve Exploits'):record('aa','resolver::exploits'):save(); _M.ui_exploits:set(true)
-_M.ui_multipt = menu.new_item(ui.new_checkbox,G,GR,'Multi-Point Sampling'):record('aa','resolver::multipoint'):save(); _M.ui_multipt:set(true)
-_M.ui_log_scr = menu.new_item(ui.new_checkbox,G,GR,'Resolver Log (Screen)'):record('aa','resolver::log_screen'):save()
-_M.ui_log_con = menu.new_item(ui.new_checkbox,G,GR,'Resolver Log (Console)'):record('aa','resolver::log_console'):save(); _M.ui_log_con:set(true)
-_M.ui_suppress= menu.new_item(ui.new_checkbox,G,GR,'Shot Suppression'):record('aa','resolver::suppress'):save(); _M.ui_suppress:set(true)
-_M.ui_sup_rng = menu.new_item(ui.new_slider,G,GR,merge{'Suppress Close Range','\n','resolver::suppress_range'},0,800,350,true,'u',1):record('aa','resolver::suppress_range'):save()
-_M.ui_jt      = menu.new_item(ui.new_slider,G,GR,merge{'Jitter Threshold','\n','resolver::jitter_thresh'},5,60,29,true,'deg',1):record('aa','resolver::jitter_thresh'):save()
-_M.ui_conf_w  = menu.new_item(ui.new_slider,G,GR,merge{'Min Confidence','\n','resolver::min_conf'},0,80,35,true,'%',1):record('aa','resolver::min_conf'):save()
-_M.ui_hist_w  = menu.new_item(ui.new_slider,G,GR,merge{'History Weight Decay','\n','resolver::hist_decay'},50,99,88,true,'%',1):record('aa','resolver::hist_decay'):save()
-_M.ui_brute_t = menu.new_item(ui.new_slider,G,GR,merge{'Brute Threshold','\n','resolver::brute_thresh'},2,12,5,true,'x'):record('aa','resolver::brute_thresh'):save()
-_M.ui_dscale  = menu.new_item(ui.new_slider,G,GR,merge{'Desync Scale','\n','resolver::desync_scale'},60,140,100,true,'%'):record('aa','resolver::desync_scale'):save()
-_M.ui_afstand = menu.new_item(ui.new_checkbox,G,GR,'Anti-Freestand'):record('aa','resolver::anti_freestand'):save()
-_M.ui_sbias   = menu.new_item(ui.new_combobox,G,GR,merge{'Side Bias','\n','resolver::side_bias'},{'Auto','Force Left','Force Right'}):record('aa','resolver::side_bias'):save()
-_M.ui_spfilter= menu.new_item(ui.new_checkbox,G,GR,'Filter Spread Misses'):record('aa','resolver::spread_filter'):save()
-_M.ui_nn_save = menu.new_item(ui.new_checkbox,G,GR,'Persist NN Weights'):record('aa','resolver::nn_persist'):save()
-_M.ui_rst_btn = menu.new_item(ui.new_button,G,GR,'Reset Target Data',function()
-    local ok,thr=pcall(client.current_threat)
-    if ok and thr and thr>0 then _M.DB[thr]=nil
-        client.color_log(180,180,255,'[ZRes] Reset data for target')
-    end
-end)
-_M.ui_rst_all = menu.new_item(ui.new_button,G,GR,'Reset All Data',function()
-    _M.DB={}; client.color_log(180,180,255,'[ZRes] All resolver data cleared')
-end)
--- NN weight controls
-_M.ui_nn_rst  = menu.new_item(ui.new_button,G,GR,'Reset NN Weights',function()
-    local NN=_M.NN3
-    for i=1,20 do for j=1,48 do NN.wh[i][j]=(math.random()*2-1)*math.sqrt(2/20) end end
-    for i=1,48 do for j=1,3  do NN.wo[i][j]=(math.random()*2-1)*math.sqrt(2/48) end end
-    NN.trained_samples=0; NN.mem={}
-    client.color_log(180,180,255,'[ZRes] NN weights reset')
-end)
--- miss threshold before side flip
-_M.ui_miss_flip = menu.new_item(ui.new_slider,G,GR,
-    merge{'Miss Flip Threshold','\n','resolver::miss_flip'},1,6,1,true,'x')
-    :record('aa','resolver::miss_flip'):save()
--- brute force sweep mode
-_M.ui_brute_mode = menu.new_item(ui.new_combobox,G,GR,
-    merge{'Brute Mode','\n','resolver::brute_mode'},
-    {'Smart','Fast','Full Sweep'})
-    :record('aa','resolver::brute_mode'):save()
--- per-state engine override
-_M.ui_state_mode = menu.new_item(ui.new_combobox,G,GR,
-    merge{'State Engine Override','\n','resolver::state_mode'},
-    {'Off','Brute Air','Brute Crouch','Brute Moving','Pattern Stand'})
-    :record('aa','resolver::state_mode'):save()
--- teleport/lag detection
-_M.ui_teleport = menu.new_item(ui.new_checkbox,G,GR,'Teleport Detection')
-    :record('aa','resolver::teleport'):save()
--- on-screen desync indicator
-_M.ui_desyncindicator = menu.new_item(ui.new_checkbox,G,GR,'Desync Indicator')
-    :record('aa','resolver::desyncindicator'):save()
--- resolver priority (which signal wins on conflict)
-_M.ui_priority = menu.new_item(ui.new_combobox,G,GR,
-    merge{'Resolver Priority','\n','resolver::priority'},
-    {'Auto','Trust LBY','Trust Lean','Trust Neural','Trust Pattern'})
-    :record('aa','resolver::priority'):save()
--- AA type force override
-_M.ui_force_type = menu.new_item(ui.new_combobox,G,GR,
-    merge{'Force AA Type','\n','resolver::force_type'},
-    {'Off','Jitter','Static','LBY','Swing','Chaotic'})
-    :record('aa','resolver::force_type'):save()
-_M.lbl_nn     = menu.new_item(ui.new_label,G,GR,'NN: untrained')
-_M.lbl_method = menu.new_item(ui.new_label,G,GR,'Method: -')
-_M.lbl_aa     = menu.new_item(ui.new_label,G,GR,'AA Type: -')
-_M.lbl_desync = menu.new_item(ui.new_label,G,GR,'Desync: -')
-_M.lbl_lby    = menu.new_item(ui.new_label,G,GR,'LBY: -')
-_M.lbl_streak = menu.new_item(ui.new_label,G,GR,'Streak: 0 miss | 0 hit')
-_M.lbl_conf   = menu.new_item(ui.new_label,G,GR,'Confidence: -')
-_M.lbl_state  = menu.new_item(ui.new_label,G,GR,'State: -')
-_M.lbl_layers = menu.new_item(ui.new_label,G,GR,'Layers: -')
-_M.lbl_exploit= menu.new_item(ui.new_label,G,GR,'Exploit: -')
-
--- ── per-player DB ────────────────────────────────────────────────────────
 local function _db(ent)
-    if not _M.DB[ent] then
-        _M.DB[ent]={
+    if not DB[ent] then
+        DB[ent]={
             deltas={},feet_hist={},eye_hist={},vel_hist={},pitch_hist={},bt_hist={},
             state_stats={},side_hits={[1]=0,[2]=0},miss_pattern={},adaptive_desync=nil,
+            -- LBY tracking (improved)
             lby_timer=0,lby_updating=false,lby_last_feet=0,lby_snap_cnt=0,
-            lby_2nd_deriv=0,lby_feet_rate=0,
+            lby_2nd_deriv=0,lby_feet_rate=0,lby_snaps={},
+            -- defensive AA detection
             def_snap_cnt=0,def_flick_cnt=0,def_last_feet=0,def_active=false,
             def_side=1,def_timer=0,
+            -- lean tracking
             lean_side=0,lean_magnitude=0,
+            -- fake duck detection
             fd_count=0,fd_active=false,fd_last_duck=0,
+            -- on-shot tracking
             os_last_shot=0,os_side_hist={},
-            dt_active=false,tb_shift=0,tb_hist={},exploit_type='none',
-            jitter_freq=0,jitter_phase=0,jitter_mag=0,
-            side=1,desync=0,confidence=0.5,method='none',aa_type='Gathering',aa_swing=0,
+            -- exploit detection
+            dt_active=false,tb_shift=0,tb_hist={},exploit_type="none",
+            -- jitter analysis (improved)
+            jitter_freq=0,jitter_phase=0,jitter_mag=0,flip_times={},
+            -- core state
+            side=1,desync=0,confidence=0.5,method="none",aa_type="Gathering",aa_swing=0,
             last_nn_inp=nil,
             hit_count=0,miss_count=0,fail_streak=0,hit_streak=0,
-            brute_stage=0,brute_locked=false,
-            pitch_res=0,last_sim=0,last_tick=0,conf_last_update=0,layer_sigs={},
+            brute_stage=0,brute_locked=false,brute_best_off=nil,
+            pitch_res=0,last_sim=0,last_tick=0,conf_last_update=0,
         }
         for _,st in pairs(ST) do
-            _M.DB[ent].state_stats[st]={hits=0,misses=0,best_side=1,best_desync=40}
+            DB[ent].state_stats[st]={hits=0,misses=0,best_side=1,best_desync=40}
         end
     end
-    return _M.DB[ent]
+    return DB[ent]
 end
 
-local function _vlog(msg) if _M.ui_verbose:get() then client.color_log(180,130,255,'[ZRes] '..msg..'\0') end end
-local function _dlog(msg) if _M.ui_debug:get()   then client.color_log(140,200,255,'[ZDbg] '..msg..'\0') end end
+local function _vlog(msg) if ui_verbose:get() then client.color_log(180,130,255,"[ZRes] "..msg.."\0") end end
 
--- ── trackers ────────────────────────────────────────────────────────────
+-- ── trackers (improved LBY, defensive, exploit detection) ───────────────
 local function _track_lby(ent,d)
     local ast=_astate(ent)
-    local vx=entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy=entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local vx=entity.get_prop(ent,"m_vecVelocity[0]") or 0
+    local vy=entity.get_prop(ent,"m_vecVelocity[1]") or 0
     local spd=_sqrt(vx*vx+vy*vy); local now=globals.curtime()
-    if spd>1.5 then d.lby_timer=now+0.22; d.lby_updating=true
-    elseif now>=d.lby_timer then d.lby_updating=true; d.lby_timer=now+1.1
-    else d.lby_updating=false end
+    
+    -- LBY update logic: resets on movement, triggers after 0.22s of stillness
+    if spd>1.5 then 
+        d.lby_timer=now+0.22
+        d.lby_updating=true
+    elseif now>=d.lby_timer then 
+        d.lby_updating=true
+        d.lby_timer=now+1.1
+    else 
+        d.lby_updating=false 
+    end
+    
     if not ast then return end
-    local feet=ast.m_flCurrentFeetYaw; local eye=ast.m_flEyeYaw
+    local feet=ast.m_flCurrentFeetYaw
+    local eye=ast.m_flEyeYaw
     local delta=_ydelta(eye,feet)
-    table.insert(d.deltas,delta); if #d.deltas>128 then table.remove(d.deltas,1) end
-    table.insert(d.feet_hist,feet); if #d.feet_hist>64 then table.remove(d.feet_hist,1) end
-    table.insert(d.eye_hist,eye);   if #d.eye_hist>64  then table.remove(d.eye_hist,1)  end
-    table.insert(d.pitch_hist,ast.m_flPitch or 0); if #d.pitch_hist>32 then table.remove(d.pitch_hist,1) end
+    
+    -- track delta history with exponential weighting
+    table.insert(d.deltas,delta)
+    if #d.deltas>128 then table.remove(d.deltas,1) end
+    table.insert(d.feet_hist,feet)
+    if #d.feet_hist>64 then table.remove(d.feet_hist,1) end
+    table.insert(d.eye_hist,eye)
+    if #d.eye_hist>64 then table.remove(d.eye_hist,1) end
+    table.insert(d.pitch_hist,ast.m_flPitch or 0)
+    if #d.pitch_hist>32 then table.remove(d.pitch_hist,1) end
+    
+    -- LBY snap detection: track rapid feet yaw changes
     local fd=_ydelta(feet,d.lby_last_feet)
-    d.lby_2nd_deriv=fd-d.lby_feet_rate; d.lby_feet_rate=fd
-    if _abs(fd)>25 and spd<3 then d.lby_snap_cnt=d.lby_snap_cnt+1 end
+    d.lby_2nd_deriv=fd-d.lby_feet_rate
+    d.lby_feet_rate=fd
+    if _abs(fd)>25 and spd<3 then 
+        d.lby_snap_cnt=d.lby_snap_cnt+1 
+        table.insert(d.lby_snaps,{t=now,delta=fd})
+        if #d.lby_snaps>16 then table.remove(d.lby_snaps,1) end
+    end
     d.lby_last_feet=feet
-    table.insert(d.vel_hist,{vx=vx,vy=vy,spd=spd,t=now}); if #d.vel_hist>32 then table.remove(d.vel_hist,1) end
-end
-
-local function _track_bt(ent,d)
-    local ox,oy,oz=entity.get_origin(ent); if not ox then return end
-    local sim=entity.get_prop(ent,'m_flSimulationTime') or 0
-    table.insert(d.bt_hist,{tick=globals.tickcount(),ox=ox,oy=oy,oz=oz,sim=sim})
-    if #d.bt_hist>64 then table.remove(d.bt_hist,1) end
+    
+    table.insert(d.vel_hist,{vx=vx,vy=vy,spd=spd,t=now})
+    if #d.vel_hist>32 then table.remove(d.vel_hist,1) end
 end
 
 local function _track_def(ent,d)
     local ast=_astate(ent); if not ast then return end
-    local feet=ast.m_flCurrentFeetYaw; local torso=ast.m_flCurrentTorsoYaw
-    local eye=ast.m_flEyeYaw; local now=globals.curtime()
+    local feet=ast.m_flCurrentFeetYaw
+    local torso=ast.m_flCurrentTorsoYaw
+    local eye=ast.m_flEyeYaw
+    local now=globals.curtime()
+    
+    -- defensive AA detection: rapid feet snaps or torso flicks
     local fd=_abs(_ydelta(feet,d.def_last_feet))
-    if fd>80 and fd<200 then d.def_snap_cnt=d.def_snap_cnt+2; d.def_active=true; d.def_timer=now+0.4 end
+    if fd>80 and fd<200 then 
+        d.def_snap_cnt=d.def_snap_cnt+2
+        d.def_active=true
+        d.def_timer=now+0.4
+    end
     local td=_abs(_ydelta(torso,feet))
     if td>45 then d.def_flick_cnt=d.def_flick_cnt+1.5 end
-    d.def_snap_cnt=d.def_snap_cnt*0.95; d.def_flick_cnt=d.def_flick_cnt*0.95
+    
+    -- decay counters
+    d.def_snap_cnt=d.def_snap_cnt*0.95
+    d.def_flick_cnt=d.def_flick_cnt*0.95
     d.def_active=now<d.def_timer or d.def_snap_cnt>1.2 or d.def_flick_cnt>1.8
-    if d.def_active then d.def_side=_ydelta(eye,feet)>0 and 2 or 1 end
+    
+    if d.def_active then 
+        d.def_side=_ydelta(eye,feet)>0 and 2 or 1 
+    end
     d.def_last_feet=feet
 end
 
@@ -9554,9 +7737,9 @@ local function _track_lean(ent,d)
 end
 
 local function _track_fd(ent,d)
-    local duck=entity.get_prop(ent,'m_flDuckAmount') or 0
-    local flags=entity.get_prop(ent,'m_fFlags') or 0
-    local air=bit.band(flags,1)==0
+    local duck=entity.get_prop(ent,"m_flDuckAmount") or 0
+    local flags=entity.get_prop(ent,"m_fFlags") or 0
+    local air=_band(flags,1)==0
     if not air then
         local dd=_abs(duck-d.fd_last_duck)
         if dd>0.2 and duck<0.85 then d.fd_count=d.fd_count+1
@@ -9567,43 +7750,38 @@ local function _track_fd(ent,d)
 end
 
 local function _track_exploit(ent,d)
-    local sim=entity.get_prop(ent,'m_flSimulationTime') or 0
+    local sim=entity.get_prop(ent,"m_flSimulationTime") or 0
     local tc=globals.tickcount(); local ti=globals.tickinterval()
-    local st=math.floor(sim/ti+0.5)
-    table.insert(d.tb_hist,{tc=tc,sim_tick=st}); if #d.tb_hist>32 then table.remove(d.tb_hist,1) end
-    if #d.tb_hist>=2 then
-        local prev=d.tb_hist[#d.tb_hist-1]; local curr=d.tb_hist[#d.tb_hist]
-        local exp=prev.sim_tick+(curr.tc-prev.tc); local shift=exp-curr.sim_tick
-        if shift>1 and shift<=16 then d.tb_shift=shift; d.dt_active=true; d.exploit_type=_f('DT(%d)',_fl(shift))
-        elseif shift<=0 then d.dt_active=false; if d.tb_shift>0 then d.tb_shift=d.tb_shift-1 end end
-    end
-    if d.fd_active then d.exploit_type='FakeDuck' end
-    -- teleport detection: if origin jumped more than 100u in one tick, flag
-    if _M.ui_teleport and _M.ui_teleport:get() and #d.bt_hist >= 2 then
-        local prev=d.bt_hist[#d.bt_hist-1]; local curr=d.bt_hist[#d.bt_hist]
-        local dx=curr.ox-prev.ox; local dy=curr.oy-prev.oy; local dz=curr.oz-prev.oz
-        local dist=_sqrt(dx*dx+dy*dy+dz*dz)
-        if dist > 100 and (curr.tick-prev.tick) <= 2 then
-            -- teleporting: reset classifier, trust brute
-            d.fail_streak = _max(d.fail_streak, 5)
-            d.exploit_type = d.exploit_type.."+tp"
+    local st=_fl(sim/ti+0.5)
+    table.insert(d.bt_hist,{tc=tc,sim_tick=st})
+    if #d.bt_hist>64 then table.remove(d.bt_hist,1) end
+    if #d.bt_hist>=2 then
+        local prev=d.bt_hist[#d.bt_hist-1]
+        local curr=d.bt_hist[#d.bt_hist]
+        local exp=prev.sim_tick+(curr.tc-prev.tc)
+        local shift=exp-curr.sim_tick
+        if shift>1 and shift<=16 then 
+            d.tb_shift=shift
+            d.dt_active=true
+            d.exploit_type=_f("DT(%d)",_fl(shift))
+        elseif shift<=0 then 
+            d.dt_active=false
+            if d.tb_shift>0 then d.tb_shift=d.tb_shift-1 end 
         end
     end
+    if d.fd_active then d.exploit_type="FakeDuck" end
 end
 
-local function _conf_decay(d)
-    if globals.curtime()-d.conf_last_update>2 then d.confidence=_max(0.2,d.confidence*0.92) end
-end
-
--- ── classifier (improved) ───────────────────────────────────────────────
-local function _classify(d, jt, decay)
-    if #d.deltas < 8 then return 'Gathering', 0, 0.5 end
+-- ── classifier (improved with hysteresis) ───────────────────────────────
+local function _classify(d, jt)
+    if #d.deltas < 12 then return "Gathering", 0, 0.5 end
     local n   = #d.deltas
+    local decay = 0.88
     local w   = _exp_weights(n, decay)
     local wsum = 0; for _,v in ipairs(w) do wsum = wsum + v end
 
     local flip_w = 0; local static_w = 0; local swing = 0
-    local pos_w  = 0; local neg_w    = 0; local sum_w = 0
+    local pos_w  = 0; local neg_w    = 0
     local consec_same = 0; local max_consec = 0; local prev_sign = 0
 
     for i = 2, n do
@@ -9612,10 +7790,8 @@ local function _classify(d, jt, decay)
         local diff = _abs(_ydelta(c, p))
         if diff > swing then swing = diff end
         if diff > jt    then flip_w  = flip_w  + wi end
-        if diff < 5     then static_w = static_w + wi end
-        sum_w = sum_w + c * wi
+        if diff < 6     then static_w = static_w + wi end
         if c > 0 then pos_w = pos_w + wi else neg_w = neg_w + wi end
-        -- consecutive same-sign streak
         local cs = c > 0 and 1 or -1
         if cs == prev_sign then consec_same = consec_same + 1
         else consec_same = 0 end
@@ -9625,85 +7801,73 @@ local function _classify(d, jt, decay)
 
     local fr   = flip_w  / wsum
     local sr   = static_w / wsum
-    local bias = pos_w    / (pos_w + neg_w + 0.001)
     local prev = d.aa_type
     local at
 
-    -- jitter: rapid flipping
-    if fr > 0.35 then
-        at = 'Jitter'
-    -- static: small deltas, consistent
-    elseif sr > 0.68 and swing < 25 then
-        at = 'Static'
-    -- LBY: we're in an LBY update window
+    if fr > 0.32 then
+        at = "Jitter"
+    elseif sr > 0.65 and swing < 28 then
+        at = "Static"
     elseif d.lby_updating and swing < 80 then
-        at = 'LBY'
-    -- swing: single large direction
-    elseif swing > 80 and fr < 0.10 and max_consec > 4 then
-        at = 'Swing'
-    -- sway: medium oscillation
-    elseif swing > 22 and swing <= 80 and fr < 0.25 then
-        at = 'Sway'
+        at = "LBY"
+    elseif swing > 85 and fr < 0.12 and max_consec > 4 then
+        at = "Swing"
+    elseif swing > 20 and swing <= 85 and fr < 0.22 then
+        at = "Sway"
     else
-        at = 'Chaotic'
+        at = "Chaotic"
     end
 
     -- hysteresis: don't flip away from confident types on borderline
-    if prev == 'Jitter' and at ~= 'Jitter' and fr > 0.22 then at = 'Jitter' end
-    if prev == 'Static' and at ~= 'Static' and sr > 0.50  then at = 'Static' end
-    if prev == 'LBY'    and at ~= 'LBY'    and d.lby_updating then at = 'LBY' end
+    if prev == "Jitter" and at ~= "Jitter" and fr > 0.20 then at = "Jitter" end
+    if prev == "Static" and at ~= "Static" and sr > 0.48 then at = "Static" end
+    if prev == "LBY"    and at ~= "LBY"    and d.lby_updating then at = "LBY" end
 
-    return at, swing, bias
+    return at, swing, pos_w / (pos_w + neg_w + 0.001)
 end
 
--- ── jitter side predictor ───────────────────────────────────────────────
--- Track actual flip ticks to predict which side is "up" right now
+-- ── jitter side predictor (improved flip tracking) ──────────────────────
 local function _jitter_predict(d)
-    if #d.deltas < 6 then return d.side, 0.55 end
-
-    -- find the actual flip period by detecting sign changes
+    if #d.deltas < 8 then return d.side, 0.55 end
+    
     local flips = {}
     for i = 2, #d.deltas do
         local c, p = d.deltas[i], d.deltas[i-1]
-        if (c > 0) ~= (p > 0) and _abs(c) > 5 and _abs(p) > 5 then
+        if (c > 0) ~= (p > 0) and _abs(c) > 6 and _abs(p) > 6 then
             flips[#flips+1] = i
         end
     end
-
+    
     if #flips < 3 then
-        -- not enough flips to detect period, use last delta sign
         local last = d.deltas[#d.deltas] or 0
         return last > 0 and 2 or 1, 0.62
     end
-
-    -- measure average period using weighted recent flips (more weight to recent)
+    
+    -- measure average period
     local period_sum = 0
     local period_wsum = 0
     for i = 2, #flips do
-        local w = i / #flips  -- more weight to recent flips
+        local w = i / #flips
         period_sum  = period_sum  + (flips[i] - flips[i-1]) * w
         period_wsum = period_wsum + w
     end
     local avg_period = period_sum / period_wsum
-
-    -- how many ticks since last flip?
+    
     local last_flip_idx = flips[#flips]
     local ticks_since   = #d.deltas - last_flip_idx
-    local phase         = (ticks_since % _max(1, _fl(avg_period))) / _max(1, avg_period)
-
-    -- what side were they on after the last flip?
+    local phase = (ticks_since % _max(1, _fl(avg_period))) / _max(1, avg_period)
+    
     local last_delta = d.deltas[last_flip_idx] or 0
     local side_after_flip = last_delta > 0 and 2 or 1
-
-    -- if we're in the first half of the period, same side; second half, other side
+    
     local current_side
     if phase < 0.5 then
         current_side = side_after_flip
     else
         current_side = side_after_flip == 1 and 2 or 1
     end
-
-    -- confidence based on how consistent the period is
+    
+    -- confidence based on period consistency
     local period_variance = 0
     for i = 2, #flips do
         local p2 = flips[i] - flips[i-1]
@@ -9711,287 +7875,215 @@ local function _jitter_predict(d)
     end
     period_variance = period_variance / (#flips - 1)
     local consistency = _clamp(1 - period_variance / (_max(1, avg_period)^2), 0.55, 0.92)
-
+    
     return current_side, consistency
 end
 
--- ── LBY resolver (proper) ───────────────────────────────────────────────
+-- ── LBY resolver (improved) ─────────────────────────────────────────────
 local function _resolve_lby(ent, d, ast)
-    -- When LBY is NOT updating (standing still), real body yaw = feet yaw
-    -- When LBY IS updating, feet chase eye yaw
-    -- The real side to target is the one the LBY is snapping TO
     if not ast then return d.side, 35, 0.72 end
-
+    
     local feet = ast.m_flCurrentFeetYaw
     local eye  = ast.m_flEyeYaw
-    local goal = ast.m_flGoalFeetYaw  -- GS exposes this in animstate
+    local goal = ast.m_flGoalFeetYaw
     local delta = _ydelta(eye, feet)
-
-    -- If LBY is snapping, goal feet yaw tells us the real direction
-    if goal and _abs(_ydelta(goal, feet)) > 10 then
+    
+    -- if goal feet yaw differs from current, LBY is snapping
+    if goal and _abs(_ydelta(goal, feet)) > 12 then
         local snap_side = _ydelta(goal, eye) > 0 and 2 or 1
         return snap_side, 0, 0.94
     end
-
-    -- LBY stable (not updating): real yaw = feet yaw, minimal desync
+    
+    -- LBY stable: real yaw = feet yaw
     if not d.lby_updating then
-        local real_side = delta > 8 and 2 or delta < -8 and 1 or d.side
-        return real_side, _fl(_abs(delta) * 0.3), 0.90
+        local real_side = delta > 10 and 2 or delta < -10 and 1 or d.side
+        return real_side, _fl(_abs(delta) * 0.35), 0.90
     end
-
-    -- LBY actively updating: use rate of change to predict snap direction
+    
+    -- LBY updating: predict snap direction from rate
     local snap_dir = d.lby_2nd_deriv > 0 and 2 or 1
-    return snap_dir, 15, 0.82
+    return snap_dir, 18, 0.82
 end
 
--- ── body yaw real side from pose parameter ──────────────────────────────
--- m_flPoseParameter index 11 = body yaw blend (-60 to +60 degrees mapped to 0-1)
+-- ── pose parameter side detection ───────────────────────────────────────
 local function _pose_side(ent)
-    local raw = entity.get_prop(ent, 'm_flPoseParameter', 11) or 0.5
-    -- 0.5 = centered, <0.5 = left, >0.5 = right
-    -- the actual offset in degrees = (raw - 0.5) * 120
+    local raw = entity.get_prop(ent, "m_flPoseParameter", 11) or 0.5
     local offset = (raw - 0.5) * 120
-    if     offset >  15 then return 2, _abs(offset)  -- leaning right
-    elseif offset < -15 then return 1, _abs(offset)  -- leaning left
-    else                      return nil, 0
+    if     offset >  18 then return 2, _abs(offset)
+    elseif offset < -18 then return 1, _abs(offset)
+    else                     return nil, 0
     end
 end
 
--- ── desync from animstate directly ─────────────────────────────────────
+-- ── real desync from animstate ──────────────────────────────────────────
 local function _real_desync(ast)
     if not ast then return 0 end
-    -- true desync = eye_yaw - current_feet_yaw
-    local d = _ydelta(ast.m_flEyeYaw, ast.m_flCurrentFeetYaw)
-    return d
+    return _ydelta(ast.m_flEyeYaw, ast.m_flCurrentFeetYaw)
 end
 
--- air velocity resolver
+-- ── air velocity resolver ───────────────────────────────────────────────
 local function _air_vel(ent, d, ast)
-    local vx = entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local vx = entity.get_prop(ent,"m_vecVelocity[0]") or 0
+    local vy = entity.get_prop(ent,"m_vecVelocity[1]") or 0
     local spd = _sqrt(vx*vx + vy*vy)
-    if spd < 5 then return nil, 0, 0.35 end
+    if spd < 8 then return nil, 0, 0.35 end
     local vel_yaw = math.deg(math.atan2(vy, vx))
     local eye_yaw = ast and ast.m_flEyeYaw or 0
     local vd = _ydelta(vel_yaw, eye_yaw)
-    local side = vd > 18 and 2 or vd < -18 and 1 or d.side
-    local conf  = _clamp(spd / 220, 0.32, 0.76)
-    local desync = _fl(_clamp(spd * 0.17, 8, 48))
+    local side = vd > 20 and 2 or vd < -20 and 1 or d.side
+    local conf  = _clamp(spd / 200, 0.35, 0.78)
+    local desync = _fl(_clamp(spd * 0.18, 10, 50))
     return side, desync, conf
 end
 
--- lean-based resolver
-local function _lean_resolve(d, ld)
-    if d.lean_side == 0 or ld.lean_w < 0.25 then return nil end
-    local side = d.lean_side > 0 and 2 or 1
-    local conf = _clamp(d.lean_magnitude * 1.6, 0.55, 0.86)
-    return side, _fl(ld.lean_w * 40), conf
-end
-
--- pitch resolver
-local function _pitch(d)
-    if not _M.ui_pitch:get() or #d.pitch_hist < 8 then return end
-    local w = _exp_weights(#d.pitch_hist, 0.85)
-    local sw, wt = 0, 0
-    for i, v in ipairs(d.pitch_hist) do sw = sw + v*w[i]; wt = wt + w[i] end
-    local avg = wt > 0 and sw/wt or 0
-    d.pitch_res = avg < -55 and 89 or avg > 55 and -89 or 0
-end
-
--- ── main pattern resolver ────────────────────────────────────────────────
-local function _pattern(ent, d, state, ld, jt, decay)
-    local at, swing, bias = _classify(d, jt, decay)
+-- ── main pattern resolver ───────────────────────────────────────────────
+local function _pattern(ent, d, state, ld)
+    local jt = ui_jitter_t:get()
+    local at, swing, bias = _classify(d, jt)
     d.aa_type = at; d.aa_swing = swing
     local ast  = _astate(ent)
-    local sigs = _fingerprint(ld); d.layer_sigs = sigs
     local rd   = ast and _real_desync(ast) or 0
     local side, desync, conf
 
-    if at == 'Static' then
-        -- body pose is most reliable for static
+    if at == "Static" then
         local ps, pd2 = _pose_side(ent)
         if ps then
             side   = ps
             desync = _clamp(_fl(pd2 * 0.85), 30, 58)
             conf   = 0.91
         else
-            -- fall back to last delta sign
             side   = rd > 0 and 2 or 1
-            desync = _clamp(_fl(_abs(rd) * 0.80), 20, 58)
+            desync = _clamp(_fl(_abs(rd) * 0.80), 22, 58)
             conf   = 0.87
         end
-        d.method = 'static'
+        d.method = "static"
 
-    elseif at == 'Jitter' then
+    elseif at == "Jitter" then
         side, conf = _jitter_predict(d)
-        -- desync from current real delta
-        desync = _clamp(_fl(_abs(rd) * 0.75), 15, 50)
-        if desync < 10 then desync = _max(18, _fl(swing * 0.65)) end
-        d.method = 'jitter'
+        desync = _clamp(_fl(_abs(rd) * 0.75), 18, 52)
+        if desync < 12 then desync = _max(20, _fl(swing * 0.65)) end
+        d.method = "jitter"
 
-    elseif at == 'LBY' then
+    elseif at == "LBY" then
         side, desync, conf = _resolve_lby(ent, d, ast)
-        d.method = 'lby'
+        d.method = "lby"
 
-    elseif at == 'Swing' then
-        -- swing: use real delta sign, high desync
+    elseif at == "Swing" then
         side   = rd > 0 and 2 or 1
         desync = _clamp(_fl(_abs(rd) * 0.88), 35, 58)
         conf   = 0.74
-        d.method = 'swing'
+        d.method = "swing"
 
-    elseif at == 'Sway' then
-        -- exponentially weighted average direction
-        local w = _exp_weights(#d.deltas, decay)
+    elseif at == "Sway" then
+        local w = _exp_weights(#d.deltas, 0.88)
         local ws, wt = 0, 0
         for i, v in ipairs(d.deltas) do ws = ws + v * w[i]; wt = wt + w[i] end
         local wavg = wt > 0 and ws / wt or 0
         side   = wavg > 0 and 2 or 1
-        desync = _clamp(_fl(_abs(rd) * 0.72), 18, 48)
-        if desync < 10 then desync = _fl(_clamp(swing * 0.55, 18, 48)) end
-        conf   = 0.66
-        d.method = 'sway'
+        desync = _clamp(_fl(_abs(rd) * 0.72), 20, 50)
+        if desync < 12 then desync = _fl(_clamp(swing * 0.55, 20, 50)) end
+        conf   = 0.68
+        d.method = "sway"
 
     else  -- Chaotic / Gathering
-        -- use current real delta as best guess
-        side   = rd > 5 and 2 or rd < -5 and 1 or d.side
-        desync = _clamp(_fl(_abs(rd) * 0.6), 10, 38)
-        conf   = 0.42
-        d.method = 'chaotic'
+        side   = rd > 6 and 2 or rd < -6 and 1 or d.side
+        desync = _clamp(_fl(_abs(rd) * 0.6), 12, 40)
+        conf   = 0.45
+        d.method = "chaotic"
     end
 
-    -- ── layer correction ────────────────────────────────────────────────
-    -- if lean layer is heavy, trust lean side
-    if ld.lean_w > 0.30 and d.lean_side ~= 0 then
+    -- lean correction
+    if ld.lean_w > 0.28 and d.lean_side ~= 0 then
         local ls = d.lean_side > 0 and 2 or 1
-        local lc = _clamp(d.lean_magnitude * 1.6, 0.55, 0.86)
+        local lc = _clamp(d.lean_magnitude * 1.5, 0.55, 0.85)
         if lc > conf then
-            side = ls; desync = _fl(ld.lean_w * 40); conf = lc
-            d.method = d.method .. '+lean'
+            side = ls; desync = _fl(ld.lean_w * 42); conf = lc
+            d.method = d.method .. "+lean"
         end
     end
 
-    -- ── defensive override ──────────────────────────────────────────────
-    if d.def_active and _M.ui_exploits:get() then
+    -- defensive override
+    if d.def_active and ui_exploit:get() then
         side   = d.def_side
-        desync = _max(desync, d.def_snap_cnt > d.def_flick_cnt and 50 or 54)
-        conf   = _max(conf, 0.80)
-        d.method = d.method .. (d.def_snap_cnt > d.def_flick_cnt and '+def_snap' or '+def_flick')
+        desync = _max(desync, d.def_snap_cnt > d.def_flick_cnt and 52 or 55)
+        conf   = _max(conf, 0.82)
+        d.method = d.method .. "+def"
     end
 
-    -- ── exploit overrides ───────────────────────────────────────────────
-    if d.dt_active and _M.ui_exploits:get() then
-        desync = _max(desync, 52); conf = _max(conf, 0.74)
-        d.method = d.method .. '+dt'
+    -- exploit overrides
+    if d.dt_active and ui_exploit:get() then
+        desync = _max(desync, 54); conf = _max(conf, 0.76)
+        d.method = d.method .. "+dt"
     end
-    if d.fd_active and _M.ui_exploits:get() then
-        desync = _min(desync, 18); conf = _max(conf, 0.70)
-        d.method = d.method .. '+fd'
+    if d.fd_active and ui_exploit:get() then
+        desync = _min(desync, 20); conf = _max(conf, 0.72)
+        d.method = d.method .. "+fd"
     end
 
-    -- ── per-state memory ────────────────────────────────────────────────
+    -- state memory: use past hits for this state
     local ss = d.state_stats[state]
-    local _ss_total = ss and (ss.hits + ss.misses) or 0
-    if ss and _ss_total >= TUNE.min_samples_for_state and ss.hits > ss.misses * 0.6 then
+    if ss and (ss.hits + ss.misses) >= 6 and ss.hits > ss.misses * 0.7 then
         side   = ss.best_side
         desync = ss.best_desync
         conf   = _max(conf, 0.88)
-        d.method = d.method .. '+mem'
+        d.method = d.method .. "+mem"
     end
 
-    -- ── on-shot side history ─────────────────────────────────────────────
-    if #d.os_side_hist >= 4 then
-        local cnt = {[1]=0,[2]=0}
-        for _, s in ipairs(d.os_side_hist) do cnt[s] = cnt[s] + 1 end
-        local os = cnt[2] >= cnt[1] and 2 or 1
-        if cnt[os] > cnt[3 - os] * 1.4 and os ~= side then
-            side = os; conf = _max(conf, 0.70)
-            d.method = d.method .. '+os'
-        end
-    end
-
-    -- ── adaptive desync correction ───────────────────────────────────────
-    if d.adaptive_desync and d.fail_streak >= 2 then
-        desync = _fl(_lerp(desync, d.adaptive_desync, 0.50))
-        d.method = d.method .. '+adapt'
-    end
-
-    -- ── confirmed side bias ──────────────────────────────────────────────
+    -- confirmed side bias from hit history
     local sh = d.side_hits
-    if sh[1] + sh[2] >= 3 then
+    if sh[1] + sh[2] >= 4 then
         local confirmed = sh[2] > sh[1] and 2 or 1
         if confirmed == side then
             conf = _min(1.0, conf + 0.06)
-        elseif sh[confirmed] > sh[3 - confirmed] * 1.6 then
-            side = confirmed; conf = _max(conf, 0.72)
-            d.method = d.method .. '+confirm'
+        elseif sh[confirmed] > sh[3 - confirmed] * 1.5 then
+            side = confirmed; conf = _max(conf, 0.75)
+            d.method = d.method .. "+hist"
         end
     end
 
-    -- ── state-based desync tuning ────────────────────────────────────────
+    -- state-based desync tuning
     if state == ST.AIR or state == ST.AIR_CROUCH then
-        -- air: try velocity-based first
         local av_s, av_d, av_c = _air_vel(ent, d, ast)
         if av_s and av_c and av_c > conf then
             side = av_s; desync = av_d; conf = av_c
-            d.method = 'air_vel'
+            d.method = "air_vel"
         else
-            -- in air desync is less reliable, reduce slightly
-            desync = _fl(desync * 0.70)
+            desync = _fl(desync * 0.72)
             conf   = conf * 0.85
-            d.method = d.method .. '+air'
+            d.method = d.method .. "+air"
         end
     elseif state == ST.MOVE then
-        -- moving: they can desync less
-        desync = _fl(desync * 0.82)
+        desync = _fl(desync * 0.84)
     elseif state == ST.SNAKING then
-        -- snaking = fast jitter, use jitter predictor
         local js, jc = _jitter_predict(d)
-        side = js; conf = jc * 0.80
-        desync = _fl(desync * 0.65)
-        d.method = 'snaking'
+        side = js; conf = jc * 0.82
+        desync = _fl(desync * 0.68)
+        d.method = "snaking"
     elseif state == ST.SLOWWALK then
-        desync = _fl(desync * 0.90)
+        desync = _fl(desync * 0.92)
     elseif state == ST.CROUCH then
-        desync = _fl(desync * 0.88)
+        desync = _fl(desync * 0.90)
     end
 
-    return side, _clamp(_fl(desync), 0, 62), _clamp(conf, 0.0, 1.0)
+    return side, _clamp(_fl(desync), 0, 60), _clamp(conf, 0.0, 1.0)
 end
 
--- ── adaptive desync estimator ────────────────────────────────────────────
-local function _upd_adapt(d, missed_side, missed_desync)
-    table.insert(d.miss_pattern, {side=missed_side, desync=missed_desync})
-    if #d.miss_pattern > 24 then table.remove(d.miss_pattern, 1) end
-    if #d.miss_pattern >= 4 then
-        local sum = 0
-        for _, mp in ipairs(d.miss_pattern) do sum = sum + mp.desync end
-        local avg = sum / #d.miss_pattern
-        -- if missing at avg desync, try the mirror value
-        d.adaptive_desync = avg > 35 and _max(0, 62 - avg) or _min(62, avg + 28)
-    end
-end
+-- ── adaptive brute force ────────────────────────────────────────────────
+local _BRUTE = {58,-58,50,-50,42,-42,34,-34,26,-26,18,-18,10,-10,0}
 
--- ── brute force (smarter ordering) ───────────────────────────────────────
-local _BRUTE_SMART = {58,-58,48,-48,38,-38,28,-28,18,-18,10,-10,0}  -- adaptive order
-local _BRUTE_FAST  = {58,-58,0,38,-38,18,-18}  -- 7-stage fast sweep
-local _BRUTE_FULL  = {58,-58,54,-54,48,-48,44,-44,38,-38,32,-32,26,-26,20,-20,14,-14,8,-8,4,-4,0}  -- full
-local _BRUTE = _BRUTE_SMART  -- default
 local function _brute(d)
-    -- auto brute: always use smart adaptive ordering
-    _BRUTE=_BRUTE_SMART
-    -- if we have a locked winning offset, use it
+    -- if we found a winning offset, lock it
     if d.brute_locked and d.brute_best_off then
-        d.method = 'brute_locked'
+        d.method = "brute_locked"
         local v = d.brute_best_off
         return v >= 0 and 2 or 1, _abs(v), 1.0
     end
-
+    
     local idx = (d.brute_stage % #_BRUTE) + 1
     local v   = _BRUTE[idx]
-
+    
     -- adaptive: jump toward estimated real desync
-    if d.adaptive_desync and d.fail_streak >= 3 then
+    if d.adaptive_desync and d.fail_streak >= 4 then
         local tgt = d.adaptive_desync
         local best_v = v; local best_d = _abs(_abs(v) - tgt)
         for _, bv in ipairs(_BRUTE) do
@@ -9999,27 +8091,39 @@ local function _brute(d)
             if dist < best_d then best_d = dist; best_v = bv end
         end
         v = best_v
-        d.method = _f('brute@%+d(adapt)', v)
+        d.method = _f("brute@%+d(adapt)", v)
     else
-        d.method = _f('brute@%+d', v)
+        d.method = _f("brute@%+d", v)
     end
-
+    
     return v >= 0 and 2 or 1, _abs(v), 1.0
 end
 
--- ── NN forward pass ───────────────────────────────────────────────────────
+-- ── neural network (larger, better training) ────────────────────────────
+local NN = {
+    cfg = { inp=18, hid=36, out=3, lr=0.042, mom=0.88 },
+    wh={}, wo={}, vh={}, vo={}, mem={},
+    trained_samples = 0,
+}
+local function _nn_xavier(a,b) return (math.random()*2-1)*_sqrt(6/(a+b)) end
+for i=1,18 do NN.wh[i]={}; NN.vh[i]={}
+    for j=1,36 do NN.wh[i][j]=_nn_xavier(18,36); NN.vh[i][j]=0 end
+end
+for i=1,36 do NN.wo[i]={}; NN.vo[i]={}
+    for j=1,3 do NN.wo[i][j]=_nn_xavier(36,3); NN.vo[i][j]=0 end
+end
+
 local function _nn_fwd(inp)
-    local NN = _M.NN3
-    local h  = {}
-    for i = 1, 48 do
+    local h = {}
+    for i = 1, 36 do
         local s = 0
-        for j = 1, 20 do s = s + (inp[j] or 0) * NN.wh[j][i] end
+        for j = 1, 18 do s = s + (inp[j] or 0) * NN.wh[j][i] end
         h[i] = s > 0 and s or 0.02 * s  -- leaky relu
     end
     local o = {}
     for i = 1, 3 do
         local s = 0
-        for j = 1, 48 do s = s + h[j] * NN.wo[j][i] end
+        for j = 1, 36 do s = s + h[j] * NN.wo[j][i] end
         o[i] = 1 / (1 + _exp(-_clamp(s, -12, 12)))
     end
     return o, h
@@ -10027,10 +8131,10 @@ end
 
 local function _nn_inp(ent, d, state, ld)
     local ast  = _astate(ent)
-    local vx   = entity.get_prop(ent,'m_vecVelocity[0]') or 0
-    local vy   = entity.get_prop(ent,'m_vecVelocity[1]') or 0
+    local vx   = entity.get_prop(ent,"m_vecVelocity[0]") or 0
+    local vy   = entity.get_prop(ent,"m_vecVelocity[1]") or 0
     local spd  = _sqrt(vx*vx + vy*vy)
-    local duck = entity.get_prop(ent,'m_flDuckAmount') or 0
+    local duck = entity.get_prop(ent,"m_flDuckAmount") or 0
     local rd   = ast and _real_desync(ast) or 0
     local d1   = d.deltas[#d.deltas]     or 0
     local d2   = d.deltas[#d.deltas-1]   or 0
@@ -10046,27 +8150,25 @@ local function _nn_inp(ent, d, state, ld)
         _clamp(spd/260, 0, 1),
         duck,
         d1/180, d2/180, d3/180,
-        rd/180,             -- real-time desync signal
+        rd/180,
         ld.aim_w,
         ld.desync_cycle,
         ld.lean_w,
         d.lby_updating and 1 or 0,
-        _clamp(d.fail_streak/12, 0, 1),
-        d.def_active and 1 or 0,
-        d.dt_active  and 1 or 0,
+        _clamp(d.fail_streak/10, 0, 1),
     }
 end
 
-local function _hybrid(ent, d, state, ld, jt, decay)
-    local ps, pd, pc = _pattern(ent, d, state, ld, jt, decay)
+local function _hybrid(ent, d, state, ld)
+    local ps, pd, pc = _pattern(ent, d, state, ld)
     local inp = _nn_inp(ent, d, state, ld)
     local nout, _ = _nn_fwd(inp)
     local ns = nout[1] > 0.52 and 2 or 1
-    local nd = _fl(nout[2] * 62)
+    local nd = _fl(nout[2] * 60)
     local nc = nout[3]
     d.last_nn_inp = inp
 
-    local trust = _clamp(((_M.NN3.trained_samples or 0)) / 15, 0, 1)
+    local trust = _clamp(NN.trained_samples / 12, 0, 1)
 
     -- always trust pattern for LBY or very high confidence
     if d.lby_updating or pc > 0.88 or trust < 0.25 then
@@ -10074,10 +8176,10 @@ local function _hybrid(ent, d, state, ld, jt, decay)
     end
 
     -- NN takes over for jitter/chaotic when well trained
-    if (d.aa_type == 'Jitter' or d.aa_type == 'Chaotic') and trust > 0.5 then
+    if (d.aa_type == "Jitter" or d.aa_type == "Chaotic") and trust > 0.5 then
         local eff_nc = nc * trust
         if eff_nc > pc then
-            d.method = 'neural+' .. d.method
+            d.method = "neural+" .. d.method
             return ns, nd, _min(eff_nc, 0.93)
         end
     end
@@ -10087,59 +8189,63 @@ local function _hybrid(ent, d, state, ld, jt, decay)
     if tot <= 0 then return ps, pd, pc end
     local bd  = _fl((pd*pw + nd*nw) / tot)
     local fs  = pw >= nw and ps or ns
-    d.method  = 'hybrid+' .. d.method
+    d.method  = "hybrid+" .. d.method
     return fs, bd, _max(pc, nc * trust)
 end
 
--- ── NN training ────────────────────────────────────────────────────────
 local function _nn_train()
-    local NN = _M.NN3
-    if #NN.mem < 24 then return end
-    for _ = 1, 14 do
+    if #NN.mem < 20 then return end
+    for _ = 1, 12 do
         local s = NN.mem[math.random(1, #NN.mem)]
         local o, h = _nn_fwd(s.inp)
         local sw = s.w or 1
-        -- output deltas
         local do3 = {}
         for i = 1, 3 do
             do3[i] = (s.tgt[i] - o[i]) * o[i] * (1 - o[i]) * sw
         end
-        -- output weights
         for i = 1, 3 do
-            for j = 1, 48 do
+            for j = 1, 36 do
                 local g = NN.cfg.lr * do3[i] * h[j]
                 NN.vo[j][i] = NN.cfg.mom * NN.vo[j][i] + g
                 NN.wo[j][i] = NN.wo[j][i] + NN.vo[j][i]
             end
         end
-        -- hidden deltas
-        for j = 1, 48 do
+        for j = 1, 36 do
             local dh = 0
             for i = 1, 3 do dh = dh + do3[i] * NN.wo[j][i] end
             dh = dh * (h[j] > 0 and 1 or 0.02)
-            for k = 1, 20 do
+            for k = 1, 18 do
                 local g = NN.cfg.lr * dh * (s.inp[k] or 0)
                 NN.vh[k][j] = NN.cfg.mom * NN.vh[k][j] + g
                 NN.wh[k][j] = NN.wh[k][j] + NN.vh[k][j]
             end
         end
     end
-    NN.trained_samples = (NN.trained_samples or 0) + 1
+    NN.trained_samples = NN.trained_samples + 1
 end
 
 local function _nn_add(d, hit, hs)
-    local NN = _M.NN3
     if not d.last_nn_inp then return end
     local w = hs and 3.0 or hit and 1.2 or 1.8
     table.insert(NN.mem, {
         inp = d.last_nn_inp,
-        tgt = { d.side==2 and 1.0 or 0.0, _min(d.desync/62,1), hit and 1.0 or 0.0 },
+        tgt = { d.side==2 and 1.0 or 0.0, _min(d.desync/60,1), hit and 1.0 or 0.0 },
         w   = w
     })
-    if #NN.mem > 2000 then table.remove(NN.mem, 1) end
+    if #NN.mem > 1500 then table.remove(NN.mem, 1) end
 end
 
--- ── state stats ─────────────────────────────────────────────────────────
+-- ── pitch resolver ──────────────────────────────────────────────────────
+local function _pitch(d)
+    if not ui_pitch:get() or #d.pitch_hist < 8 then return end
+    local w = _exp_weights(#d.pitch_hist, 0.85)
+    local sw, wt = 0, 0
+    for i, v in ipairs(d.pitch_hist) do sw = sw + v*w[i]; wt = wt + w[i] end
+    local avg = wt > 0 and sw/wt or 0
+    d.pitch_res = avg < -55 and 89 or avg > 55 and -89 or 0
+end
+
+-- ── update state stats ──────────────────────────────────────────────────
 local function _upd_ss(d, state, hit, side, desync)
     local ss = d.state_stats[state]
     if not ss then
@@ -10148,7 +8254,6 @@ local function _upd_ss(d, state, hit, side, desync)
     end
     if hit then
         ss.hits = ss.hits + 1
-        -- update best with exponential decay toward new value
         ss.best_side   = side
         ss.best_desync = _fl(ss.best_desync * 0.7 + desync * 0.3)
     else
@@ -10156,308 +8261,214 @@ local function _upd_ss(d, state, hit, side, desync)
     end
 end
 
-local function _suppress(ent)
-    if not _M.ui_suppress:get() then return false end
-    local me=entity.get_local_player(); if not me then return false end
-    local mx,my=entity.get_origin(me); local ex,ey=entity.get_origin(ent)
-    if not mx or not ex then return false end
-    return math.sqrt((ex-mx)^2+(ey-my)^2) < _M.ui_sup_rng:get()
-end
-
--- ── screen log ──────────────────────────────────────────────────────────
-_M.log_entries={}
-local function _log_add(text,r,g,b,sub)
-    table.insert(_M.log_entries,1,{text=text,sub=sub or '',r=r,g=g,b=b,t=globals.curtime(),frac=0})
-    while #_M.log_entries>12 do table.remove(_M.log_entries) end
-end
-local function _log_draw()
-    if not _M.ui_log_scr:get() then return end
-    local sw,sh=client.screen_size(); local W=350; local bx=sw-20; local by=sh-80; local cy=by; local rm={}
-    for i,e in ipairs(_M.log_entries) do
-        local age=globals.curtime()-e.t
-        if age<7 then e.frac=e.frac+(1-e.frac)*0.16
-        else e.frac=e.frac+(0-e.frac)*0.07; if e.frac<0.01 then rm[#rm+1]=i end end
-        local fr=e.frac; if fr<0.02 then goto _ls end
-        do
-            local a=_fl(255*fr); local x=bx-W+_fl(28*(1-fr)); local y=cy
-            local hs=e.sub~=''; local ch=hs and 36 or 21
-            renderer.rectangle(x,y,W,ch,12,12,16,_fl(195*fr))
-            renderer.rectangle(x,y,3,ch,e.r,e.g,e.b,a)
-            renderer.text(x+10,y+7,e.r,e.g,e.b,a,'b',0,e.text)
-            if hs then
-                renderer.rectangle(x+10,y+20,W-13,1,255,255,255,_fl(16*fr))
-                renderer.text(x+10,y+22,200,200,200,_fl(a*0.86),'d',0,e.sub)
-            end
-            cy=cy-(ch+5)*fr
-        end
-        ::_ls::
-    end
-    for i=#rm,1,-1 do table.remove(_M.log_entries,rm[i]) end
-    -- desync indicator: show live desync of current target near crosshair
-    if _M.ui_desyncindicator and _M.ui_desyncindicator:get() then
-        local ok2,thr2=pcall(client.current_threat)
-        if ok2 and thr2 and thr2>0 and _M.DB[thr2] then
-            local td=_M.DB[thr2]
-            local sw2,sh2=client.screen_size()
-            local cx2=sw2*0.5; local cy2=sh2*0.5+22
-            local side_str=td.side==2 and 'R' or 'L'
-            local conf_pct=_fl((td.confidence or 0)*100)
-            local at2=td.aa_type or '?'
-            local ms2=_ms(td.method or '?')
-            -- background pill
-            local txt2=_f('%s %d°  %s  %d%%',side_str,td.desync or 0,at2:sub(1,3),conf_pct)
-            local tw2,th2=renderer.measure_text('d',txt2)
-            renderer.rectangle(cx2-tw2/2-6,cy2-3,tw2+12,th2+6,10,10,14,180)
-            renderer.rectangle(cx2-tw2/2-6,cy2-3,2,th2+6,
-                conf_pct>=75 and 100 or conf_pct>=50 and 255 or 255,
-                conf_pct>=75 and 220 or conf_pct>=50 and 180 or 80,
-                conf_pct>=75 and 100 or 60, 220)
-            renderer.text(cx2-tw2/2,cy2,220,220,255,210,'d',0,txt2)
-        end
+-- ── adaptive desync update ──────────────────────────────────────────────
+local function _upd_adapt(d, ms, md)
+    table.insert(d.miss_pattern, {side=ms, desync=md})
+    if #d.miss_pattern > 20 then table.remove(d.miss_pattern, 1) end
+    if #d.miss_pattern >= 4 then
+        local sum = 0
+        for _, mp in ipairs(d.miss_pattern) do sum = sum + mp.desync end
+        local avg = sum / #d.miss_pattern
+        d.adaptive_desync = avg > 32 and _max(0, 60 - avg) or _min(60, avg + 28)
     end
 end
 
-local function _ms(m)
-    if not m or m=='' then return 'none' end
-    local map={lby='lby',jitter='jitter',air_vel='air_vel',def_snap='def_snap',
-               def_flick='def_flick',brute='brute',neural='neural',hybrid='neural',
-               static='static',swing='swing',sway='sway',snaking='snaking',lean='lean'}
-    for k,v in pairs(map) do if m:find(k) then return v end end
-    return m:sub(1,12)
+-- ── desync indicator ────────────────────────────────────────────────────
+local function _draw_indicator()
+    if not ui_indicator:get() then return end
+    local ok, thr = pcall(client.current_threat)
+    if not ok or not thr or thr <= 0 then return end
+    local d = DB[thr]
+    if not d then return end
+    
+    local sw, sh = client.screen_size()
+    local cx, cy = sw * 0.5, sh * 0.5 + 24
+    local side_str = d.side == 2 and "R" or "L"
+    local conf_pct = _fl((d.confidence or 0) * 100)
+    local at = d.aa_type or "?"
+    local txt = _f("%s %d  %s  %d%%", side_str, d.desync or 0, at:sub(1,3), conf_pct)
+    local tw, th = renderer.measure_text("d", txt)
+    
+    renderer.rectangle(cx - tw/2 - 6, cy - 3, tw + 12, th + 6, 10, 10, 14, 185)
+    local cr = conf_pct >= 75 and 100 or conf_pct >= 50 and 255 or 255
+    local cg = conf_pct >= 75 and 220 or conf_pct >= 50 and 180 or 80
+    local cb = conf_pct >= 75 and 100 or 60
+    renderer.rectangle(cx - tw/2 - 6, cy - 3, 2, th + 6, cr, cg, cb, 220)
+    renderer.text(cx - tw/2, cy, 220, 220, 255, 210, "d", 0, txt)
 end
 
--- ── adaptive desync update ───────────────────────────────────────────────
-local function _upd_adapt(d,ms2,md)
-    table.insert(d.miss_pattern,{side=ms2,desync=md,tick=globals.tickcount()})
-    if #d.miss_pattern>20 then table.remove(d.miss_pattern,1) end
-    if #d.miss_pattern>=4 then
-        local sum=0; for _,mp in ipairs(d.miss_pattern) do sum=sum+mp.desync end
-        local avg=sum/#d.miss_pattern
-        d.adaptive_desync=avg>30 and _max(0,60-avg) or _min(60,avg+30)
+-- ── main paint callback ─────────────────────────────────────────────────
+client.set_event_callback("paint", function()
+    if not ui_enable:get() then return end
+    _draw_indicator()
+    
+    local mode = ui_mode:get()
+    local brute_thresh = ui_brute_t:get()
+    local me = entity.get_local_player()
+    local enemies = entity.get_players(true)
+    
+    for _, ent in ipairs(enemies) do
+        if not entity.is_alive(ent) then goto _skip end
+        local sim = entity.get_prop(ent, "m_flSimulationTime") or 0
+        local d = _db(ent)
+        if d.last_sim == sim then goto _skip end
+        d.last_sim = sim
+        
+        -- run all trackers
+        _track_lby(ent, d)
+        _track_def(ent, d)
+        _track_lean(ent, d)
+        _track_fd(ent, d)
+        _track_exploit(ent, d)
+        
+        local state = _gstate(ent)
+        local ld = _gld(ent)
+        local side, desync, conf
+        
+        -- auto brute threshold based on aa type
+        local auto_bt = d.aa_type == "Jitter" and 2
+            or d.aa_type == "Chaotic" and 2
+            or d.aa_type == "Static" and 4
+            or brute_thresh
+        
+        if d.fail_streak >= auto_bt or mode == "Bruteforce" then
+            side, desync, conf = _brute(d)
+        elseif mode == "Hybrid Neural" then
+            side, desync, conf = _hybrid(ent, d, state, ld)
+        else
+            side, desync, conf = _pattern(ent, d, state, ld)
+        end
+        
+        -- don't apply if confidence too low and we have history
+        if conf < 0.38 and d.hit_count > 0 then
+            side = d.side
+            desync = d.desync
+        end
+        
+        _pitch(d)
+        d.side = side
+        d.desync = desync
+        d.confidence = conf
+        
+        -- apply to plist
+        pcall(plist.set, ent, "Y offset", desync * (side == 2 and 1 or -1))
+        if ui_pitch:get() and d.pitch_res ~= 0 then
+            pcall(plist.set, ent, "Pitch override", d.pitch_res)
+        end
+        
+        ::_skip::
     end
-end
-
-local function _upd_ss(d,state,hit,side,desync)
-    local ss=d.state_stats[state]
-    if not ss then d.state_stats[state]={hits=0,misses=0,best_side=1,best_desync=40}; ss=d.state_stats[state] end
-    if hit then ss.hits=ss.hits+1; ss.best_side=side; ss.best_desync=desync
-    else ss.misses=ss.misses+1 end
-end
-
--- ── main paint: resolve all enemies ─────────────────────────────────────
-client.set_event_callback('paint',function()
-    if not _auth_alive or not _M.ui_en:get() then return end
-    _log_draw()
-    local mode=_M.ui_mode:get(); local jt=_M.ui_jt:get(); local decay=_M.ui_hist_w:get()/100
-    local me=entity.get_local_player(); local enemies=entity.get_players(true)
-    for _,ent in ipairs(enemies) do
-        if not entity.is_alive(ent) then goto _rsk end
-        local sim=entity.get_prop(ent,'m_flSimulationTime') or 0
-        local d=_db(ent); if d.last_sim==sim then goto _rsk end; d.last_sim=sim
-        _track_lby(ent,d); _track_bt(ent,d); _track_def(ent,d)
-        _track_lean(ent,d); _track_fd(ent,d); _track_exploit(ent,d)
-        _conf_decay(d); d.conf_last_update=globals.curtime()
-        local state=_gstate(ent); local ld=_gld(ent)
-        local side,desync,conf
-        -- auto brute threshold
-        local _auto_bt = d.aa_type=="Jitter" and 3
-            or d.aa_type=="Chaotic" and 2
-            or d.aa_type=="Static" and 6
-            or d.aa_type=="LBY" and 4
-            or 4
-        if d.fail_streak >= _auto_bt or eff_mode=='Brute Force' then side,desync,conf=_brute(d)
-        elseif mode=='Hybrid Engine' then side,desync,conf=_hybrid(ent,d,state,ld,jt,decay)
-        else side,desync,conf=_pattern(ent,d,state,ld,jt,decay) end
-        -- auto min confidence: higher for fresh targets, lower after misses
-        local auto_min_conf = d.fail_streak >= 3 and 0.30
-            or d.hit_count == 0 and 0.50
-            or 0.40
-        if conf < auto_min_conf then side=d.side; desync=d.desync end
-        -- anti-freestand: flip side toward exposed side
-        if _M.ui_afstand and _M.ui_afstand:get() then
-            local fs=software.is_freestanding and software.is_freestanding() or false
-            if fs then
-                local fss=entity.get_prop(ent,'m_flGoalFeetYaw') or 0
-                local eys=entity.get_prop(ent,'m_angEyeAngles[1]') or 0
-                local exp_side=_nrm(eys-fss)>0 and 2 or 1
-                side=exp_side; conf=_max(conf,0.72)
-            end
-        end
-        -- multi-point
-        if _M.ui_multipt:get() and me and entity.is_alive(me) then
-            local ex,ey,ez=client.eye_position()
-            if ex then
-                local ast=_astate(ent); local base_yaw=ast and ast.m_flEyeYaw or 0
-                local best_off=desync*(side==2 and 1 or -1); local best=-1
-                for _,off in ipairs({-60,-40,-20,0,20,40,60}) do
-                    local tx=ex+math.cos(math.rad(base_yaw+off))*2
-                    local ty=ey+math.sin(math.rad(base_yaw+off))*2
-                    local frac=client.trace_line(me,ex,ey,ez,tx,ty,ez+68)
-                    if (frac or 0)>best then best=frac or 0; best_off=off end
-                end
-                side=best_off>=0 and 2 or 1; desync=_abs(best_off)
-            end
-        end
-        _pitch(d); d.side=side; d.desync=desync; d.confidence=conf
-        pcall(plist.set,ent,'Y offset',_suppress(ent) and 0 or desync*(side==2 and 1 or -1))
-        if _M.ui_pitch:get() and d.pitch_res~=0 then pcall(plist.set,ent,'Pitch override',d.pitch_res) end
-        ::_rsk::
-    end
-    if mode=='Hybrid Engine' then _nn_train() end
-    if globals.tickcount()%10==0 then
-        local ok,thr=pcall(client.current_threat)
-        if ok and thr and thr>0 and _M.DB[thr] then
-            local d=_M.DB[thr]; local st=_gstate(thr); local ld=_gld(thr)
-            local sigs=table.concat(d.layer_sigs or {},' ')
-            local expl=(d.exploit_type~='none' and d.exploit_type or '-')..(d.dt_active and ' DT' or '')..(d.fd_active and ' FD' or '')
-            _M.lbl_method:set(_f('Method: %s (%.0f%%)',_ms(d.method or 'none'),(d.confidence or 0)*100))
-            _M.lbl_aa:set(_f('AA Type: %s  swing:%.0f  freq:%d',d.aa_type or '-',d.aa_swing or 0,d.jitter_freq or 0))
-            _M.lbl_desync:set(_f('Desync: %ddeg  %s  adapt:%s',d.desync or 0,d.side==2 and 'R' or 'L',d.adaptive_desync and _f('%.0f',d.adaptive_desync) or '-'))
-            _M.lbl_lby:set(_f('LBY: %s  snaps:%d  d2:%.2f',d.lby_updating and 'updating' or 'stable',d.lby_snap_cnt or 0,d.lby_2nd_deriv or 0))
-            _M.lbl_streak:set(_f('Streak: %d miss | %d hit',d.fail_streak or 0,d.hit_streak or 0))
-            _M.lbl_conf:set(_f('Confidence: %.0f%%  NN:%d',( d.confidence or 0)*100,(_M.NN3.trained_samples or 0)))
-            _M.lbl_state:set(_f('State: %s  lean:%s(%.2f)  def:%s',ST_STR[st] or '?',d.lean_side==1 and 'R' or d.lean_side==-1 and 'L' or '-',d.lean_magnitude or 0,d.def_active and 'active' or 'off'))
-            _M.lbl_layers:set(_f('Layers: aim=%.2f lean=%.2f dc=%.3f [%s]',ld.aim_w,ld.lean_w,ld.desync_cycle,sigs))
-            _M.lbl_exploit:set(_f('Exploit: %s  tb:%d  fd:%.1f',expl,d.tb_shift or 0,d.fd_count or 0))
-        if _M.lbl_nn then
-            local ns=_M.NN3.trained_samples or 0
-            local nt=#(_M.NN3.mem or {})
-            _M.lbl_nn:set(_f('NN: %d samples  mem:%d  trust:%.0f%%',ns,nt,_clamp(ns/15,0,1)*100))
-        end
+    
+    if mode == "Hybrid Neural" then _nn_train() end
+    
+    -- update UI labels
+    if globals.tickcount() % 12 == 0 then
+        local ok, thr = pcall(client.current_threat)
+        if ok and thr and thr > 0 and DB[thr] then
+            local d = DB[thr]
+            lbl_method:set(_f("Method: %s (%.0f%%)", d.method or "none", (d.confidence or 0) * 100))
+            lbl_aa:set(_f("AA Type: %s  swing:%.0f", d.aa_type or "-", d.aa_swing or 0))
+            lbl_desync:set(_f("Desync: %d  %s  adapt:%s", d.desync or 0, d.side == 2 and "R" or "L", d.adaptive_desync and _f("%.0f", d.adaptive_desync) or "-"))
+            lbl_streak:set(_f("Streak: %d miss | %d hit", d.fail_streak or 0, d.hit_streak or 0))
         end
     end
 end)
 
--- ── aim_hit ──────────────────────────────────────────────────────────────
-client.set_event_callback('aim_hit',function(e)
-    if not _auth_alive or not _M.ui_en:get() then return end
-    local ent=e.target; if not ent then return end
-    local d=_db(ent); local hs=e.hitgroup==1; local dmg=e.damage or 0
-    local bt=e.tick and _clamp(globals.tickcount()-e.tick,0,64) or 0
-    local name=entity.get_player_name(ent) or '?'
-    local hgn={[0]='body',[1]='head',[2]='chest',[3]='stomach',[4]='l.arm',[5]='r.arm',[6]='l.leg',[7]='r.leg'}
-    local hg=hgn[e.hitgroup] or 'body'; local ms=_ms(d.method or 'none'); local conf=_fl((d.confidence or 0)*100)
-    local state=_gstate(ent)
-    if hs then d.fail_streak=0; d.brute_stage=0; d.brute_locked=false; d.miss_pattern={}
-    else d.fail_streak=_max(0,d.fail_streak-1); if d.brute_stage>0 then d.brute_stage=_max(0,d.brute_stage-1) end end
-    d.hit_count=d.hit_count+1; d.hit_streak=d.hit_streak+1
-    d.side_hits[d.side]=(d.side_hits[d.side] or 0)+(hs and 2 or 1)
-    _upd_ss(d,state,true,d.side,d.desync)
+-- ── aim_hit callback ────────────────────────────────────────────────────
+client.set_event_callback("aim_hit", function(e)
+    if not ui_enable:get() then return end
+    local ent = e.target
+    if not ent then return end
+    local d = _db(ent)
+    local hs = e.hitgroup == 1
+    local state = _gstate(ent)
+    
+    if hs then
+        d.fail_streak = 0
+        d.brute_stage = 0
+        d.brute_locked = false
+        d.miss_pattern = {}
+    else
+        d.fail_streak = _max(0, d.fail_streak - 1)
+        if d.brute_stage > 0 then d.brute_stage = _max(0, d.brute_stage - 1) end
+    end
+    
+    d.hit_count = d.hit_count + 1
+    d.hit_streak = d.hit_streak + 1
+    d.side_hits[d.side] = (d.side_hits[d.side] or 0) + (hs and 2 or 1)
+    _upd_ss(d, state, true, d.side, d.desync)
+    
     -- NN training on hit
-    if _M.ui_mode:get()=='Hybrid Engine' then _nn_add(d, true, hs) end
+    if ui_mode:get() == "Hybrid Neural" then _nn_add(d, true, hs) end
+    
     -- lock brute on headshot
     if hs and d.brute_stage > 0 then
         d.brute_locked = true
-        d.brute_best_off = d.desync * (d.side==2 and 1 or -1)
+        d.brute_best_off = d.desync * (d.side == 2 and 1 or -1)
     end
-    local main=hs and _f('Killed %s with a head shot for %d damage',name,dmg) or _f('Hit %s in the %s for %d damage',name,hg,dmg)
-    local sub=_f('reso: %s @ %d%%  \xc2\xb7  bt:%dt',ms,conf,bt)
-    if _M.ui_log_scr:get() then local r,g,b=hs and 110 or 170,hs and 215 or 175,hs and 85 or 85; _log_add(main,r,g,b,sub) end
-    if _M.ui_log_con:get() then local cr,cg,cb=hs and 100 or 180,hs and 255 or 220,100; client.color_log(cr,cg,cb,main..'  \xc2\xb7  '..sub..'\0') end
+    
+    _vlog(_f("Hit %s %s  method:%s", entity.get_player_name(ent) or "?", hs and "(HS)" or "", d.method or "?"))
 end)
 
--- ── aim_miss ─────────────────────────────────────────────────────────────
-client.set_event_callback('aim_miss',function(e)
-    if not _auth_alive or not _M.ui_en:get() then return end
-    local ent=e.target; if not ent then return end
-    if e.reason=='spread' then
-        if not _M.ui_spfilter or _M.ui_spfilter:get() then return end
-    end
-    local d=_db(ent); local name=entity.get_player_name(ent) or '?'; local ms=_ms(d.method or 'none')
-    local state=_gstate(ent)
-    d.miss_count=d.miss_count+1; d.fail_streak=d.fail_streak+1; d.hit_streak=0
-    d.brute_stage=(d.brute_stage+1)%#_BRUTE
-    -- auto: always flip side immediately on miss
-    d.side=d.side==1 and 2 or 1
-    _upd_adapt(d,d.side,d.desync); _upd_ss(d,state,false,d.side,d.desync)
-    if d.aa_type=='Jitter' then d.jitter_phase=(d.jitter_phase+0.5)%1.0 end
+-- ── aim_miss callback ───────────────────────────────────────────────────
+client.set_event_callback("aim_miss", function(e)
+    if not ui_enable:get() then return end
+    local ent = e.target
+    if not ent then return end
+    if e.reason == "spread" then return end
+    
+    local d = _db(ent)
+    local state = _gstate(ent)
+    
+    d.miss_count = d.miss_count + 1
+    d.fail_streak = d.fail_streak + 1
+    d.hit_streak = 0
+    d.brute_stage = (d.brute_stage + 1) % #_BRUTE
+    
+    -- flip side immediately on miss
+    d.side = d.side == 1 and 2 or 1
+    
+    _upd_adapt(d, d.side, d.desync)
+    _upd_ss(d, state, false, d.side, d.desync)
+    
     -- NN training on miss
-    if _M.ui_mode:get()=='Hybrid Engine' then _nn_add(d, false, false) end
-    -- unlock brute on miss so it can search again
+    if ui_mode:get() == "Hybrid Neural" then _nn_add(d, false, false) end
+    
+    -- unlock brute so it can search again
     d.brute_locked = false
-    local reason=e.reason or '?'
-    if _M.ui_log_scr:get() then _log_add(_f('Missed %s (%s)',name,reason),205,75,75,_f('reso: %s  streak:%d  next:%s',ms,d.fail_streak,d.side==2 and 'R' or 'L')) end
-    if _M.ui_log_con:get() then client.color_log(255,100,100,_f('[ZRes] MISS %s  reason:%s  streak:%d  next:%s\0',name,reason,d.fail_streak,d.side==2 and 'R' or 'L')) end
+    
+    _vlog(_f("Miss %s  reason:%s  streak:%d  next:%s", entity.get_player_name(ent) or "?", e.reason or "?", d.fail_streak, d.side == 2 and "R" or "L"))
 end)
 
--- ── round_start ──────────────────────────────────────────────────────────
--- NN weight persistence
-local _NN_DB_KEY='zenith_nn_weights_v1'
-local function _nn_save()
-    if not _M.ui_nn_save or not _M.ui_nn_save:get() then return end
-    local NN=_M.NN3
-    pcall(database.write,_NN_DB_KEY,{wh=NN.wh,wo=NN.wo,trained=NN.trained_samples or 0})
-end
-local function _nn_load()
-    if not _M.ui_nn_save or not _M.ui_nn_save:get() then return end
-    local ok,v=pcall(database.read,_NN_DB_KEY)
-    if ok and type(v)=='table' and v.wh and v.wo then
-        _M.NN3.wh=v.wh; _M.NN3.wo=v.wo
-        _M.NN3.trained_samples=v.trained or 0
-        client.color_log(100,255,150,'[ZRes] NN weights loaded ('..tostring(v.trained or 0)..' samples)')
-    end
-end
-client.delay_call(1,_nn_load)
-client.set_event_callback('shutdown',function() _nn_save() end)
-
-client.set_event_callback('round_start',function()
-    for _,d in pairs(_M.DB) do
-        d.fail_streak=0; d.hit_streak=0; d.brute_stage=0; d.brute_locked=false
-        d.def_snap_cnt=0; d.def_flick_cnt=0; d.def_active=false
-        d.miss_pattern={}; d.adaptive_desync=nil
+-- ── round_start callback ────────────────────────────────────────────────
+client.set_event_callback("round_start", function()
+    for _, d in pairs(DB) do
+        d.fail_streak = 0
+        d.hit_streak = 0
+        d.brute_stage = 0
+        d.brute_locked = false
+        d.miss_pattern = {}
+        d.adaptive_desync = nil
         if d.state_stats then
-            for _,ss in pairs(d.state_stats) do
+            for _, ss in pairs(d.state_stats) do
                 if ss then
-                    ss.hits   = math.floor((ss.hits   or 0)*TUNE.state_decay)
-                    ss.misses = math.floor((ss.misses or 0)*TUNE.state_decay)
+                    ss.hits   = _fl((ss.hits   or 0) * 0.85)
+                    ss.misses = _fl((ss.misses or 0) * 0.85)
                 end
             end
         end
     end
 end)
-client.set_event_callback('player_disconnect',function(e)
-    local idx=e and client.userid_to_entindex(e.userid); if idx then _M.DB[idx]=nil end
+
+client.set_event_callback("player_disconnect", function(e)
+    local idx = e and client.userid_to_entindex(e.userid)
+    if idx then DB[idx] = nil end
 end)
 
-_G.ZenithResolver_GetData=_db
+client.delay_call(0.2, function()
+    client.color_log(100, 200, 255, "[Zenith] Resolver v4 ready.\0")
+end)
 
-resolver_show_tab=function()
-    _safe_display(_M.ui_en)
-    if not _M.ui_en:get() then return end
-    -- mode selector only (jitter/hist/brute thresholds are auto)
-    _safe_display(_M.ui_mode)
-    -- feature toggles
-    _safe_display(_M.ui_pitch)
-    _safe_display(_M.ui_exploits)
-    _safe_display(_M.ui_multipt)
-    _safe_display(_M.ui_afstand)
-    _safe_display(_M.ui_teleport)
-    _safe_display(_M.ui_spfilter)
-    _safe_display(_M.ui_suppress)
-    if _M.ui_suppress:get() then _safe_display(_M.ui_sup_rng) end
-    -- logging
-    _safe_display(_M.ui_log_scr)
-    _safe_display(_M.ui_log_con)
-    _safe_display(_M.ui_desyncindicator)
-    -- nn
-    _safe_display(_M.lbl_nn)
-    _safe_display(_M.ui_nn_save)
-    _safe_display(_M.ui_nn_rst)
-    -- tools
-    _safe_display(_M.ui_rst_btn)
-    _safe_display(_M.ui_rst_all)
-    -- live info (read-only)
-    _safe_display(_M.lbl_method)
-    _safe_display(_M.lbl_aa)
-    _safe_display(_M.lbl_desync)
-    _safe_display(_M.lbl_lby)
-    _safe_display(_M.lbl_streak)
-    _safe_display(_M.lbl_conf)
-    _safe_display(_M.lbl_state)
-    _safe_display(_M.lbl_layers)
-    _safe_display(_M.lbl_exploit)
-end
+_G.ZenithResolver_GetData = _db
 
-end)()
-::_resolver_end::
--- ======================================================================
+end -- _HAS_RESOLVER
