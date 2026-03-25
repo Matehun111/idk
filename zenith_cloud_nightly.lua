@@ -8142,10 +8142,17 @@ do
             elseif target_hp <= 40 then
                 dmg = math.max(target_hp - 8, 1)
                 hc  = math.max(hc - 5, 35)
-            elseif target_hp >= 100 then
-                -- full HP: always require 100 dmg minimum
-                -- overrides preset values like 82/87/90
-                dmg = math.max(dmg, 100)
+            elseif target_hp <= 60 then
+                -- medium HP: require at least their HP
+                dmg = math.max(dmg, target_hp)
+            elseif target_hp <= 80 then
+                -- medium-high HP: require their HP
+                dmg = math.max(dmg, target_hp)
+            elseif target_hp > 80 then
+                -- high/full HP: always require HP amount as minimum
+                -- if they have 100hp, min dmg = 100
+                -- if they have 105hp (kevlar bonus display), min dmg = 105
+                dmg = math.max(dmg, target_hp)
             end
             -- lethal shot detection: if we can 1-shot from here, lower dmg gate
             -- so GS fires faster rather than waiting for a "perfect" shot
@@ -9079,7 +9086,7 @@ do
     }
     local _flicker_tags = {'zenith.gs','ZENITH.GS','Zenith.Gs','zEnItH.gS'}
 
-    -- ── menu items ────────────────────────────────────────────────────
+    -- ── menu items ───────────────────────────────────────────────���────
     mp.lbl_ct   = menu.new_item(ui.new_label,    'AA','Anti-aimbot angles', '\a71bc78ff\xe2\x9a\xa1 Clantag')
     mp.ct_en    = menu.new_item(ui.new_checkbox, 'AA','Anti-aimbot angles', 'Custom Clantag')
         :record('misc','misc::ct_en'):save()
@@ -9387,7 +9394,7 @@ local function _fingerprint(ld)
     return s
 end
 
--- ── UI ──────────────────────────────────────────────────────────────────
+-- ── UI ���─────────────────────────────────────────────────────────────────
 local G='AA'; local GR='Anti-aimbot angles'
 _M.ui_en      = menu.new_item(ui.new_checkbox,G,GR,'Enable Resolver'):record('aa','resolver::enabled'):save(); _M.ui_en:set(true)
 _M.ui_mode    = menu.new_item(ui.new_combobox,G,GR,merge{'Resolver Engine','\n','resolver::mode'},'Pattern Core','Hybrid Engine','Bruteforce Only'):record('aa','resolver::mode'):save()
@@ -9398,6 +9405,7 @@ _M.ui_exploits= menu.new_item(ui.new_checkbox,G,GR,'Resolve Exploits'):record('a
 _M.ui_multipt = menu.new_item(ui.new_checkbox,G,GR,'Multi-Point Sampling'):record('aa','resolver::multipoint'):save(); _M.ui_multipt:set(true)
 _M.ui_log_scr = menu.new_item(ui.new_checkbox,G,GR,'Resolver Log (Screen)'):record('aa','resolver::log_screen'):save()
 _M.ui_log_con = menu.new_item(ui.new_checkbox,G,GR,'Resolver Log (Console)'):record('aa','resolver::log_console'):save(); _M.ui_log_con:set(true)
+_M.ui_watermark = menu.new_item(ui.new_checkbox,G,GR,'Zenith Watermark'):record('aa','resolver::watermark'):save(); _M.ui_watermark:set(true)
 _M.ui_suppress= menu.new_item(ui.new_checkbox,G,GR,'Shot Suppression'):record('aa','resolver::suppress'):save(); _M.ui_suppress:set(true)
 _M.ui_sup_rng = menu.new_item(ui.new_slider,G,GR,merge{'Suppress Close Range','\n','resolver::suppress_range'},0,800,350,true,'u',1):record('aa','resolver::suppress_range'):save()
 _M.ui_jt      = menu.new_item(ui.new_slider,G,GR,merge{'Jitter Threshold','\n','resolver::jitter_thresh'},5,60,29,true,'deg',1):record('aa','resolver::jitter_thresh'):save()
@@ -10367,31 +10375,130 @@ local function _suppress(ent)
     return math.sqrt((ex-mx)^2+(ey-my)^2) < _M.ui_sup_rng:get()
 end
 
--- ── screen log ──────────────────────────────────────────────────────────
+-- ── screen log (new modern style) ───────────────────────────────────────
 _M.log_entries={}
-local function _log_add(text,r,g,b,sub)
-    table.insert(_M.log_entries,1,{text=text,sub=sub or '',r=r,g=g,b=b,t=globals.curtime(),frac=0})
-    while #_M.log_entries>12 do table.remove(_M.log_entries) end
+local function _log_add(text,r,g,b,sub,log_type)
+    -- log_type: 'hit', 'kill', 'miss_spread', 'miss_resolver', 'miss_other', 'info'
+    table.insert(_M.log_entries,1,{
+        text=text,sub=sub or '',r=r,g=g,b=b,
+        t=globals.curtime(),frac=0,
+        log_type=log_type or 'info'
+    })
+    while #_M.log_entries>10 do table.remove(_M.log_entries) end
 end
+
+-- ── zenith watermark (modern pill style) ────────────────────────────────
+local _wm_data = { alpha=0, fps_avg=0, ping_avg=0 }
+local function _draw_watermark()
+    if not _M.ui_watermark or not _M.ui_watermark:get() then return end
+    local sw,sh = client.screen_size()
+    local now = globals.realtime()
+    
+    -- smooth fps/ping
+    local fps = 1 / math.max(globals.frametime(), 0.001)
+    _wm_data.fps_avg = _wm_data.fps_avg * 0.92 + fps * 0.08
+    
+    local nci = pcall(client.get_netchannelinfo) and client.get_netchannelinfo() or nil
+    local ping = 0
+    if nci then
+        local ok, lat = pcall(function() return nci:get_latency(0) + nci:get_latency(1) end)
+        if ok then ping = math.max(0, lat * 1000) end
+    end
+    _wm_data.ping_avg = _wm_data.ping_avg * 0.9 + ping * 0.1
+    
+    -- build elements
+    local items = {}
+    items[#items+1] = { text='zenith', r=85, g=140, b=255, bold=true }  -- logo in accent
+    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
+    
+    local name = USERNAME or 'user'
+    items[#items+1] = { text=name, r=200, g=200, b=210, bold=false }
+    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
+    
+    items[#items+1] = { text=_f('%dms', _fl(_wm_data.ping_avg)), r=170, g=170, b=180, bold=false }
+    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
+    
+    items[#items+1] = { text=_f('%dfps', _fl(_wm_data.fps_avg)), r=170, g=170, b=180, bold=false }
+    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
+    
+    local h, m = client.system_time()
+    items[#items+1] = { text=_f('%02d:%02d', h, m), r=170, g=170, b=180, bold=false }
+    
+    -- measure total width
+    local total_w = 20  -- padding
+    for _, it in ipairs(items) do
+        local tw = renderer.measure_text(it.bold and 'b' or 'd', it.text)
+        total_w = total_w + tw + 8
+    end
+    
+    -- draw background pill
+    local px, py = sw - total_w - 12, 10
+    local pill_h = 26
+    
+    -- dark pill background with subtle border
+    renderer.rectangle(px, py, total_w, pill_h, 18, 18, 22, 235)
+    renderer.rectangle(px, py, total_w, 2, 85, 140, 255, 180)  -- accent top line
+    
+    -- draw text items
+    local cx = px + 10
+    for _, it in ipairs(items) do
+        local tw = renderer.measure_text(it.bold and 'b' or 'd', it.text)
+        renderer.text(cx, py + 7, it.r, it.g, it.b, 255, it.bold and 'b' or 'd', 0, it.text)
+        cx = cx + tw + 8
+    end
+end
+
+-- ── modern hitlog ───────────────────────────────────────────────────────
 local function _log_draw()
+    _draw_watermark()  -- draw watermark first
+    
     if not _M.ui_log_scr:get() then return end
-    local sw,sh=client.screen_size(); local W=350; local bx=sw-20; local by=sh-80; local cy=by; local rm={}
+    local sw,sh=client.screen_size()
+    local W=380
+    local cx=sw*0.5  -- center aligned
+    local by=sh-120  -- bottom area
+    local cy=by
+    local rm={}
+    
     for i,e in ipairs(_M.log_entries) do
         local age=globals.curtime()-e.t
-        if age<7 then e.frac=e.frac+(1-e.frac)*0.16
-        else e.frac=e.frac+(0-e.frac)*0.07; if e.frac<0.01 then rm[#rm+1]=i end end
+        if age<6 then e.frac=e.frac+(1-e.frac)*0.14
+        else e.frac=e.frac+(0-e.frac)*0.08; if e.frac<0.01 then rm[#rm+1]=i end end
         local fr=e.frac; if fr<0.02 then goto _ls end
         do
-            local a=_fl(255*fr); local x=bx-W+_fl(28*(1-fr)); local y=cy
-            local hs=e.sub~=''; local ch=hs and 36 or 21
-            renderer.rectangle(x,y,W,ch,12,12,16,_fl(195*fr))
-            renderer.rectangle(x,y,3,ch,e.r,e.g,e.b,a)
-            renderer.text(x+10,y+7,e.r,e.g,e.b,a,'b',0,e.text)
-            if hs then
-                renderer.rectangle(x+10,y+20,W-13,1,255,255,255,_fl(16*fr))
-                renderer.text(x+10,y+22,200,200,200,_fl(a*0.86),'d',0,e.sub)
+            local a=_fl(255*fr)
+            local tw=renderer.measure_text('d',e.text)
+            local pw=math.max(tw+24, 200)  -- pill width
+            local px=cx-pw*0.5  -- centered
+            local ph=28
+            
+            -- slide in from bottom with fade
+            local y=cy+_fl(20*(1-fr))
+            
+            -- background color based on log type
+            local bg_r, bg_g, bg_b = 22, 22, 28
+            local border_r, border_g, border_b = e.r, e.g, e.b
+            
+            if e.log_type == 'kill' then
+                bg_r, bg_g, bg_b = 28, 35, 28
+            elseif e.log_type == 'miss_spread' then
+                bg_r, bg_g, bg_b = 35, 32, 22
+            elseif e.log_type == 'miss_resolver' then
+                bg_r, bg_g, bg_b = 38, 22, 22
             end
-            cy=cy-(ch+5)*fr
+            
+            -- draw pill
+            renderer.rectangle(px, y, pw, ph, bg_r, bg_g, bg_b, _fl(220*fr))
+            
+            -- left accent dot/circle
+            local dot_x = px + 12
+            local dot_y = y + ph*0.5
+            renderer.circle(dot_x, dot_y, 4, border_r, border_g, border_b, _fl(255*fr))
+            
+            -- text centered in pill
+            renderer.text(cx, y+8, 220, 220, 230, a, 'd', 'c', e.text)
+            
+            cy = cy - (ph + 6) * fr
         end
         ::_ls::
     end
@@ -10574,10 +10681,20 @@ client.set_event_callback('aim_hit',function(e)
         d.brute_locked = true
         d.brute_best_off = d.desync * (d.side==2 and 1 or -1)
     end
-    local main=hs and _f('Killed %s with a head shot for %d damage',name,dmg) or _f('Hit %s in the %s for %d damage',name,hg,dmg)
-    local sub=_f('reso: %s @ %d%%  \xc2\xb7  bt:%dt  aa:%s',ms,conf,bt,at:sub(1,3))
-    if _M.ui_log_scr:get() then local r,g,b=hs and 110 or 170,hs and 215 or 175,hs and 85 or 85; _log_add(main,r,g,b,sub) end
-    if _M.ui_log_con:get() then local cr,cg,cb=hs and 100 or 180,hs and 255 or 220,100; client.color_log(cr,cg,cb,main..'  \xc2\xb7  '..sub..'\0') end
+    -- modern log format like reference image
+    local log_type = hs and 'kill' or 'hit'
+    local main_text
+    if hs then
+        main_text = _f('Killed %s for %d damage', name, dmg)
+    else
+        main_text = _f('Hit %s in %s for %d damage', name, hg, dmg)
+    end
+    local sub=_f('reso: %s @ %d%%  bt:%dt  aa:%s',ms,conf,bt,at:sub(1,3))
+    if _M.ui_log_scr:get() then 
+        local r,g,b = hs and 85 or 140, hs and 200 or 170, hs and 85 or 85
+        _log_add(main_text,r,g,b,sub,log_type) 
+    end
+    if _M.ui_log_con:get() then local cr,cg,cb=hs and 100 or 180,hs and 255 or 220,100; client.color_log(cr,cg,cb,main_text..'  |  '..sub..'\0') end
 end)
 
 -- ── aim_miss (v4: smarter side flip + AA type tracking) ──────────────────
@@ -10622,8 +10739,29 @@ client.set_event_callback('aim_miss',function(e)
     -- unlock brute on miss so it can search again
     d.brute_locked = false
     local reason=e.reason or '?'
-    if _M.ui_log_scr:get() then _log_add(_f('Missed %s (%s)',name,reason),205,75,75,_f('reso: %s  streak:%d  next:%s  aa:%s',ms,d.fail_streak,d.side==2 and 'R' or 'L',at:sub(1,3))) end
-    if _M.ui_log_con:get() then client.color_log(255,100,100,_f('[ZRes] MISS %s  reason:%s  streak:%d  next:%s  aa:%s\0',name,reason,d.fail_streak,d.side==2 and 'R' or 'L',at:sub(1,3))) end
+    local hg_miss = e.hitgroup or 0
+    local hgn_miss = {[0]='body',[1]='head',[2]='chest',[3]='stomach',[4]='left arm',[5]='right arm',[6]='left leg',[7]='right leg'}
+    local hg_str = hgn_miss[hg_miss] or 'body'
+    
+    -- determine log type and color based on reason
+    local log_type, r, g, b
+    if reason == 'spread' then
+        log_type = 'miss_spread'
+        r, g, b = 220, 180, 60  -- yellow/orange
+    elseif reason == 'resolver' or reason == '?' then
+        log_type = 'miss_resolver'
+        r, g, b = 220, 75, 75   -- red
+    else
+        log_type = 'miss_other'
+        r, g, b = 100, 160, 220 -- blue
+    end
+    
+    -- format like reference: "Missed in Player's hitgroup due to reason"
+    local main_text = _f("Missed in %s's %s due to %s", name, hg_str, reason)
+    local sub = _f('streak:%d  next:%s  aa:%s', d.fail_streak, d.side==2 and 'R' or 'L', at:sub(1,3))
+    
+    if _M.ui_log_scr:get() then _log_add(main_text, r, g, b, sub, log_type) end
+    if _M.ui_log_con:get() then client.color_log(255,100,100,_f('[ZRes] %s\0', main_text)) end
 end)
 
 -- ── round_start ──────────────────────────────────────────────────────────
