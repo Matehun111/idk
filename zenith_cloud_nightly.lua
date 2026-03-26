@@ -3849,27 +3849,43 @@ do
     local ALPHA_UNIT   = 1 / 255
 
     -- ── layout tunables ─────────────────────────────────────────────────────
-    local PILL_PAD_X      = 10    -- horizontal padding inside pill
-    local PILL_PAD_Y      = 3     -- vertical padding inside pill
-    local PILL_RADIUS     = 4     -- corner radius of the pill background
-    local PILL_GAP        = 5     -- vertical gap between rows
-    local ACCENT_BAR_W    = 3     -- width of the left colour bar
-    local SLIDE_TICKS     = 0.18  -- seconds for slide-in animation
-    local FADE_IN_TICKS   = 0.12  -- seconds to fade in
-    local PILL_BG_ALPHA   = 0.62  -- background darkness (0-1)
-    local GLOW_SPREAD     = 18    -- horizontal glow gradient width
-    local MAX_ENTRIES     = 10    -- cap live queue
+    local PILL_PAD_X    = 11   -- horizontal inner padding
+    local PILL_PAD_Y    = 4    -- vertical inner padding
+    local PILL_RADIUS   = 9    -- corner radius — high = fully rounded pill
+    local PILL_GAP      = 5    -- vertical gap between entries
+    local DOT_R         = 3    -- coloured dot radius
+    local DOT_PAD       = 10   -- gap between left edge and dot centre
+    local DOT_TEXT_GAP  = 7    -- gap between dot right edge and text
+    local SLIDE_TICKS   = 0.20 -- slide-in duration
+    local PILL_BG_ALPHA = 0.55 -- background fill opacity
+    local MAX_ENTRIES   = 10
 
-    -- ── icon prefixes by type ────────────────────────────────────────────────
-    -- type is set on each log when added:
-    --   'hit'  'miss'  'spread'  'net'
-    -- Plain ASCII prefixes — safe across all renderers
-    local TYPE_ICONS = {
-        hit    = "[+] ",
-        miss   = "[-] ",
-        spread = "[~] ",
-        net    = "[?] ",
-        burned = "[F] ",
+    -- dot colour per event type  (r, g, b)
+    local DOT_COLORS = {
+        hit    = { 91,  157, 232 },   -- blue   #5b9de8
+        miss   = { 214,  78,  78 },   -- red    #d64e4e
+        spread = { 212, 167,  44 },   -- yellow #d4a72c
+        net    = {  91, 157, 232 },   -- blue   #5b9de8
+        burned = { 212, 167,  44 },   -- yellow
+    }
+    -- pill border colour per type
+    local BORDER_COLORS = {
+        hit    = { 30,  50,  80 },
+        miss   = { 70,  28,  28 },
+        spread = { 70,  55,  18 },
+        net    = { 28,  42,  70 },
+        burned = { 70,  55,  18 },
+    }
+
+    -- colour applied to highlighted tokens (name / hitgroup / reason)
+    -- hit: name=blue, hg=green, reason=grey
+    -- miss/net: name=blue, hg=same as dot, reason=same as dot
+    local TOKEN_COLORS = {
+        hit    = { name={107,188,245}, hg={114,201,126}, reason={155,165,185} },
+        miss   = { name={107,188,245}, hg={214,78,78},   reason={214,78,78}   },
+        spread = { name={107,188,245}, hg={212,167,44},  reason={212,167,44}  },
+        net    = { name={107,188,245}, hg={107,188,245}, reason={107,188,245} },
+        burned = { name={107,188,245}, hg={212,167,44},  reason={212,167,44}  },
     }
 
     -- ── helpers ──────────────────────────────────────────────────────────────
@@ -3878,30 +3894,35 @@ do
         return 1 - u * u * u * u
     end
 
-    local function draw_pill(x, y, w, h, r, g, b, alpha, radius)
+    -- pill: dark rounded rect + thin border
+    local function draw_pill(x, y, w, h, alpha, bdr_col)
         local ia = math.floor(alpha)
         if ia <= 0 then return end
-        radius = math.min(radius, math.floor(h / 2))
-
-        -- filled rounded rect (manual: top/bottom strips + left/right strips + 4 circles)
-        renderer.rectangle(x + radius, y,         w - radius*2, h,            0, 0, 0, ia)
-        renderer.rectangle(x,         y + radius, radius,       h - radius*2, 0, 0, 0, ia)
-        renderer.rectangle(x + w - radius, y + radius, radius,  h - radius*2, 0, 0, 0, ia)
-        renderer.circle(x + radius,         y + radius,         0,0,0, ia, radius, 180, 0.25)
-        renderer.circle(x + radius,         y + h - radius,     0,0,0, ia, radius, 270, 0.25)
-        renderer.circle(x + w - radius,     y + h - radius,     0,0,0, ia, radius,   0, 0.25)
-        renderer.circle(x + w - radius,     y + radius,         0,0,0, ia, radius,  90, 0.25)
+        local r2 = math.min(PILL_RADIUS, math.floor(h/2))
+        local bg = { 15, 18, 24 }
+        renderer.rectangle(x+r2, y,      w-r2*2, h,       bg[1],bg[2],bg[3], ia)
+        renderer.rectangle(x,    y+r2,   r2,     h-r2*2,  bg[1],bg[2],bg[3], ia)
+        renderer.rectangle(x+w-r2, y+r2, r2,     h-r2*2,  bg[1],bg[2],bg[3], ia)
+        renderer.circle(x+r2,   y+r2,   bg[1],bg[2],bg[3], ia, r2, 180, 0.25)
+        renderer.circle(x+r2,   y+h-r2, bg[1],bg[2],bg[3], ia, r2, 270, 0.25)
+        renderer.circle(x+w-r2, y+h-r2, bg[1],bg[2],bg[3], ia, r2,   0, 0.25)
+        renderer.circle(x+w-r2, y+r2,   bg[1],bg[2],bg[3], ia, r2,  90, 0.25)
+        -- border
+        local bi = math.floor(ia * 0.8)
+        local bc = bdr_col or { 28, 33, 44 }
+        renderer.rectangle(x+r2,   y,       w-r2*2, 1,    bc[1],bc[2],bc[3], bi)
+        renderer.rectangle(x+r2,   y+h-1,   w-r2*2, 1,    bc[1],bc[2],bc[3], bi)
+        renderer.rectangle(x,      y+r2,    1,  h-r2*2,   bc[1],bc[2],bc[3], bi)
+        renderer.rectangle(x+w-1,  y+r2,    1,  h-r2*2,   bc[1],bc[2],bc[3], bi)
     end
 
-    local function draw_accent_bar(x, y, h, r, g, b, alpha, radius)
+    -- filled dot with soft glow
+    local function draw_dot(cx, cy, col, alpha)
         local ia = math.floor(alpha)
         if ia <= 0 then return end
-        -- solid bar
-        renderer.rectangle(x, y + radius, ACCENT_BAR_W, h - radius * 2, r, g, b, ia)
-        renderer.circle(x + radius, y + radius,     r,g,b, ia, radius, 180, 0.25)
-        renderer.circle(x + radius, y + h - radius, r,g,b, ia, radius, 270, 0.25)
-        -- glow gradient bleeding right
-        renderer.gradient(x + ACCENT_BAR_W, y, GLOW_SPREAD, h, r, g, b, math.floor(ia*0.30), r, g, b, 0, false)
+        renderer.circle(cx, cy, col[1],col[2],col[3], ia, DOT_R, 0, 1.0)
+        -- glow ring
+        renderer.circle(cx, cy, col[1],col[2],col[3], math.floor(ia*0.22), DOT_R+2, 0, 1.0)
     end
 
     local function replacement(s, col_a, col_b)
@@ -3978,22 +3999,12 @@ do
             e.is_preview = true
         end
 
-        local ar, ag, ab = widgets.color_picker:rawget()
-        add_prev(ar,ag,ab, "Hit ${vladislav} for ${10} damage",          'hit',  'h1')
-        add_prev(ar,ag,ab, "Hit ${monster} in the ${head} for ${103} damage", 'hit', 'h2')
-
-        local mr, mg, mb = eventlogs.miss_color_picker:rawget()
-        add_prev(mr,mg,mb, "Missed shot due to ${correction}",       'miss',   'm1')
-        add_prev(mr,mg,mb, "Missed shot due to ${prediction error}", 'miss',   'm2')
-        add_prev(mr,mg,mb, "Missed shot due to ${lagcomp failure}",  'miss',   'm3')
-
-        local sr, sg, sb = eventlogs.spread_color_picker:rawget()
-        add_prev(sr,sg,sb, "Missed shot due to ${spread}",           'spread', 's1')
-
-        local nr, ng, nb = eventlogs.unregistered_color_picker:rawget()
-        add_prev(nr,ng,nb, "Missed shot due to ${unregistered shot}", 'net',   'n1')
-        add_prev(nr,ng,nb, "Missed shot due to ${player death}",      'net',   'n2')
-        add_prev(nr,ng,nb, "Missed shot due to ${death}",             'net',   'n3')
+        -- preview entries matching HTML demo entries
+        add_prev(255,255,255, "${Vladimir} burned out",                               'burned','h1')
+        add_prev(255,255,255, "Hit ${Trump} in ${right arm} for 11 damage",           'hit',   'h2')
+        add_prev(255,255,255, "Missed in ${Connor}'s ${stomach} due to ${spread}",    'spread','s1')
+        add_prev(255,255,255, "Missed in ${prince}'s ${head} due to ${?}",            'miss',  'm1')
+        add_prev(255,255,255, "Missed in ${Zabolotny}'s ${neck} due to ${prediction error}", 'net', 'n1')
     end
 
     -- ── widget / window ──────────────────────────────────────────────────────
@@ -4042,6 +4053,7 @@ do
             end
         end
 
+        -- pills are left-aligned from pos.x (not centred)
         local draw_y = pos.y
 
         for idx = 1, #live_entries do
@@ -4051,53 +4063,71 @@ do
 
             local age      = now - e.spawn_t
             local slide_p  = math.min(age / SLIDE_TICKS, 1.0)
-            local slide_x  = SLIDE_AMOUNT * (1.0 - ease_out_quart(slide_p))
+            -- slide in from left (negative offset that shrinks to 0)
+            local slide_x  = -SLIDE_AMOUNT * (1.0 - ease_out_quart(slide_p))
 
-            local r, g, b  = e.r, e.g, e.b
-            -- plain_msg: strip ${...} markers for shadow + measure
+            local kind  = e.kind or 'hit'
+            local dot_c = DOT_COLORS[kind]   or DOT_COLORS['hit']
+            local bdr_c = BORDER_COLORS[kind] or BORDER_COLORS['hit']
+            local tok_c = TOKEN_COLORS[kind]  or TOKEN_COLORS['hit']
+
+            -- build coloured text using inline \a colour codes
+            -- msg uses ${name}, ${hitgroup}, ${reason} as token markers
+            -- token 1 = name (blue), token 2 = hg/reason (type colour)
+            local token_idx = 0
             local plain_msg = string.gsub(e.msg, "${(.-)}", "%1")
-            local icon      = TYPE_ICONS[e.kind] or ""
-            local plain_txt = icon .. plain_msg
 
-            -- full_txt: colour-escaped version for main render
-            local raw_text  = replacement(e.msg, {r, g, b, 255}, {255, 255, 255, 255})
-            local full_txt  = icon .. raw_text
+            local function colour_tokens(s)
+                local result = s
+                token_idx = 0
+                result = string.gsub(s, "${(.-)}", function(token)
+                    token_idx = token_idx + 1
+                    local col
+                    if token_idx == 1 then
+                        col = tok_c.name
+                    elseif token_idx == 2 then
+                        col = tok_c.hg
+                    else
+                        col = tok_c.reason
+                    end
+                    local hex = utils.to_hex(col[1], col[2], col[3], 255)
+                    return string.format("\a%s%s\affffffff", hex, token)
+                end)
+                return result
+            end
 
-            local tw, th  = renderer.measure_text(flags, plain_txt)
-            local pill_w  = tw + PILL_PAD_X * 2 + ACCENT_BAR_W
-            local pill_h  = th + PILL_PAD_Y * 2
+            local full_txt  = colour_tokens(e.msg)
+            -- base text colour: dim grey like HTML .cm
+            local base_hex  = utils.to_hex(155, 163, 181, 255)
+            full_txt = "\a" .. base_hex .. full_txt .. "\affffffff"
 
-            local pill_x  = math.floor(cx - pill_w * 0.5 + slide_x)
+            local tw, th  = renderer.measure_text(flags, plain_msg)
+            -- pill width: dot area + text + right pad
+            local dot_area = DOT_PAD + DOT_R * 2 + DOT_TEXT_GAP
+            local pill_w   = dot_area + tw + PILL_PAD_X
+            local pill_h   = th + PILL_PAD_Y * 2
+
+            local pill_x  = math.floor(pos.x + slide_x)
             local pill_y  = math.floor(draw_y)
 
-            local ia_pill = math.floor(210 * PILL_BG_ALPHA * alpha)
-            local ia_bar  = math.floor(255 * alpha)
+            local ia_pill = math.floor(220 * PILL_BG_ALPHA * alpha)
             local ia_txt  = math.floor(255 * alpha)
+            local ia_dot  = math.floor(255 * alpha)
 
-            -- pill background
-            draw_pill(pill_x, pill_y, pill_w, pill_h, 0, 0, 0, ia_pill, PILL_RADIUS)
+            -- pill background + border
+            draw_pill(pill_x, pill_y, pill_w, pill_h, ia_pill, bdr_c)
 
-            -- right-edge fade
-            renderer.gradient(
-                pill_x + pill_w - 24, pill_y, 24, pill_h,
-                0,0,0,0,  0,0,0, ia_pill,  false)
-
-            -- left accent bar + glow
-            draw_accent_bar(pill_x, pill_y, pill_h, r, g, b, ia_bar, PILL_RADIUS)
-
-            -- top highlight
-            renderer.gradient(
-                pill_x + PILL_RADIUS, pill_y,
-                pill_w - PILL_RADIUS * 2, 1,
-                255,255,255, math.floor(28 * alpha),
-                255,255,255, 0,  false)
+            -- coloured dot
+            local dot_cx = pill_x + DOT_PAD
+            local dot_cy = pill_y + math.floor(pill_h / 2)
+            draw_dot(dot_cx, dot_cy, dot_c, ia_dot)
 
             -- text
-            local tx = pill_x + ACCENT_BAR_W + PILL_PAD_X
+            local tx = pill_x + dot_area
             local ty = pill_y + PILL_PAD_Y
-            -- shadow uses plain text (no colour escapes)
-            renderer.text(tx+1, ty+1, 0,0,0, math.floor(120*alpha), flags, nil, plain_txt)
-            -- main uses colour-escaped text via graphics.text
+            -- shadow
+            renderer.text(tx+1, ty+1, 0,0,0, math.floor(100*alpha), flags, nil, plain_msg)
+            -- coloured main text
             graphics.text(tx, ty, 255,255,255, ia_txt, flags, 0, full_txt)
 
             draw_y = draw_y + pill_h + PILL_GAP
@@ -4637,114 +4667,120 @@ LPH_NO_VIRTUALIZE(function ()
             timer = timer + 1.0
         end
 
+        -- ── chip bar helpers ────────────────────────────────────────────
+        local CHIP_H      = 17
+        local CHIP_PAD_X  = 8
+        local CHIP_GAP    = 4
+        local CHIP_R      = 8
+        local C_BG        = { 22,  24,  30  }
+        local C_BG_ACT    = { 24,  28,  38  }
+        local C_BORDER    = { 38,  44,  54  }
+        local C_TEXT_DIM  = { 120, 130, 148 }
+        local C_TEXT_NORM = { 175, 183, 198 }
+        local C_LABEL_BG  = { 16,  18,  24  }
+        local C_LABEL_BDR = { 33,  38,  48  }
+
+        local function draw_chip_rect(x, y, w, h, bg, border, a)
+            local ia = math.floor(a)
+            if ia <= 0 then return end
+            local r2 = math.min(CHIP_R, math.floor(h/2))
+            renderer.rectangle(x + r2, y,      w - r2*2, h,      bg[1],bg[2],bg[3], ia)
+            renderer.rectangle(x,      y + r2,  r2,       h-r2*2, bg[1],bg[2],bg[3], ia)
+            renderer.rectangle(x+w-r2, y + r2,  r2,       h-r2*2, bg[1],bg[2],bg[3], ia)
+            renderer.circle(x+r2,   y+r2,   bg[1],bg[2],bg[3], ia, r2, 180, 0.25)
+            renderer.circle(x+r2,   y+h-r2, bg[1],bg[2],bg[3], ia, r2, 270, 0.25)
+            renderer.circle(x+w-r2, y+h-r2, bg[1],bg[2],bg[3], ia, r2,   0, 0.25)
+            renderer.circle(x+w-r2, y+r2,   bg[1],bg[2],bg[3], ia, r2,  90, 0.25)
+            local bi = math.floor(ia * 0.9)
+            renderer.rectangle(x+r2,   y,         w-r2*2, 1,   border[1],border[2],border[3], bi)
+            renderer.rectangle(x+r2,   y+h-1,     w-r2*2, 1,   border[1],border[2],border[3], bi)
+            renderer.rectangle(x,      y+r2,       1,   h-r2*2, border[1],border[2],border[3], bi)
+            renderer.rectangle(x+w-1,  y+r2,       1,   h-r2*2, border[1],border[2],border[3], bi)
+        end
+
+        local function chip_width(flags, text)
+            local tw = renderer.measure_text(flags, text)
+            return tw + CHIP_PAD_X * 2
+        end
+
         function watermark.frame()
             local can_show_watermark = widgets.enabled:get() and widgets.items:have_key("Watermark")
             alpha = motion.interp(alpha, can_show_watermark, 0.045)
-
-            if alpha <= 0 then
-                return
-            end
+            if alpha <= 0 then return end
 
             local lp = entity.get_local_player()
-            if lp == nil then
-                return
-            end
+            if lp == nil then return end
 
             local nci = iengineclient.get_net_channel_info()
             update_timer(nci, globals.frametime())
-
-            if nci == nil then
-                return
-            end
+            if nci == nil then return end
 
             local screen = vector(client.screen_size())
-            local pos = vector(screen.x - 9, 9)
+            local flags  = get_flags()
+            local ar, ag, ab = widgets.color_picker:rawget()
+            local ia = math.floor(255 * alpha)
 
-            local flags = get_flags()
-            local r, g, b = widgets.color_picker:rawget()
-
-            local a = 255
-
-            local radius = 5
-
-            local drawlist = { }
-
-            do
-                local label = "Zenith"
-                local build = BUILD
-
-                if texture ~= nil then
-                    label = ""
-                end
-
-                if build ~= nil then
-                    build = f("[%s]", build)
-
-                    build = decorations.wave(build, globals.realtime(), 255, 255, 255, 255, r, g, b, a)
-                    build = f("%s\affffffff", build)
-                end
-
-                drawlist[#drawlist + 1] = merge({ label, build }, "\x20")
-            end
+            local chips = {}
+            chips[#chips+1] = { text = "zenith", bg = C_LABEL_BG, bdr = C_LABEL_BDR, tc = { 100, 108, 122 }, accent = false }
 
             if widgets.display:have_key("Username") then
-                local nickname = USERNAME
-
+                local nick = USERNAME
                 if widgets.custom_name:get() then
-                    local chosen_nickname = ui.get(widgets.custom_name_value:get_ref())
-
-                    if #chosen_nickname ~= 0 then
-                        nickname = chosen_nickname
-                    end
+                    local cn = ui.get(widgets.custom_name_value:get_ref())
+                    if #cn ~= 0 then nick = cn end
                 end
-
-                drawlist[#drawlist + 1] = nickname
+                chips[#chips+1] = { text = nick, bg = C_BG_ACT, bdr = C_BORDER, tc = C_TEXT_NORM, accent = true, ar = ar, ag = ag, ab = ab }
             end
 
             if widgets.display:have_key("Latency") then
-                drawlist[#drawlist + 1] = get_ping(nci)
+                local ping = get_ping(nci)
+                if ping then chips[#chips+1] = { text = ping, bg = C_BG, bdr = C_BORDER, tc = C_TEXT_DIM } end
             end
 
             if widgets.display:have_key("FPS") then
-                drawlist[#drawlist + 1] = f("%dfps", 1 / get_framerate())
-            end
-
-            if widgets.display:have_key("Server frametime") then
-                drawlist[#drawlist + 1] = f("sv: %.1f (%.1fms)", get_remote_framerate())
+                chips[#chips+1] = { text = f("%dfps", 1/get_framerate()), bg = C_BG, bdr = C_BORDER, tc = C_TEXT_DIM }
             end
 
             if widgets.display:have_key("Time") then
-                drawlist[#drawlist + 1] = f("%02d:%02d", client.system_time())
+                chips[#chips+1] = { text = f("%02d:%02d", client.system_time()), bg = C_BG, bdr = C_BORDER, tc = C_TEXT_DIM }
             end
 
-            local left_padding = 0
-
-            if texture ~= nil then
-                left_padding = 22
+            if widgets.display:have_key("Server frametime") then
+                chips[#chips+1] = { text = f("sv%.1f", get_remote_framerate()), bg = C_BG, bdr = C_BORDER, tc = C_TEXT_DIM }
             end
 
-            local text = merge(drawlist, " ∙ ")
-            local text_size = vector(renderer.measure_text(flags, text))
-
-            local rect_size = vector(text_size.x + offset.x * 2, text_size.y + offset.y * 2)
-            rect_size.x = rect_size.x + left_padding
-
-            pos.x = pos.x - rect_size.x
-
-            graphics.header(pos.x, pos.y, rect_size.x, 2, 5, r, g, b, a * alpha)
-            --graphics.glow(pos.x, pos.y, rect_size.x, rect_size.y, r, g, b, a * 0.3 * alpha, thickness, radius)
-            graphics.rectangle(pos.x, pos.y, rect_size.x, rect_size.y, 0, 0, 0, 100 * alpha, radius)
-
-            if texture ~= nil then
-                renderer.texture(texture, pos.x + offset.x - 1, pos.y + (rect_size.y - 22) * 0.5, 22, 22, 255, 255, 255, 255 * alpha, "f")
+            local total_w = 0
+            for ci, chip in ipairs(chips) do
+                chip._w = chip_width(flags, chip.text)
+                if chip.accent then chip._w = chip._w + DOT_R_wm * 2 + 4 end
+                total_w = total_w + chip._w
+                if ci < #chips then total_w = total_w + CHIP_GAP end
             end
 
-            graphics.text(
-                pos.x + left_padding + offset.x - 1,
-                pos.y + (rect_size.y - text_size.y) * 0.5,
-                71, 152, 255, 255 * alpha,
-                flags, 0, text
-            )
+            local DOT_R_wm = 3
+            local cx = screen.x - 9 - total_w
+            local cy = 9
+            local draw_x = cx
+
+            for _, chip in ipairs(chips) do
+                local cw = chip._w
+                draw_chip_rect(draw_x, cy, cw, CHIP_H, chip.bg, chip.bdr, ia)
+                if chip.accent then
+                    local dot_x = draw_x + CHIP_PAD_X + DOT_R_wm
+                    local dot_y = cy + math.floor(CHIP_H / 2)
+                    renderer.circle(dot_x, dot_y, chip.ar, chip.ag, chip.ab, math.floor(ia*0.9), DOT_R_wm, 0, 1.0)
+                    local _, th = renderer.measure_text(flags, chip.text)
+                    local tx = draw_x + CHIP_PAD_X + DOT_R_wm*2 + 4
+                    local ty = cy + math.floor((CHIP_H - th) * 0.5)
+                    renderer.text(tx, ty, chip.tc[1],chip.tc[2],chip.tc[3], ia, flags, nil, chip.text)
+                else
+                    local tw, th = renderer.measure_text(flags, chip.text)
+                    local tx = draw_x + CHIP_PAD_X
+                    local ty = cy + math.floor((CHIP_H - th) * 0.5)
+                    renderer.text(tx, ty, chip.tc[1],chip.tc[2],chip.tc[3], ia, flags, nil, chip.text)
+                end
+                draw_x = draw_x + cw + CHIP_GAP
+            end
         end
     end
 
