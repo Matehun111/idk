@@ -10427,11 +10427,9 @@ local function _draw_watermark()
     if not _M.ui_watermark or not _M.ui_watermark:get() then return end
     local sw, sh = client.screen_size()
 
-    -- smooth fps
+    -- smooth fps / ping
     local fps = 1 / math.max(globals.frametime(), 0.001)
     _wm.fps = _wm.fps * 0.9 + fps * 0.1
-
-    -- smooth ping
     local ping = 0
     local ok_nci, nci = pcall(client.get_netchannelinfo)
     if ok_nci and nci then
@@ -10442,87 +10440,80 @@ local function _draw_watermark()
 
     local name = USERNAME or 'user'
     local h, m = client.system_time()
-    local F     = 'd'   -- renderer font flag
+    local F    = 'd'
 
-    -- ── layout constants (tuned to match HTML reference) ─────────────────
-    local BAR_H   = 22          -- total bar height
-    local PAD_X   = 10          -- left/right padding inside each chip
-    local CHIP_GAP = 4          -- gap between chips
-    local DOT_R   = 3           -- accent dot radius
-    local DOT_GAP = 5           -- gap between dot and text
-    local TOP     = 8           -- px from top of screen
-    local RIGHT   = 8           -- px from right of screen
+    -- ── same constants as watermark.frame chip bar ────────────────────────
+    local CHIP_H   = 17
+    local CHIP_PAD = 8
+    local CHIP_GAP = 4
+    local CHIP_R   = 8
+    local DOT_R    = 3
 
-    -- ── chip table ────────────────────────────────────────────────────────
-    -- type: 'label'  → italic style, dim text, no border  (the "evaluate" label)
-    -- type: 'active' → accent dot, lighter bg, border     (.tb-chip.active)
-    -- type: 'dim'    → no dot, dark bg, faint border      (.tb-chip)
+    local C_BG       = { 22,  24,  30  }
+    local C_BG_ACT   = { 24,  28,  38  }
+    local C_BORDER   = { 38,  44,  54  }
+    local C_TEXT_DIM = { 120, 130, 148 }
+    local C_TEXT_ACT = { 175, 183, 198 }
+    local C_LBL_BG   = { 16,  18,  24  }
+    local C_LBL_BDR  = { 33,  38,  48  }
+    local C_DOT      = { 91,  157, 232 }  -- #5b9de8
+
+    -- ── rounded chip helper (identical logic to draw_chip_rect) ──────────
+    local function draw_chip(x, y, w, bg, bdr)
+        local r = math.min(CHIP_R, math.floor(CHIP_H / 2))
+        renderer.rectangle(x+r,   y,       w-r*2, CHIP_H,   bg[1],bg[2],bg[3], 255)
+        renderer.rectangle(x,     y+r,     r,     CHIP_H-r*2, bg[1],bg[2],bg[3], 255)
+        renderer.rectangle(x+w-r, y+r,     r,     CHIP_H-r*2, bg[1],bg[2],bg[3], 255)
+        renderer.circle(x+r,   y+r,        bg[1],bg[2],bg[3], 255, r, 180, 0.25)
+        renderer.circle(x+r,   y+CHIP_H-r, bg[1],bg[2],bg[3], 255, r, 270, 0.25)
+        renderer.circle(x+w-r, y+CHIP_H-r, bg[1],bg[2],bg[3], 255, r,   0, 0.25)
+        renderer.circle(x+w-r, y+r,        bg[1],bg[2],bg[3], 255, r,  90, 0.25)
+        renderer.rectangle(x+r,   y,         w-r*2, 1,   bdr[1],bdr[2],bdr[3], 230)
+        renderer.rectangle(x+r,   y+CHIP_H-1, w-r*2, 1,  bdr[1],bdr[2],bdr[3], 230)
+        renderer.rectangle(x,     y+r,       1, CHIP_H-r*2, bdr[1],bdr[2],bdr[3], 230)
+        renderer.rectangle(x+w-1, y+r,       1, CHIP_H-r*2, bdr[1],bdr[2],bdr[3], 230)
+    end
+
+    -- ── chip list ─────────────────────────────────────────────────────────
     local chips = {
-        { label='zenith',                                    kind='label'  },
-        { label='Debug',                                     kind='active' },
-        { label=name,                                        kind='active' },
-        { label=string.format('%dms',  _fl(_wm.ping)),       kind='dim'    },
-        { label=string.format('%dfps', _fl(_wm.fps)),        kind='dim'    },
-        { label=string.format('%02d:%02d', h, m),            kind='dim'    },
+        { text='zenith',                                bg=C_LBL_BG,  bdr=C_LBL_BDR, tc=C_TEXT_DIM, dot=false },
+        { text='Debug',                                 bg=C_BG_ACT,  bdr=C_BORDER,  tc=C_TEXT_ACT, dot=true  },
+        { text=name,                                    bg=C_BG_ACT,  bdr=C_BORDER,  tc=C_TEXT_ACT, dot=true  },
+        { text=string.format('%dms',  _fl(_wm.ping)),   bg=C_BG,      bdr=C_BORDER,  tc=C_TEXT_DIM, dot=false },
+        { text=string.format('%dfps', _fl(_wm.fps)),    bg=C_BG,      bdr=C_BORDER,  tc=C_TEXT_DIM, dot=false },
+        { text=string.format('%02d:%02d', h, m),        bg=C_BG,      bdr=C_BORDER,  tc=C_TEXT_DIM, dot=false },
     }
 
-    -- ── measure each chip width ───────────────────────────────────────────
+    -- measure
     local total_w = 0
     for i, c in ipairs(chips) do
-        local tw, _ = renderer.measure_text(F, c.label)
-        if c.kind == 'active' then tw = tw + DOT_R * 2 + DOT_GAP end
-        c._tw = tw
-        c._cw = tw + PAD_X * 2
+        local tw = renderer.measure_text(F, c.text)
+        if c.dot then tw = tw + DOT_R * 2 + 5 end
+        c._cw = tw + CHIP_PAD * 2
         total_w = total_w + c._cw
         if i < #chips then total_w = total_w + CHIP_GAP end
     end
 
-    -- ── position (top-right) ─────────────────────────────────────────────
-    local ox = sw - RIGHT - total_w
-    local oy = TOP
-
-    -- ── draw ─────────────────────────────────────────────────────────────
-    local dot_r_col = 91;  local dot_g_col = 157; local dot_b_col = 232  -- #5b9de8
-
+    local ox = sw - 9 - total_w
+    local oy = 9
     local dx = ox
+
     for _, c in ipairs(chips) do
-        local cw = c._cw
-        local _, th = renderer.measure_text(F, c.label)
-        local ty = oy + math.floor((BAR_H - th) * 0.5)
+        local _, th = renderer.measure_text(F, c.text)
+        local ty = oy + math.floor((CHIP_H - th) * 0.5)
 
-        if c.kind == 'label' then
-            -- "evaluate"-style italic label: slightly different bg, no border
-            renderer.rectangle(dx, oy, cw, BAR_H, 19, 22, 30, 210)
-            renderer.rectangle(dx, oy,       cw, 1,      28, 32, 44, 120)
-            renderer.rectangle(dx, oy+BAR_H-1, cw, 1,   28, 32, 44, 120)
-            renderer.rectangle(dx, oy,       1, BAR_H,   28, 32, 44, 120)
-            renderer.rectangle(dx+cw-1, oy,  1, BAR_H,   28, 32, 44, 120)
-            renderer.text(dx + PAD_X, ty, 100, 108, 122, 255, F, 0, c.label)
+        draw_chip(dx, oy, c._cw, c.bg, c.bdr)
 
-        elseif c.kind == 'active' then
-            -- active chip: slightly lighter bg, visible border
-            renderer.rectangle(dx, oy, cw, BAR_H, 26, 31, 43, 230)
-            renderer.rectangle(dx, oy,       cw, 1,      58, 65, 85, 200)
-            renderer.rectangle(dx, oy+BAR_H-1, cw, 1,   58, 65, 85, 200)
-            renderer.rectangle(dx, oy,       1, BAR_H,   58, 65, 85, 200)
-            renderer.rectangle(dx+cw-1, oy,  1, BAR_H,   58, 65, 85, 200)
-            -- accent dot
-            local dot_x = dx + PAD_X + DOT_R
-            local dot_y = oy + math.floor(BAR_H * 0.5)
-            renderer.circle(dot_x, dot_y, dot_r_col, dot_g_col, dot_b_col, 255, DOT_R, 0, 1.0)
-            renderer.text(dx + PAD_X + DOT_R * 2 + DOT_GAP, ty, 196, 202, 214, 255, F, 0, c.label)
-
-        else -- dim
-            -- inactive chip: dark bg, faint border
-            renderer.rectangle(dx, oy, cw, BAR_H, 17, 20, 28, 215)
-            renderer.rectangle(dx, oy,       cw, 1,      30, 35, 47, 140)
-            renderer.rectangle(dx, oy+BAR_H-1, cw, 1,   30, 35, 47, 140)
-            renderer.rectangle(dx, oy,       1, BAR_H,   30, 35, 47, 140)
-            renderer.rectangle(dx+cw-1, oy,  1, BAR_H,   30, 35, 47, 140)
-            renderer.text(dx + PAD_X, ty, 138, 147, 166, 255, F, 0, c.label)
+        if c.dot then
+            local dot_x = dx + CHIP_PAD + DOT_R
+            local dot_y = oy + math.floor(CHIP_H * 0.5)
+            renderer.circle(dot_x, dot_y, C_DOT[1], C_DOT[2], C_DOT[3], 255, DOT_R, 0, 1.0)
+            renderer.text(dx + CHIP_PAD + DOT_R*2 + 5, ty, c.tc[1], c.tc[2], c.tc[3], 255, F, 0, c.text)
+        else
+            renderer.text(dx + CHIP_PAD, ty, c.tc[1], c.tc[2], c.tc[3], 255, F, 0, c.text)
         end
 
-        dx = dx + cw + CHIP_GAP
+        dx = dx + c._cw + CHIP_GAP
     end
 end
 
