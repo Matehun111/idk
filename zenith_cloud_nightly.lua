@@ -4749,6 +4749,7 @@ LPH_NO_VIRTUALIZE(function ()
                 chips[#chips+1] = { text = f("sv%.1f", get_remote_framerate()), bg = C_BG, bdr = C_BORDER, tc = C_TEXT_DIM }
             end
 
+            local DOT_R_wm = 3
             local total_w = 0
             for ci, chip in ipairs(chips) do
                 chip._w = chip_width(flags, chip.text)
@@ -4756,8 +4757,6 @@ LPH_NO_VIRTUALIZE(function ()
                 total_w = total_w + chip._w
                 if ci < #chips then total_w = total_w + CHIP_GAP end
             end
-
-            local DOT_R_wm = 3
             local cx = screen.x - 9 - total_w
             local cy = 9
             local draw_x = cx
@@ -10427,10 +10426,12 @@ local _wm = { fps=0, ping=0 }
 local function _draw_watermark()
     if not _M.ui_watermark or not _M.ui_watermark:get() then return end
     local sw, sh = client.screen_size()
-    
+
+    -- smooth fps
     local fps = 1 / math.max(globals.frametime(), 0.001)
     _wm.fps = _wm.fps * 0.9 + fps * 0.1
-    
+
+    -- smooth ping
     local ping = 0
     local ok_nci, nci = pcall(client.get_netchannelinfo)
     if ok_nci and nci then
@@ -10438,32 +10439,83 @@ local function _draw_watermark()
         if ok_lat then ping = math.max(0, lat * 1000) end
     end
     _wm.ping = _wm.ping * 0.9 + ping * 0.1
-    
-    local name = USERNAME or 'user'
-    local h, m = client.system_time()
-    
-    -- segments: {text, r, g, b, bold}
-    local segs = {
-        {'zenith', 120, 180, 255, true},
-        {'  X Debug', 130, 130, 140, false},
-        {'  @ '..name, 130, 130, 140, false},
-        {'  O '..string.format('%dms', _fl(_wm.ping)), 130, 130, 140, false},
-        {'  # '..string.format('%dfps', _fl(_wm.fps)), 130, 130, 140, false},
-        {'  T '..string.format('%02d:%02d', h, m), 130, 130, 140, false},
+
+    local name   = USERNAME or 'user'
+    local h, m   = client.system_time()
+    local flags  = 'd'
+
+    -- pill geometry (matches HTML chip style)
+    local PILL_H    = 20
+    local PILL_PAD  = 9   -- horizontal inner padding
+    local PILL_GAP  = 4   -- gap between pills
+    local DOT_R     = 3   -- accent dot radius
+    local TOP_OFF   = 9   -- px from screen top
+
+    -- chip definitions: { text, tr, tg, tb, accent_dot }
+    -- accent_dot = true  → coloured dot + active bg  (like .tb-chip.active in HTML)
+    -- accent_dot = false → dim text, inactive bg      (like .tb-chip in HTML)
+    local chips = {
+        { text = 'zenith',                             tr=100, tg=108, tb=122, italic=true,  accent=false },
+        { text = 'Debug',                              tr=196, tg=202, tb=214, italic=false, accent=true  },
+        { text = name,                                 tr=196, tg=202, tb=214, italic=false, accent=true  },
+        { text = string.format('%dms',  _fl(_wm.ping)),tr=138, tg=147, tb=166, italic=false, accent=false },
+        { text = string.format('%dfps', _fl(_wm.fps)), tr=138, tg=147, tb=166, italic=false, accent=false },
+        { text = string.format('%02d:%02d', h, m),     tr=138, tg=147, tb=166, italic=false, accent=false },
     }
-    
-    local tw = 20
-    for _, s in ipairs(segs) do tw = tw + renderer.measure_text(s[5] and 'b' or 'd', s[1]) end
-    
-    local px, py = (sw - tw) * 0.5, 10
-    local ph = 24
-    
-    renderer.rectangle(px, py, tw, ph, 30, 30, 36, 240)
-    
-    local cx = px + 10
-    for _, s in ipairs(segs) do
-        renderer.text(cx, py + 6, s[2], s[3], s[4], 255, s[5] and 'b' or 'd', 0, s[1])
-        cx = cx + renderer.measure_text(s[5] and 'b' or 'd', s[1])
+
+    -- measure total row width
+    local total_w = 0
+    for i, c in ipairs(chips) do
+        local tw = renderer.measure_text(flags, c.text)
+        if c.accent then tw = tw + DOT_R * 2 + 4 end
+        c._tw = tw
+        c._pw = tw + PILL_PAD * 2
+        total_w = total_w + c._pw
+        if i < #chips then total_w = total_w + PILL_GAP end
+    end
+
+    -- position: top-right, 9px from edge (mirrors chip watermark position)
+    local ox = sw - TOP_OFF - total_w
+    local oy = TOP_OFF
+
+    local ax, ag, ab = 91, 157, 232  -- accent dot colour (#5b9de8)
+
+    local draw_x = ox
+    for _, c in ipairs(chips) do
+        local pw = c._pw
+
+        -- pill background
+        if c.accent then
+            -- active chip: slightly lighter bg + visible border
+            renderer.rectangle(draw_x, oy, pw, PILL_H, 26, 31, 43, 230)
+            renderer.rectangle(draw_x, oy, pw, 1,       58, 65, 85, 180)   -- top border
+            renderer.rectangle(draw_x, oy+PILL_H-1, pw, 1, 58, 65, 85, 180)
+            renderer.rectangle(draw_x, oy, 1, PILL_H,   58, 65, 85, 180)   -- side borders
+            renderer.rectangle(draw_x+pw-1, oy, 1, PILL_H, 58, 65, 85, 180)
+        else
+            -- inactive chip: dark bg + subtle border
+            renderer.rectangle(draw_x, oy, pw, PILL_H, 17, 20, 28, 220)
+            renderer.rectangle(draw_x, oy, pw, 1,       30, 35, 47, 150)
+            renderer.rectangle(draw_x, oy+PILL_H-1, pw, 1, 30, 35, 47, 150)
+            renderer.rectangle(draw_x, oy, 1, PILL_H,   30, 35, 47, 150)
+            renderer.rectangle(draw_x+pw-1, oy, 1, PILL_H, 30, 35, 47, 150)
+        end
+
+        local text_x = draw_x + PILL_PAD
+        local _, th  = renderer.measure_text(flags, c.text)
+        local text_y = oy + math.floor((PILL_H - th) * 0.5)
+
+        if c.accent then
+            -- accent dot (left of text)
+            local dot_x = draw_x + PILL_PAD + DOT_R
+            local dot_y = oy + math.floor(PILL_H * 0.5)
+            renderer.circle(dot_x, dot_y, ax, ag, ab, 230, DOT_R, 0, 1.0)
+            text_x = draw_x + PILL_PAD + DOT_R * 2 + 4
+        end
+
+        renderer.text(text_x, text_y, c.tr, c.tg, c.tb, 255, flags, 0, c.text)
+
+        draw_x = draw_x + pw + PILL_GAP
     end
 end
 
