@@ -10375,134 +10375,109 @@ local function _suppress(ent)
     return math.sqrt((ex-mx)^2+(ey-my)^2) < _M.ui_sup_rng:get()
 end
 
--- ── screen log (new modern style) ───────────────────────────────────────
+-- ── screen log ──────────────────────────────────────────────────────────
 _M.log_entries={}
-local function _log_add(text,r,g,b,sub,log_type)
-    -- log_type: 'hit', 'kill', 'miss_spread', 'miss_resolver', 'miss_other', 'info'
-    table.insert(_M.log_entries,1,{
-        text=text,sub=sub or '',r=r,g=g,b=b,
-        t=globals.curtime(),frac=0,
-        log_type=log_type or 'info'
+local function _log_add_seg(segments, dot_r, dot_g, dot_b)
+    table.insert(_M.log_entries, 1, {
+        segments = segments,
+        dot_r = dot_r, dot_g = dot_g, dot_b = dot_b,
+        t = globals.curtime(), frac = 0
     })
-    while #_M.log_entries>10 do table.remove(_M.log_entries) end
+    while #_M.log_entries > 8 do table.remove(_M.log_entries) end
 end
 
--- ── zenith watermark (modern pill style) ────────────────────────────────
-local _wm_data = { alpha=0, fps_avg=0, ping_avg=0 }
+-- ── zenith watermark ────────────────────────────────────────────────────
+local _wm = { fps=0, ping=0 }
 local function _draw_watermark()
     if not _M.ui_watermark or not _M.ui_watermark:get() then return end
-    local sw,sh = client.screen_size()
-    local now = globals.realtime()
+    local sw, sh = client.screen_size()
     
-    -- smooth fps/ping
     local fps = 1 / math.max(globals.frametime(), 0.001)
-    _wm_data.fps_avg = _wm_data.fps_avg * 0.92 + fps * 0.08
+    _wm.fps = _wm.fps * 0.9 + fps * 0.1
     
-    local nci = pcall(client.get_netchannelinfo) and client.get_netchannelinfo() or nil
     local ping = 0
-    if nci then
-        local ok, lat = pcall(function() return nci:get_latency(0) + nci:get_latency(1) end)
-        if ok then ping = math.max(0, lat * 1000) end
+    local ok_nci, nci = pcall(client.get_netchannelinfo)
+    if ok_nci and nci then
+        local ok_lat, lat = pcall(function() return nci:get_latency(0) + nci:get_latency(1) end)
+        if ok_lat then ping = math.max(0, lat * 1000) end
     end
-    _wm_data.ping_avg = _wm_data.ping_avg * 0.9 + ping * 0.1
-    
-    -- build elements
-    local items = {}
-    items[#items+1] = { text='zenith', r=85, g=140, b=255, bold=true }  -- logo in accent
-    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
+    _wm.ping = _wm.ping * 0.9 + ping * 0.1
     
     local name = USERNAME or 'user'
-    items[#items+1] = { text=name, r=200, g=200, b=210, bold=false }
-    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
-    
-    items[#items+1] = { text=_f('%dms', _fl(_wm_data.ping_avg)), r=170, g=170, b=180, bold=false }
-    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
-    
-    items[#items+1] = { text=_f('%dfps', _fl(_wm_data.fps_avg)), r=170, g=170, b=180, bold=false }
-    items[#items+1] = { text='|', r=60, g=60, b=70, bold=false }
-    
     local h, m = client.system_time()
-    items[#items+1] = { text=_f('%02d:%02d', h, m), r=170, g=170, b=180, bold=false }
     
-    -- measure total width
-    local total_w = 20  -- padding
-    for _, it in ipairs(items) do
-        local tw = renderer.measure_text(it.bold and 'b' or 'd', it.text)
-        total_w = total_w + tw + 8
-    end
+    -- segments: {text, r, g, b, bold}
+    local segs = {
+        {'zenith', 120, 180, 255, true},
+        {'  X Debug', 130, 130, 140, false},
+        {'  @ '..name, 130, 130, 140, false},
+        {'  O '..string.format('%dms', _fl(_wm.ping)), 130, 130, 140, false},
+        {'  # '..string.format('%dfps', _fl(_wm.fps)), 130, 130, 140, false},
+        {'  T '..string.format('%02d:%02d', h, m), 130, 130, 140, false},
+    }
     
-    -- draw background pill
-    local px, py = sw - total_w - 12, 10
-    local pill_h = 26
+    local tw = 20
+    for _, s in ipairs(segs) do tw = tw + renderer.measure_text(s[5] and 'b' or 'd', s[1]) end
     
-    -- dark pill background with subtle border
-    renderer.rectangle(px, py, total_w, pill_h, 18, 18, 22, 235)
-    renderer.rectangle(px, py, total_w, 2, 85, 140, 255, 180)  -- accent top line
+    local px, py = (sw - tw) * 0.5, 10
+    local ph = 24
     
-    -- draw text items
+    renderer.rectangle(px, py, tw, ph, 30, 30, 36, 240)
+    
     local cx = px + 10
-    for _, it in ipairs(items) do
-        local tw = renderer.measure_text(it.bold and 'b' or 'd', it.text)
-        renderer.text(cx, py + 7, it.r, it.g, it.b, 255, it.bold and 'b' or 'd', 0, it.text)
-        cx = cx + tw + 8
+    for _, s in ipairs(segs) do
+        renderer.text(cx, py + 6, s[2], s[3], s[4], 255, s[5] and 'b' or 'd', 0, s[1])
+        cx = cx + renderer.measure_text(s[5] and 'b' or 'd', s[1])
     end
 end
 
--- ── modern hitlog ───────────────────────────────────────────────────────
+-- ── hitlog (centered pills with colored segments) ───────────────────────
 local function _log_draw()
-    _draw_watermark()  -- draw watermark first
+    _draw_watermark()
     
     if not _M.ui_log_scr:get() then return end
-    local sw,sh=client.screen_size()
-    local W=380
-    local cx=sw*0.5  -- center aligned
-    local by=sh-120  -- bottom area
-    local cy=by
-    local rm={}
+    local sw, sh = client.screen_size()
+    local cx = sw * 0.5
+    local by = sh * 0.5 + 80
+    local cy = by
+    local rm = {}
     
-    for i,e in ipairs(_M.log_entries) do
-        local age=globals.curtime()-e.t
-        if age<6 then e.frac=e.frac+(1-e.frac)*0.14
-        else e.frac=e.frac+(0-e.frac)*0.08; if e.frac<0.01 then rm[#rm+1]=i end end
-        local fr=e.frac; if fr<0.02 then goto _ls end
+    for i, e in ipairs(_M.log_entries) do
+        local age = globals.curtime() - e.t
+        if age < 5 then e.frac = e.frac + (1 - e.frac) * 0.18
+        else e.frac = e.frac - e.frac * 0.12; if e.frac < 0.01 then rm[#rm+1] = i end end
+        
+        local fr = e.frac
+        if fr < 0.02 then goto _skip end
         do
-            local a=_fl(255*fr)
-            local tw=renderer.measure_text('d',e.text)
-            local pw=math.max(tw+24, 200)  -- pill width
-            local px=cx-pw*0.5  -- centered
-            local ph=28
+            local a = _fl(255 * fr)
+            local segs = e.segments or {}
             
-            -- slide in from bottom with fade
-            local y=cy+_fl(20*(1-fr))
+            local tw = 0
+            for _, s in ipairs(segs) do tw = tw + renderer.measure_text('d', s[1]) end
             
-            -- background color based on log type
-            local bg_r, bg_g, bg_b = 22, 22, 28
-            local border_r, border_g, border_b = e.r, e.g, e.b
+            local pw = tw + 32
+            local ph = 24
+            local px = cx - pw * 0.5
+            local y = cy + _fl(12 * (1 - fr))
             
-            if e.log_type == 'kill' then
-                bg_r, bg_g, bg_b = 28, 35, 28
-            elseif e.log_type == 'miss_spread' then
-                bg_r, bg_g, bg_b = 35, 32, 22
-            elseif e.log_type == 'miss_resolver' then
-                bg_r, bg_g, bg_b = 38, 22, 22
+            renderer.rectangle(px, y, pw, ph, 34, 34, 40, _fl(235 * fr))
+            
+            local dr, dg, db = e.dot_r or 100, e.dot_g or 160, e.dot_b or 220
+            renderer.circle(px + 13, y + ph * 0.5, 4, dr, dg, db, a)
+            
+            local tx = px + 26
+            for _, s in ipairs(segs) do
+                renderer.text(tx, y + 6, s[2], s[3], s[4], a, 'd', 0, s[1])
+                tx = tx + renderer.measure_text('d', s[1])
             end
             
-            -- draw pill
-            renderer.rectangle(px, y, pw, ph, bg_r, bg_g, bg_b, _fl(220*fr))
-            
-            -- left accent dot/circle
-            local dot_x = px + 12
-            local dot_y = y + ph*0.5
-            renderer.circle(dot_x, dot_y, 4, border_r, border_g, border_b, _fl(255*fr))
-            
-            -- text centered in pill
-            renderer.text(cx, y+8, 220, 220, 230, a, 'd', 'c', e.text)
-            
-            cy = cy - (ph + 6) * fr
+            cy = cy - (ph + 4) * fr
         end
-        ::_ls::
+        ::_skip::
     end
-    for i=#rm,1,-1 do table.remove(_M.log_entries,rm[i]) end
+    
+    for i = #rm, 1, -1 do table.remove(_M.log_entries, rm[i]) end
     -- desync indicator: show live desync of current target near crosshair
     if _M.ui_desyncindicator and _M.ui_desyncindicator:get() then
         local ok2,thr2=pcall(client.current_threat)
@@ -10681,20 +10656,34 @@ client.set_event_callback('aim_hit',function(e)
         d.brute_locked = true
         d.brute_best_off = d.desync * (d.side==2 and 1 or -1)
     end
-    -- modern log format like reference image
-    local log_type = hs and 'kill' or 'hit'
-    local main_text
-    if hs then
-        main_text = _f('Killed %s for %d damage', name, dmg)
-    else
-        main_text = _f('Hit %s in %s for %d damage', name, hg, dmg)
+    -- colored segment log (like reference image)
+    if _M.ui_log_scr:get() then
+        local segs
+        if hs then
+            -- kill: "Player burned out" or similar
+            segs = {
+                {name, 100, 180, 255},  -- cyan name
+                {' burned out', 180, 180, 190}
+            }
+            _log_add_seg(segs, 100, 180, 255)  -- blue dot
+        else
+            -- hit: "Hit Player in hitgroup for X damage"
+            segs = {
+                {'Hit ', 180, 180, 190},
+                {name, 100, 180, 255},  -- cyan name
+                {' in ', 180, 180, 190},
+                {hg, 130, 200, 130},  -- green hitgroup
+                {' for ', 180, 180, 190},
+                {tostring(dmg), 200, 200, 210},
+                {' damage', 180, 180, 190}
+            }
+            _log_add_seg(segs, 100, 200, 100)  -- green dot
+        end
     end
-    local sub=_f('reso: %s @ %d%%  bt:%dt  aa:%s',ms,conf,bt,at:sub(1,3))
-    if _M.ui_log_scr:get() then 
-        local r,g,b = hs and 85 or 140, hs and 200 or 170, hs and 85 or 85
-        _log_add(main_text,r,g,b,sub,log_type) 
+    if _M.ui_log_con:get() then 
+        local main = hs and _f('%s burned out', name) or _f('Hit %s in %s for %d damage', name, hg, dmg)
+        client.color_log(hs and 100 or 180, hs and 255 or 220, 100, main..'\0') 
     end
-    if _M.ui_log_con:get() then local cr,cg,cb=hs and 100 or 180,hs and 255 or 220,100; client.color_log(cr,cg,cb,main_text..'  |  '..sub..'\0') end
 end)
 
 -- ── aim_miss (v4: smarter side flip + AA type tracking) ──────────────────
@@ -10738,30 +10727,42 @@ client.set_event_callback('aim_miss',function(e)
     
     -- unlock brute on miss so it can search again
     d.brute_locked = false
-    local reason=e.reason or '?'
+    local reason = e.reason or '?'
     local hg_miss = e.hitgroup or 0
     local hgn_miss = {[0]='body',[1]='head',[2]='chest',[3]='stomach',[4]='left arm',[5]='right arm',[6]='left leg',[7]='right leg'}
     local hg_str = hgn_miss[hg_miss] or 'body'
     
-    -- determine log type and color based on reason
-    local log_type, r, g, b
-    if reason == 'spread' then
-        log_type = 'miss_spread'
-        r, g, b = 220, 180, 60  -- yellow/orange
-    elseif reason == 'resolver' or reason == '?' then
-        log_type = 'miss_resolver'
-        r, g, b = 220, 75, 75   -- red
-    else
-        log_type = 'miss_other'
-        r, g, b = 100, 160, 220 -- blue
+    -- colored segment log (like reference image)
+    if _M.ui_log_scr:get() then
+        -- dot color + reason color based on miss type
+        local dot_r, dot_g, dot_b = 100, 160, 220  -- default blue
+        local reason_r, reason_g, reason_b = 100, 160, 220
+        local hg_r, hg_g, hg_b = 180, 180, 190
+        
+        if reason == 'spread' then
+            dot_r, dot_g, dot_b = 220, 180, 60  -- yellow
+            reason_r, reason_g, reason_b = 220, 180, 60
+        elseif reason == 'resolver' or reason == '?' then
+            dot_r, dot_g, dot_b = 220, 80, 80  -- red
+            reason_r, reason_g, reason_b = 220, 80, 80
+            hg_r, hg_g, hg_b = 220, 100, 100  -- red hitgroup for resolver
+        else
+            -- prediction error, occlusion, etc = blue
+            dot_r, dot_g, dot_b = 100, 160, 220
+            reason_r, reason_g, reason_b = 100, 160, 220
+        end
+        
+        local segs = {
+            {'Missed in ', 180, 180, 190},
+            {name.."'s", 100, 180, 255},  -- cyan name
+            {' ', 180, 180, 190},
+            {hg_str, hg_r, hg_g, hg_b},
+            {' due to ', 180, 180, 190},
+            {reason, reason_r, reason_g, reason_b}
+        }
+        _log_add_seg(segs, dot_r, dot_g, dot_b)
     end
-    
-    -- format like reference: "Missed in Player's hitgroup due to reason"
-    local main_text = _f("Missed in %s's %s due to %s", name, hg_str, reason)
-    local sub = _f('streak:%d  next:%s  aa:%s', d.fail_streak, d.side==2 and 'R' or 'L', at:sub(1,3))
-    
-    if _M.ui_log_scr:get() then _log_add(main_text, r, g, b, sub, log_type) end
-    if _M.ui_log_con:get() then client.color_log(255,100,100,_f('[ZRes] %s\0', main_text)) end
+    if _M.ui_log_con:get() then client.color_log(255,100,100,_f("[ZRes] Missed in %s's %s due to %s\0", name, hg_str, reason)) end
 end)
 
 -- ── round_start ──────────────────────────────────────────────────────────
