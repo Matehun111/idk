@@ -7380,7 +7380,7 @@ client.set_event_callback("paint_ui", windows.frame)
 
 client.set_event_callback("paint_ui", manual_direction.frame)
 
-client.set_event_callback("paint_ui", watermark.frame)
+-- watermark.frame disabled: replaced by _draw_watermark (pill style)
 client.set_event_callback("paint_ui", keybinds.frame)
 client.set_event_callback("paint_ui", indicators.frame)
 client.set_event_callback("paint_ui", arrows.frame)
