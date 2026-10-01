@@ -59,7 +59,6 @@ local user do
 end
 
 LPH_NO_VIRTUALIZE(function ()
-    local ffi = require 'ffi';
     -- gamesense normally provides toticks; keep a fallback so defensive timing never errors
     local toticks = toticks or function(t) return math.floor(0.5 + (t or 0) / globals.tickinterval()) end
 
@@ -556,7 +555,11 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         c_tweening = {} do
-            local native_GetTimescale = vtable_bind('engine.dll', 'VEngineClient014', 91, 'float(__thiscall*)(void*)')
+            -- the engine's time scale from the cvar (no vtable call)
+            local function get_timescale()
+                local ok, v = pcall(function() return cvar.host_timescale:get_float() end)
+                return (ok and type(v) == "number" and v > 0) and v or 1
+            end
 
             local function solve(easings_fn, prev, new, clock, duration)
                 local prev = easings_fn(clock, prev, new - prev, duration)
@@ -603,7 +606,7 @@ LPH_NO_VIRTUALIZE(function ()
                         self.to = target
                     end
 
-                    local clock = globals_frametime() / native_GetTimescale()
+                    local clock = globals_frametime() / get_timescale()
                     local duration = duration or .15
 
                     if self.clock == duration then
@@ -2193,15 +2196,10 @@ LPH_NO_VIRTUALIZE(function ()
                 local exploit_active = doubletap_active or onshot_active
 
                 local should_activate = false
-                local animlayers = ffi_helpers.animlayers:get(me)
-                if animlayers then
-                    local weapon_activity = ffi_helpers.activity:get(animlayers[1]['sequence'], me)
-                    local body_weight = animlayers[3] and animlayers[3]['weight'] or 0
-                    local is_reloading = animlayers[1]['weight'] ~= 0.0 and weapon_activity == 967
-
-                    if took_damage or (is_reloading and has_threat) or (body_weight > 0.5 and has_threat and exploit_active) then
-                        should_activate = true
-                    end
+                -- reloading = the next attack is in the future (gamesense props, no animation layers)
+                local is_reloading = (entity_get_prop(me, "m_flNextAttack") or 0) > globals_curtime() + 0.1
+                if took_damage or (is_reloading and has_threat) then
+                    should_activate = true
                 end
 
                 if has_threat and player.peeking then
@@ -4051,126 +4049,10 @@ LPH_NO_VIRTUALIZE(function ()
     --- FFI
     ---
     do
-        ffi_helpers = {} do
-            ffi_helpers.get_client_entity = vtable_bind('client.dll', 'VClientEntityList003', 3, 'void*(__thiscall*)(void***, int)')
-
-            ffi_helpers.animstate = {} do
-                if not pcall(ffi.typeof, 'bt_animstate_t') then
-                    ffi.cdef[[
-                        typedef struct {
-                            char __0x108[0x108];
-                            bool on_ground;
-                            bool hit_in_ground_animation;
-                        } bt_animstate_t, *pbt_animstate_t
-                    ]]
-                end
-
-                ffi_helpers.animstate.offset = 0x9960
-
-                ffi_helpers.animstate.get = function (self, ent)
-                    local client_entity = ffi_helpers.get_client_entity(ent)
-
-                    if client_entity == nil or client_entity == ffi.NULL then     -- a NULL cdata pointer is truthy
-                        return
-                    end
-
-                    return ffi.cast('pbt_animstate_t*', ffi.cast('uintptr_t', client_entity) + self.offset)[0]
-                end
-            end
-
-            ffi_helpers.animlayers = {} do
-                if not pcall(ffi.typeof, 'bt_animlayer_t') then
-                    ffi.cdef[[
-                        typedef struct {
-                            float   anim_time;
-                            float   fade_out_time;
-                            int     nil;
-                            int     activty;
-                            int     priority;
-                            int     order;
-                            int     sequence;
-                            float   prev_cycle;
-                            float   weight;
-                            float   weight_delta_rate;
-                            float   playback_rate;
-                            float   cycle;
-                            int     owner;
-                            int     bits;
-                        } bt_animlayer_t, *pbt_animlayer_t
-                    ]]
-                end
-
-                ffi_helpers.animlayers.offset = ffi.cast('int*', ffi.cast('uintptr_t', client.find_signature('client.dll', '\x8B\x89\xCC\xCC\xCC\xCC\x8D\x0C\xD1')) + 2)[0]
-
-                ffi_helpers.animlayers.get = function (self, ent)
-                    local client_entity = ffi_helpers.get_client_entity(ent)
-
-                    if client_entity == nil or client_entity == ffi.NULL then     -- a NULL cdata pointer is truthy
-                        return
-                    end
-
-                    return ffi.cast('pbt_animlayer_t*', ffi.cast('uintptr_t', client_entity) + self.offset)[0]
-                end
-            end
-
-            ffi_helpers.activity = {} do
-                if not pcall(ffi.typeof, 'bt_get_sequence') then
-                    ffi.cdef[[
-                        typedef int(__fastcall* bt_get_sequence)(void* entity, void* studio_hdr, int sequence);
-                    ]]
-                end
-
-                ffi_helpers.activity.offset = 0x2950
-                ffi_helpers.activity.location = ffi.cast('bt_get_sequence', client.find_signature('client.dll', '\x55\x8B\xEC\x53\x8B\x5D\x08\x56\x8B\xF1\x83'))
-
-                ffi_helpers.activity.get = function (self, sequence, ent)
-                    local client_entity = ffi_helpers.get_client_entity(ent)
-
-                    if client_entity == nil or client_entity == ffi.NULL then     -- a NULL cdata pointer is truthy
-                        return
-                    end
-
-                    local studio_hdr = ffi.cast('void**', ffi.cast('uintptr_t', client_entity) + self.offset)[0]
-
-                    if not studio_hdr then
-                        return;
-                    end
-
-                    return self.location(client_entity, studio_hdr, sequence);
-                end
-            end
-
-            ffi_helpers.user_input = {} do
-                if not pcall(ffi.typeof, 'bt_cusercmd_t') then
-                    ffi.cdef[[
-                        typedef struct {
-                            struct bt_cusercmd_t (*cusercmd)();
-                            int     command_number;
-                            int     tick_count;
-                            float   view[3];
-                            float   aim[3];
-                            float   move[3];
-                            int     buttons;
-                        } bt_cusercmd_t;
-                    ]]
-                end
-
-                if not pcall(ffi.typeof, 'bt_get_usercmd') then
-                    ffi.cdef[[
-                        typedef bt_cusercmd_t*(__thiscall* bt_get_usercmd)(void* input, int, int command_number);
-                    ]]
-                end
-
-                ffi_helpers.user_input.vtbl = ffi.cast('void***', ffi.cast('void**', ffi.cast('uintptr_t', client.find_signature('client.dll', '\xB9\xCC\xCC\xCC\xCC\x8B\x40\x38\xFF\xD0\x84\xC0\x0F\x85') or error('fipp')) + 1)[0])
-                ffi_helpers.user_input.location = ffi.cast('bt_get_usercmd', ffi_helpers.user_input.vtbl[0][8])
-
-                ffi_helpers.user_input.get_command = function (self, command_number)
-                    return self.location(self.vtbl, 0, command_number)
-                end
-            end
-        end
+        -- (the ffi helpers that read the animstate, the animation layers and the usercmd from memory are gone: everything they
+        -- gave is read through the gamesense api now)
+        ffi_helpers = {}
     end
-
     ---
     --- Player class
     ---
@@ -4204,17 +4086,15 @@ LPH_NO_VIRTUALIZE(function ()
                     self._shifting_enough = false
                 end
 
+                -- on the ground (m_fFlags), but not on the tick it landed; the landing animation is ~0.25 s after it
                 function BaseLocal:is_onground()
-                    local animstate = ffi_helpers.animstate:get(self.entindex)
-
-                    if not animstate then
-                        return true
-                    end
-
-                    local ptr_addr = ffi.cast('uintptr_t', ffi.cast('void*', animstate))
-                    local landed_on_ground_this_frame = ffi.cast('bool*', ptr_addr + 0x120)[0]
-
-                    return animstate.on_ground and not landed_on_ground_this_frame
+                    local flags = entity_get_prop(self.entindex, 'm_fFlags') or 1
+                    local on_ground = bit.band(flags, 1) == 1
+                    local tick = globals_tickcount()
+                    if on_ground and self._was_air then self._land_tick = tick end
+                    self._was_air = not on_ground
+                    self.landing = on_ground and self._land_tick ~= nil and tick - self._land_tick <= toticks(0.25)
+                    return on_ground and self._land_tick ~= tick
                 end
 
                 function BaseLocal:get_velocity_modifier()
@@ -4382,26 +4262,22 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 do
-                    local defensive_tick = 0
-                    local native_GetClientEntity = vtable_bind('client.dll', 'VClientEntityList003', 3, 'void*(__thiscall*)(void*, int)')
+                    -- our own defensive (tickbase shift) through the gamesense api: the networked tick base falls behind the
+                    -- highest one seen while the shift lasts
+                    local max_tickbase = 0
 
                     function BaseLocal:handle_defensive()
                         local lp = entity_get_local_player()
 
                         if lp and entity.is_alive(lp) then
-                            local Entity = native_GetClientEntity(lp)
-                            if Entity == nil or Entity == ffi.NULL then return false end     -- a NULL cdata pointer is truthy
-                            local m_flOldSimulationTime = ffi.cast("float*", ffi.cast("uintptr_t", Entity) + 0x26C)[0]
-                            local m_flSimulationTime = entity_get_prop(lp, "m_flSimulationTime") or 0
-
-                            local delta = m_flOldSimulationTime - m_flSimulationTime
-
-                            if delta > 0 then
-                                defensive_tick = globals_tickcount() + toticks(delta - client.real_latency())
-                            end
+                            local tickbase = entity_get_prop(lp, "m_nTickBase")
+                            if not tickbase then return false end
+                            -- a respawn / reconnect starts the count over
+                            if tickbase > max_tickbase or max_tickbase - tickbase > 64 then max_tickbase = tickbase end
+                            return max_tickbase - tickbase > 2
                         end
 
-                        return globals_tickcount() <= defensive_tick - 2
+                        return false
                     end
                 end
 
@@ -4532,8 +4408,6 @@ LPH_NO_VIRTUALIZE(function ()
                     self.alive = entity.is_alive(self.entindex)
 
                     if self.alive then
-                        local animstate = ffi_helpers.animstate:get(me) or {}
-
                         self.onground = self:is_onground()
                         self.defensive_predict = self:handle_defensive()
                         self.velocity = vector(entity_get_prop(me, 'm_vecVelocity'))
@@ -4542,7 +4416,6 @@ LPH_NO_VIRTUALIZE(function ()
                         self.stamina = entity_get_prop(me, 'm_flStamina')
                         self.velocity_modifier = self:get_velocity_modifier()
                         self.state = self:get_state()
-                        self.landing = animstate.hit_in_ground_animation
                         local tick = globals_tickcount()
                         if self._peek_tick ~= tick then
                             self._peek_tick = tick
@@ -4573,17 +4446,12 @@ LPH_NO_VIRTUALIZE(function ()
                     end
                 end
 
+                -- our body yaw from the networked body yaw pose parameter (it used to read the usercmd from memory)
                 function BaseLocal:finish_command(cmd, me, wpn)
-                    local command = ffi_helpers.user_input:get_command(cmd.command_number)
-
-                    if command then
-                        if cmd.chokedcommands == 0 and self._last_yaw then
-                            local cheat_dsy = c_math.normalize_yaw(self._last_yaw - command.view[1])
-
-                            self.fakeyaw = -(cheat_dsy > 0 and cheat_dsy - 60 or cheat_dsy + 60)
-                        elseif cmd.chokedcommands ~= 0 then
-                            self._last_yaw = command.view[1]
-                        end
+                    if not me then return end
+                    local pose = entity_get_prop(me, 'm_flPoseParameter', 11)
+                    if type(pose) == "number" then
+                        self.fakeyaw = pose * 120 - 60
                     end
                 end
 
@@ -5749,17 +5617,12 @@ LPH_NO_VIRTUALIZE(function ()
                     local defensive_triggers = config.antiaimbot.defensive_triggers:get()
                     local defensive_triggered
 
-                    local animlayers = ffi_helpers.animlayers:get(me)
-
-                    if not animlayers then
-                        return false
-                    end
-
-                    local weapon_activity_number = ffi_helpers.activity:get(animlayers[1]['sequence'], me)
-                    local flash_activity_number = ffi_helpers.activity:get(animlayers[9]['sequence'], me)
-                    local is_reloading = animlayers[1]['weight'] ~= 0.0 and weapon_activity_number == 967
-                    local is_flashed = animlayers[9]['weight'] > 0.1 and flash_activity_number == 960
-                    local is_under_attack = animlayers[10]['weight'] > 0.1
+                    -- the triggers from gamesense props (they used to come from the animation layers in memory):
+                    -- reloading = the next attack is in the future, flashed = flash duration, hit = the slowdown after damage
+                    local curtime = globals_curtime()
+                    local is_reloading = (entity_get_prop(me, 'm_flNextAttack') or 0) > curtime + 0.1
+                    local is_flashed = (entity_get_prop(me, 'm_flFlashDuration') or 0) > 0.1
+                    local is_under_attack = (entity_get_prop(me, 'm_flVelocityModifier') or 1) < 0.95
                     local is_swapping_weapons = cmd.weaponselect > 0
 
                     if c_table.contains(defensive_triggers, 'Flashed') and is_flashed
@@ -6725,11 +6588,6 @@ LPH_NO_VIRTUALIZE(function ()
 
                 function antiaimbot.animation_breaker.run(me)
                     local leg_move = config.antiaimbot.animation_breaker_leg:get()
-                    local animlayers = ffi_helpers.animlayers:get(me)
-
-                    if not animlayers then
-                        return
-                    end
 
                     if leg_move ~= 'Off' and player.onground and (player.state == 'Moving' or player.state == 'Crouch moving') then
                         if leg_move == 'Frozen' then
@@ -6737,7 +6595,6 @@ LPH_NO_VIRTUALIZE(function ()
                             override.set(reference.misc.leg_movement, "Always slide")
                         elseif leg_move == 'Jitter' and player.state == 'Moving' then
                             entity.set_prop(me, 'm_flPoseParameter', client.random_float(0, 1), 0)
-                            animlayers[12]['weight'] = client.random_float(0, 1)
                             override.set(reference.misc.leg_movement, "Always slide")
                         elseif leg_move == 'Walking' then
                             entity.set_prop(me, 'm_flPoseParameter', 0.5, 7)
@@ -6768,8 +6625,7 @@ LPH_NO_VIRTUALIZE(function ()
                                 end
                             end
 
-                            animlayers[6]['weight'] = 1
-                            animlayers[6]['cycle'] = cycle
+                            entity.set_prop(me, 'm_flPoseParameter', cycle, 6)
                         end
                     end
 
@@ -6788,19 +6644,14 @@ LPH_NO_VIRTUALIZE(function ()
                     end
                 end
 
+                -- quick peek legs: the movement buttons off (the move values stay), through the setup_command cmd fields
+                -- (it used to edit the usercmd in memory)
                 function antiaimbot.animation_breaker.post(cmd, me)
                     if c_table.contains(config.antiaimbot.animation_breaker_other:get(), 'Quick peek legs') and c_table.is_hotkey_active(reference.ragebot.quick_peek_assist) then
                         local move_type = entity_get_prop(me, 'm_MoveType')
 
                         if move_type == 2 then
-                            local command = ffi_helpers.user_input:get_command(cmd.command_number)
-
-                            if command then
-                                command.buttons = bit.band(command.buttons, bit.bnot(8))
-                                command.buttons = bit.band(command.buttons, bit.bnot(16))
-                                command.buttons = bit.band(command.buttons, bit.bnot(512))
-                                command.buttons = bit.band(command.buttons, bit.bnot(1024))
-                            end
+                            cmd.in_forward, cmd.in_back, cmd.in_moveleft, cmd.in_moveright = 0, 0, 0, 0
                         end
                     end
                 end
@@ -7002,16 +6853,13 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 self.main:run(cmd, me, wpn)
+
+                if config.antiaimbot.animation_breaker:get() then
+                    self.animation_breaker.post(cmd, me)
+                end
             end
 
             function antiaimbot:finish_command(cmd, me, wpn)
-                if not me then
-                    return
-                end
-
-                if config.antiaimbot.animation_breaker:get() then
-                    self.animation_breaker.post(cmd, me);
-                end
             end
         end
     end
