@@ -21,6 +21,7 @@ rawset(_G, "_auth_user",  "dev")
 rawset(_G, "_auth_key",   "DEV-LOCAL")
 rawset(_G, "_auth_hwid",  "DEV")
 rawset(_G, "BUILD_VERSION", "debug")
+rawset(_G, "_server_url",  "https://your-server.railway.app")
 
 -- locate specter_cloud.lua next to this file
 local me = debug.getinfo(1, "S").source:match("^@?(.*)")

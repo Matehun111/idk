@@ -31,11 +31,13 @@ do
         plan = _rg(_G, "BUILD_VERSION") or "beta",
         ts   = _ts,
         seal = _ts * 31 + #tostring(_rg(_G, "_auth_key") or ""),
+        server_url = _rg(_G, "_server_url") or "",
     }
 
     for _, k in ipairs({
         "_auth_ok", "_auth_alive", "_auth_ts", "_auth_ticket",
         "_auth_ticket_exp", "_auth_nonce", "_auth_key", "_auth_hwid",
+        "_server_url",
     }) do
         rawset(_G, k, nil)
     end
@@ -173,6 +175,7 @@ LPH_NO_VIRTUALIZE(function ()
     local clipboard = require 'gamesense/clipboard'
     local surface = require 'gamesense/surface'
     local json = require 'json'
+    local http = require 'gamesense/http'
 
     -- ── INTEGRITY MONITOR ────────────────────────────────────────────────
     local _integrity do
@@ -11440,6 +11443,190 @@ LPH_NO_VIRTUALIZE(function ()
                     menu_was_open = open
                 end)
             end
+
+            -- ── CLOUD CONFIG ─────────────────────────────────────────────
+            do
+                local SERVER = _auth_data and _auth_data.server_url or ""
+                local KEY    = _auth_data and _auth_data.key or ""
+                local HWID   = _auth_data and _auth_data.hwid or ""
+
+                local function _ue(s)
+                    return tostring(s):gsub("([^%w%-_.~])", function(c)
+                        return string_format("%%%02X", string.byte(c))
+                    end)
+                end
+
+                local cloud_configs = {}
+                local cloud_idx     = 0
+                local cloud_busy    = false
+
+                config.cloud = {} do
+                    config.cloud.gap     = mui.spacer(mui.CONTENT)
+                    config.cloud.label   = mui.header(mui.CONTENT, "☁", "Cloud Configs")
+                    config.cloud.name    = menu.new_item(ui.new_textbox, "AA", "Anti-aimbot angles", "\nCloud name", "", false)
+                        :config_ignore()
+                    config.cloud.upload  = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "Upload to cloud", function() end)
+                        :config_ignore()
+                    config.cloud.refresh = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "Refresh cloud list", function() end)
+                        :config_ignore()
+                    config.cloud.current = mui.hint(mui.CONTENT, "No configs loaded.")
+                    config.cloud.prev    = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "◀ Prev", function() end)
+                        :config_ignore()
+                    config.cloud.next    = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "Next ▶", function() end)
+                        :config_ignore()
+                    config.cloud.load_btn   = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "Load from cloud", function() end)
+                        :config_ignore()
+                    config.cloud.delete_btn = menu.new_item(ui.new_button, "AA", "Anti-aimbot angles", "Delete from cloud", function() end)
+                        :config_ignore()
+                    config.cloud.status  = mui.hint(mui.CONTENT, "")
+                end
+
+                local function cloud_update_label()
+                    if #cloud_configs == 0 then
+                        pcall(function() config.cloud.current:set("No configs loaded.") end)
+                        return
+                    end
+                    local cfg = cloud_configs[cloud_idx]
+                    if not cfg then return end
+                    local txt = string_format("[%d/%d] %s  by %s", cloud_idx, #cloud_configs, cfg.name, cfg.author or "?")
+                    pcall(function() config.cloud.current:set(txt) end)
+                end
+
+                local function cloud_set_status(msg)
+                    pcall(function() config.cloud.status:set(msg) end)
+                end
+
+                local function cloud_refresh()
+                    if SERVER == "" then cloud_set_status("Server URL not set."); return end
+                    if cloud_busy then return end
+                    cloud_busy = true
+                    cloud_set_status("Loading...")
+
+                    http.get(SERVER .. "/configs", function(ok, resp)
+                        cloud_busy = false
+                        if not ok then cloud_set_status("Server unreachable."); return end
+                        local body = type(resp) == "table" and resp.body or resp
+                        local s, data = pcall(json.parse, body)
+                        if not s or type(data) ~= "table" then cloud_set_status("Bad response."); return end
+
+                        cloud_configs = data
+                        cloud_idx = #data > 0 and 1 or 0
+                        cloud_update_label()
+                        cloud_set_status(#data .. " config(s) found.")
+                    end)
+                end
+
+                local function cloud_upload()
+                    if SERVER == "" then cloud_set_status("Server URL not set."); return end
+                    if cloud_busy then return end
+                    local name = ""
+                    pcall(function() name = config.cloud.name:get() or "" end)
+                    name = name:match("^%s*(.-)%s*$")
+                    if name == "" then cloud_set_status("Enter a config name."); return end
+                    if #name > 32 then cloud_set_status("Name too long (max 32)."); return end
+
+                    cloud_busy = true
+                    cloud_set_status("Uploading...")
+
+                    local config_str = config_system.export_to_str()
+                    local encoded = base64.encode(config_str)
+
+                    local url = SERVER .. "/configs/upload"
+                        .. "?key="  .. _ue(KEY)
+                        .. "&hwid=" .. _ue(HWID)
+                        .. "&name=" .. _ue(name)
+                        .. "&data=" .. _ue(encoded)
+
+                    http.get(url, function(ok, resp)
+                        cloud_busy = false
+                        if not ok then cloud_set_status("Upload failed."); return end
+                        local body = type(resp) == "table" and resp.body or resp
+                        local s, data = pcall(json.parse, body)
+                        if s and type(data) == "table" and data.ok then
+                            cloud_set_status("Uploaded: " .. name)
+                            c_logger.log("Cloud config '%s' uploaded.", name)
+                            cloud_refresh()
+                        else
+                            cloud_set_status("Upload error: " .. (data and data.reason or "?"))
+                        end
+                    end)
+                end
+
+                local function cloud_load()
+                    if cloud_idx < 1 or cloud_idx > #cloud_configs then
+                        cloud_set_status("Refresh the list first."); return
+                    end
+                    local cfg = cloud_configs[cloud_idx]
+                    if not cfg or not cfg.data then cloud_set_status("Invalid config."); return end
+
+                    local raw = cfg.data
+                    local decoded = base64.decode(raw)
+                    if not decoded or decoded == "" then decoded = raw end
+
+                    local ok, err = config_system.import_from_str(decoded)
+                    if ok then
+                        pcall(antiaimbot_builder.refresh)
+                        pcall(antiaimbot_builder.refresh_defensive)
+                        config_system:save_local(true)
+                        cloud_set_status("Loaded: " .. cfg.name)
+                        c_logger.log("Cloud config '%s' by %s loaded.", cfg.name, cfg.author or "?")
+                    else
+                        cloud_set_status("Import failed: " .. (err or "?"))
+                    end
+                end
+
+                local function cloud_delete()
+                    if SERVER == "" then cloud_set_status("Server URL not set."); return end
+                    if cloud_idx < 1 or cloud_idx > #cloud_configs then
+                        cloud_set_status("Nothing to delete."); return
+                    end
+                    if cloud_busy then return end
+                    local cfg = cloud_configs[cloud_idx]
+                    if not cfg then cloud_set_status("Select a config."); return end
+
+                    cloud_busy = true
+                    cloud_set_status("Deleting...")
+
+                    local url = SERVER .. "/configs/delete"
+                        .. "?key="  .. _ue(KEY)
+                        .. "&hwid=" .. _ue(HWID)
+                        .. "&name=" .. _ue(cfg.name)
+
+                    http.get(url, function(ok, resp)
+                        cloud_busy = false
+                        if not ok then cloud_set_status("Delete failed."); return end
+                        local body = type(resp) == "table" and resp.body or resp
+                        local s, data = pcall(json.parse, body)
+                        if s and type(data) == "table" and data.ok then
+                            cloud_set_status("Deleted: " .. cfg.name)
+                            c_logger.log("Cloud config '%s' deleted.", cfg.name)
+                            cloud_refresh()
+                        else
+                            cloud_set_status("Delete error: " .. (data and data.reason or "?"))
+                        end
+                    end)
+                end
+
+                config.cloud.upload:set_callback(cloud_upload)
+                config.cloud.refresh:set_callback(cloud_refresh)
+                config.cloud.load_btn:set_callback(cloud_load)
+                config.cloud.delete_btn:set_callback(cloud_delete)
+                config.cloud.prev:set_callback(function()
+                    if #cloud_configs > 0 then
+                        cloud_idx = cloud_idx - 1
+                        if cloud_idx < 1 then cloud_idx = #cloud_configs end
+                        cloud_update_label()
+                    end
+                end)
+                config.cloud.next:set_callback(function()
+                    if #cloud_configs > 0 then
+                        cloud_idx = cloud_idx + 1
+                        if cloud_idx > #cloud_configs then cloud_idx = 1 end
+                        cloud_update_label()
+                    end
+                end)
+            end
+            -- ── END CLOUD CONFIG ─────────────────────────────────────────
         end
     end
 

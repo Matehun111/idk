@@ -239,6 +239,7 @@ app.get('/script', async (req, res) => {
         `rawset(_G, "_auth_key",        ${JSON.stringify(key)})`,
         `rawset(_G, "_auth_hwid",       ${JSON.stringify(hwid)})`,
         `rawset(_G, "BUILD_VERSION",    ${JSON.stringify(plan)})`,
+        `rawset(_G, "_server_url",      ${JSON.stringify(process.env.PUBLIC_URL || '')})`,
     ].join('\n')
 
     // burn ticket
@@ -332,6 +333,29 @@ app.post('/configs', async (req, res) => {
         await redis.set('specter:configs', configs)
         console.log(`[CONFIG UPLOAD] ${cfg_name} by ${author}`)
         res.json({ ok: true, name: cfg_name, author })
+    } catch(e) {
+        res.status(500).json({ ok: false, reason: 'server_error' })
+    }
+})
+
+// ── GET /configs/delete — user deletes own config ────────────────────────
+app.get('/configs/delete', async (req, res) => {
+    const { key, hwid, name } = req.query
+    if (!key || !hwid || !name)
+        return res.status(400).json({ ok: false, reason: 'missing_params' })
+    const db = await db_read()
+    const license = db[key]
+    if (!license || license.revoked) return res.status(403).json({ ok: false, reason: 'invalid_key' })
+    if (license.hwid !== hwid) return res.status(403).json({ ok: false, reason: 'hwid_mismatch' })
+    const author = license.note || key.slice(-6)
+    try {
+        let configs = await redis.get('specter:configs') || []
+        const before = configs.length
+        configs = configs.filter(c => !(c.name === name && c.author === author))
+        if (configs.length === before) return res.json({ ok: false, reason: 'not_found' })
+        await redis.set('specter:configs', configs)
+        console.log(`[CONFIG DELETE] ${name} by ${author}`)
+        res.json({ ok: true })
     } catch(e) {
         res.status(500).json({ ok: false, reason: 'server_error' })
     }
