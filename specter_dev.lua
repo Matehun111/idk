@@ -2082,18 +2082,11 @@ LPH_NO_VIRTUALIZE(function ()
                     if use_ba and data.arm_conf < profile.conf_ba then want_ba = true end
                 end
 
-                -- shifting: the angle is a guess by definition. After a RECENT defensive miss (or when the defensive arms
-                -- are failing) play it safe until the target stops shifting. It used to be every miss of the round, so after
-                -- two defensive misses every later defensive window was shot at the body: the levers follow the current
-                -- confidence now, a miss counts for 5 seconds and a defensive hit clears it. Body aim needs the arms to be
-                -- doubted as well (or three misses in a row).
+                -- a defensive record is resolved to the HEAD, not given up on: no safe point / body aim while the target is
+                -- shifting (it used to switch them on after defensive misses, so most shots at them ended on the body).
+                -- The angle gets better by learning (feet model, learned angle), not by aiming elsewhere.
                 local now = globals_curtime()
-                if data.is_shifting and opt("Defensive fix") then
-                    local bad = data.def_conf ~= nil and data.def_conf < 0.40
-                    local recent = (m.def_recent_t and now - m.def_recent_t < 5) and (m.def_recent_n or 0) or 0
-                    if recent > 0 or bad then want_sp = true end
-                    if (recent >= 1 and bad) or recent >= 3 then want_ba = true end
-                end
+                if data.is_shifting and opt("Defensive fix") then want_sp, want_ba = false, false end
 
                 -- a lag compensation break: body aim while it lasts and for a few seconds after a miss on it (not the whole round)
                 local lc_recent = m.lc_miss_t ~= nil and now - m.lc_miss_t < 8
@@ -2415,7 +2408,7 @@ LPH_NO_VIRTUALIZE(function ()
                 data.consecutive_misses = data.consecutive_misses + 1
                 data.confidence = math_max(data.confidence - 0.25, 0)
                 m.resolver_misses = m.resolver_misses + 1
-                m.streak = (m.streak or 0) + 1
+                if not (shot and shot.shifting) then m.streak = (m.streak or 0) + 1 end   -- defensive misses do not push towards body aim
 
                 if not shot or shot.value == nil or not shot.ctx then
                     log("%s: native resolver missed", name)
@@ -2431,8 +2424,6 @@ LPH_NO_VIRTUALIZE(function ()
                 if shot.shifting then
                     if shot.ctx:sub(1, 1) ~= "d" then weight = weight * 0.5 end
                     m.def_misses_round = (m.def_misses_round or 0) + 1
-                    if m.def_recent_t and globals_curtime() - m.def_recent_t >= 5 then m.def_recent_n = 0 end
-                    m.def_recent_n, m.def_recent_t = (m.def_recent_n or 0) + 1, globals_curtime()
                 end
                 if bt >= 24 then
                     weight = weight * 0.4
@@ -2468,7 +2459,6 @@ LPH_NO_VIRTUALIZE(function ()
                 m.streak = 0
                 if shot and shot.shifting then
                     m.def_misses_round = math_max(0, (m.def_misses_round or 0) - 1)
-                    m.def_recent_n = 0
                 end
 
                 if not shot or shot.value == nil or not shot.ctx then return end
