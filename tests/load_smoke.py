@@ -11,7 +11,9 @@ It only proves that the top-level code runs through and that the callbacks the s
 without hitting an undefined global. It does NOT prove that anything works in game.
 
     pip install lupa
-    python3 tests/load_smoke.py [--dev]        (--dev: load through specter_dev.lua with a fake readfile)
+    python3 tests/load_smoke.py                       specter_cloud.lua with a fake login (the production script)
+    python3 tests/load_smoke.py --dev-file            specter_dev.lua exactly as it is, with NO auth globals at all
+    python3 tests/load_smoke.py --plan=nightly|beta|specter
 """
 import os
 import sys
@@ -22,7 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 
 LUA = r'''
-return function(src, dev_src, opts)
+return function(src, opts)
     local ffi = require("ffi")
     pcall(function() require("jit").off() end)     -- compiled loops would not call the budget hook
     local real_G = _G
@@ -107,7 +109,7 @@ return function(src, dev_src, opts)
     env.vtable_entry = function() return ffi.cast("void*", 0) end
     env.toticks = function(t) return math.floor(0.5 + (t or 0) * 64) end
     env.totime = function(t) return (t or 0) / 64 end
-    env.readfile = function(name) if opts.dev and name == "lua/specter_cloud.lua" then return src end end
+    env.readfile = function() end
     env.writefile = function() end
     env.print = function(...) end
 
@@ -159,17 +161,14 @@ return function(src, dev_src, opts)
     budget(300, 900)
 
     local result = { loaded = false }
-    if opts.dev then
-        -- through the dev loader, exactly like gamesense runs it
-        local ok, err = run(dev_src, "@specter_dev")
-        result.loaded, result.error = ok, err
-    else
+    if not opts.noauth then
+        -- what the loader / server prefix sets before the production script runs
         rawset(env, "_auth_ok", true); rawset(env, "_auth_alive", true); rawset(env, "_auth_ts", opts.now)
         rawset(env, "_auth_user", "tester"); rawset(env, "_auth_key", "KEY"); rawset(env, "_auth_hwid", "HWID")
         rawset(env, "BUILD_VERSION", opts.plan or "debug"); rawset(env, "_server_url", "https://example.invalid")
-        local ok, err = run(src, "@specter_cloud")
-        result.loaded, result.error = ok, err
     end
+    local ok, err = run(src, "@script")
+    result.loaded, result.error = ok, err
     real_G.debug.sethook()
 
     -- invoke every registered callback once: undefined globals / typos show up, ghost arithmetic does not matter
@@ -189,6 +188,7 @@ return function(src, dev_src, opts)
     result.errors = errors
     result.logs = logs
     result.auth_wiped = rawget(env, "_auth_ok") == nil and rawget(env, "_auth_key") == nil
+    result.auth_touched = rawget(env, "_auth_ok") ~= nil or rawget(env, "_auth_ts") ~= nil
     return result
 end
 '''
@@ -197,27 +197,41 @@ end
 def main():
     import resource
     resource.setrlimit(resource.RLIMIT_AS, (6 * 1024 ** 3, 6 * 1024 ** 3))   # fail with an error instead of being OOM-killed
-    dev = "--dev" in sys.argv
+    dev_file = "--dev-file" in sys.argv
     plan = "debug"
     for a in sys.argv[1:]:
         if a.startswith("--plan="):
             plan = a.split("=", 1)[1]
-    src = open(os.path.join(ROOT, "specter_cloud.lua"), encoding="utf-8").read()
-    dev_src = open(os.path.join(ROOT, "specter_dev.lua"), encoding="utf-8").read()
+    if dev_file:
+        import subprocess
+        check = subprocess.run([sys.executable, os.path.join(ROOT, "tools", "make_dev.py"), "--check"], capture_output=True, text=True)
+        print(check.stdout.strip() or check.stderr.strip())
+        if check.returncode != 0:
+            print("SMOKE TEST FAILED")
+            return 1
+    path = os.path.join(ROOT, "specter_dev.lua" if dev_file else "specter_cloud.lua")
+    src = open(path, encoding="utf-8").read()
     rt = L.LuaRuntime(unpack_returned_tuples=True)
     runner = rt.eval("function(code) return load(code)() end")(LUA)
-    res = runner(src, dev_src, rt.table_from({"now": 1700000000, "dev": dev, "plan": plan, "callbacks": True}))
-    print(f"mode: {'dev loader' if dev else 'direct'}   plan: {plan}")
+    res = runner(src, rt.table_from({"now": 1700000000, "noauth": dev_file, "plan": plan, "callbacks": True}))
+    print(f"file: {os.path.basename(path)}   plan: {plan}   login: {'none' if dev_file else 'fake'}")
     print("loaded:", res.loaded)
     if not res.loaded:
         print("ERROR:", res.error)
     print("callbacks registered:", res.callbacks)
-    print("auth globals wiped after load:", res.auth_wiped)
     for e in res.errors.values():
         print("  script reported:", e)
     for e in res.cb_errors.values():
         print("  callback problem:", e)
     ok = bool(res.loaded) and len(res.cb_errors) == 0
+    if dev_file:
+        # nothing of the login machinery may be needed or left behind
+        if res.auth_touched:
+            print("  the dev build touched auth globals")
+            ok = False
+        if res.callbacks < 40:
+            print("  too few callbacks registered for a full script")
+            ok = False
     print("SMOKE TEST", "PASSED" if ok else "FAILED")
     return 0 if ok else 1
 
