@@ -9,6 +9,9 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   integrity monitor, every feature unlocked. Never edit it by hand, never turn it back into a loader
 - `specter_loader.lua` — Production loader (auth + cloud fetch from server)
 - `server.js` — License server (Express + Upstash Redis)
+- `specter_resolver.lua` — STANDALONE desync resolver: one file, no login, no AA, no visuals, nothing but the resolver
+  (menu: RAGE > Other > "Specter desync resolver"). Independent from `specter_cloud.lua` (own copy of the resolver code, own
+  learning, own saved priors key). A change to one does not touch the other
 
 ## Editing Rules
 - Edit `specter_cloud.lua` only. Then run `python3 tools/make_dev.py` (rewrites `specter_dev.lua`) and commit both together.
@@ -64,3 +67,22 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   gamesense-like sandbox (no os / io / debug, strict globals, ghost API). Run it after every change that touches load-time code,
   the loaders or the auth gate.
   Run it after every resolver change; it checks learning logic, not in-game behaviour.
+
+## Standalone desync resolver (`specter_resolver.lua`)
+- Same design as the resolver block of the cloud script (contexts, arms, per-record shot attribution, ping profiles, FFI layers / animstate
+  / feet model, defensive hold), plus what the simulations showed to be missing:
+  * zone `s|<stance>|z`: when the feet model says the body yaw is ~0 (feet on the eye yaw) the `zero` arm is the model's call and is
+    learned apart from the other situations; the layer hints (balance adjust) do not apply there
+  * side tracking (`dyn_*`): per player and stance the script learns how often the target switches sides after a hit and after a miss
+    (win-stay / lose-shift, anti bruteforce on shot / hit / miss, shot noise). Arms that only guess a side (fs/opp full/half/low, db hit)
+    follow the predicted side, the `flip pattern` arm is that prediction. Arms that read animation data (feet, pose) are left alone
+  * `Remember learning` keeps the session-wide arm priors in `database` under `specter_desync_resolver_priors` (version in `PRIOR_VERSION`,
+    bump it when the arm lists change)
+- Tests: `python3 tests/standalone_regress.py` (needs `pip install lupa`). The mock gamesense + enemy world is `tests/standalone/harness.lua`:
+  every tick the enemy AA decides an eye yaw (with fakelag), a copy of the server feet logic gives the true body yaw, an aimbot model shoots with
+  backtrack and ping delayed results, spread misses (6%) and optional extra noise. The script exports `R`, `F`, `U` ... only when the global
+  `SPECTER_RESOLVER_TEST` is set; the harness sets it.
+  The test covers hit rates per anti-aim and ping, ablations, garbage netvars, adversarial animstate memory (bad / zero / shifted offsets: the
+  script must never write), player list, menu, ping profile switching, several enemies, remembered priors, options, panel, events.
+- When the resolver logic changes in `specter_resolver.lua` and the same idea belongs in the cloud script (or the other way round), port it by
+  hand: the two are separate files on purpose.
