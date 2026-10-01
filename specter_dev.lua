@@ -737,6 +737,7 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.gtables = {}     -- session-wide angle tables, the start of a new player's
             resolver.dyn_global = { hit = { n = 0, f = 0 }, miss = { n = 0, f = 0 } }   -- side switches after a hit / a miss, everybody
             resolver.zone_global = { s = 0, f = 0 }           -- how often zero hit where the feet model said zero, everybody
+            resolver.feet_global = {}                         -- how often the feet model hit, per choke class, everybody
 
             local RECORDS       = 32      -- stored eye-angle records per player
             local DEF_CAP       = 14      -- max ticks a single tickbase shift keeps "shifting" on
@@ -1070,6 +1071,7 @@ LPH_NO_VIRTUALIZE(function ()
                         def_misses_round = 0, lc_misses_round = 0,
                         dyn = {}, shot_seq = 0,         -- side tracking per stance, shots fired at this player
                         zone = { s = 0, f = 0 },        -- how often zero hit where the feet model said zero
+                        feet = {},                      -- how often the feet model hit this player, per choke class
                     }
                     resolver.memory[idx] = m
                 end
@@ -1818,8 +1820,41 @@ LPH_NO_VIRTUALIZE(function ()
             -- first guess of the two polarity arms: even when nothing is known about the sign convention, and
             -- clearly in favour of the right one once the animstate showed which way forced values turn out.
             -- A target that chokes a lot moves its feet through updates we never see, so the model is less reliable there.
-            local function feet_bias(data)
-                local base = (data.choke or 0) <= 3 and 0 or -0.08
+            -- how often the feet model hit, per choke class (n: no choke, m: some, h: a lot). A target that chokes moves its
+            -- feet through updates we never see (a log showed the model missing on choke 11-15 every time), so the model is
+            -- only worth following where it keeps hitting: this player first, everybody else second
+            local function choke_class(choke)
+                if (choke or 0) <= 1 then return "n" end
+                if choke <= 5 then return "m" end
+                return "h"
+            end
+            resolver.choke_class = choke_class
+
+            local function feet_rate(store, class)
+                local t = store and store[class]
+                if not t or t.s + t.f < 3 then return nil end
+                return (t.s + 1) / (t.s + t.f + 2)
+            end
+
+            local function feet_learn(store, class, hit)
+                local t = store[class]
+                if not t then t = { s = 0, f = 0 }; store[class] = t end
+                t.s, t.f = t.s * 0.98, t.f * 0.98
+                if hit then t.s = t.s + 1 else t.f = t.f + 1 end
+            end
+
+            local function feet_base(data, m)
+                local class = choke_class(data.choke)
+                local base = 0
+                local rp, rg = feet_rate(m and m.feet, class), feet_rate(resolver.feet_global, class)
+                if rp then base = base + (rp - 0.5) * 0.5 end
+                if rg then base = base + (rg - 0.5) * 0.4 end
+                if rp == nil and rg == nil then base = (class == "n") and 0 or (class == "m" and -0.04 or -0.10) end
+                return base
+            end
+
+            local function feet_bias(data, m)
+                local base = feet_base(data, m)
                 local pol = fres.polarity
                 if pol == 1 then return base + 0.15, base - 0.10 end
                 if pol == -1 then return base - 0.10, base + 0.15 end
@@ -1944,7 +1979,7 @@ LPH_NO_VIRTUALIZE(function ()
                 local feet_arm = feet_usable(data)
                 avail[11], avail[12] = feet_arm, feet_arm
                 if feet_arm then
-                    bias[11], bias[12] = feet_bias(data)
+                    bias[11], bias[12] = feet_bias(data, m)
                 end
 
                 local side = hint_side(data)
@@ -1995,6 +2030,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                 data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
                 data.used_pol, data.used_side, data.used_step = a.pol or 1, side, arm
+                data.used_src = a.src
                 data.used_zone = zone and arm == 5 or nil       -- the model's own call: counts for how far it is believed
                 return value, reason
             end
@@ -2021,7 +2057,7 @@ LPH_NO_VIRTUALIZE(function ()
                 local feet_arm = feet_usable(data)
                 avail[8], avail[9] = feet_arm, feet_arm
                 if feet_arm then
-                    bias[8], bias[9] = feet_bias(data)
+                    bias[8], bias[9] = feet_bias(data, m)
                 end
 
                 local arm, conf = arm_pick(m, ctx, n, bias, avail)
@@ -2039,6 +2075,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                 data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
                 data.used_pol, data.used_side, data.used_step = a.pol or 1, side, arm
+                data.used_src = a.src
                 if a.src == "feet" then return value, "feet model" end
                 return value, a.frac and a.frac < 1 and "jitter low" or "jitter"
             end
@@ -2069,7 +2106,7 @@ LPH_NO_VIRTUALIZE(function ()
                 avail[6], avail[7] = feet_ok, feet_ok
                 if feet_ok then
                     local b = (kind == "flick" or kind == "free") and 0.12 or (kind == "snap" and 0.03 or 0)
-                    if (data.choke or 0) >= 2 then b = b - 0.06 end         -- the feet move through updates we never see
+                    b = b + feet_base(data, m)                                -- how far the model is believed with this choke
                     local pol = fres.polarity
                     bias[6] = bias[6] + b + (pol == 1 and 0.10 or (pol == -1 and -0.05 or 0))
                     bias[7] = bias[7] + b + (pol == -1 and 0.10 or (pol == 1 and -0.05 or 0))
@@ -2110,6 +2147,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                 data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
                 data.used_pol, data.used_side, data.used_step = a.pol or 1, 1, arm
+                data.used_src = a.src
                 data.used_tkey = tkey
                 if value == nil then return nil, "native" end
                 return value, "defensive hold"
@@ -2121,7 +2159,7 @@ LPH_NO_VIRTUALIZE(function ()
                 local data, m = resolver.init_player(idx)
                 data.used_stance = data.stance
                 data.used_ctx, data.used_arm, data.used_n = nil, nil, nil
-                data.used_pol, data.used_side, data.used_step = nil, nil, nil
+                data.used_pol, data.used_side, data.used_step, data.used_src = nil, nil, nil, nil
                 data.used_tkey, data.used_zone = nil, nil
                 data.arm_conf, data.def_conf = nil, nil
 
@@ -2320,6 +2358,7 @@ LPH_NO_VIRTUALIZE(function ()
                                 pol = data.used_pol, side = data.used_side, step = data.used_step,
                                 shifted = data.is_shifting, stance = data.used_stance,
                                 jside = data.jitter_side, jnext = data.jitter_next, maxd = data.max_desync,
+                                src = data.used_src, cc = choke_class(data.choke),
                             }
                             while #hist > HIST_SIZE do table_remove(hist, 1) end
                         end
@@ -2493,12 +2532,14 @@ LPH_NO_VIRTUALIZE(function ()
                     shot.ctx, shot.arm, shot.n, shot.tkey, shot.zone = e.ctx, e.arm, e.n, e.tkey, e.zone
                     shot.pol, shot.side, shot.step = e.pol, e.side, e.step
                     shot.jside, shot.jnext, shot.maxd = e.jside, e.jnext, e.maxd
+                    shot.src, shot.cc = e.src, e.cc
                 else
                     shot.value, shot.reason = resolver.forced[idx], data.last_reason or "native"
                     shot.stance, shot.shifting = data.used_stance or data.stance, data.is_shifting
                     shot.ctx, shot.arm, shot.n, shot.tkey, shot.zone = data.used_ctx, data.used_arm, data.used_n, data.used_tkey, data.used_zone
                     shot.pol, shot.side, shot.step = data.used_pol, data.used_side, data.used_step
                     shot.jside, shot.jnext, shot.maxd = data.jitter_side, data.jitter_next, data.max_desync
+                    shot.src, shot.cc = data.used_src, choke_class(data.choke)
                 end
                 resolver.shots[key] = shot
                 data.last_shot_time = now
@@ -2564,6 +2605,11 @@ LPH_NO_VIRTUALIZE(function ()
                 arm_learn(m, shot.ctx, shot.arm, shot.n, false, weight)
                 dyn_observe(m, shot, false)
                 if shot.zone then zone_learn(m, false) end
+                if shot.src == "feet" and shot.cc then
+                    m.feet = m.feet or {}
+                    feet_learn(m.feet, shot.cc, false)
+                    feet_learn(resolver.feet_global, shot.cc, false)
+                end
                 if shot.ctx:sub(1, 1) == "d" then table_learn(m, shot.tkey, shot.value, false) end
                 local next_arm = arm_pick(m, shot.ctx, shot.n)
                 log("%s: %d missed (%s, %s%s) -> next: %s", name, shot.value, shot.reason or "?", arm_name(shot.ctx, shot.arm),
@@ -2603,6 +2649,11 @@ LPH_NO_VIRTUALIZE(function ()
                 arm_learn(m, shot.ctx, shot.arm, shot.n, true, weight)
                 dyn_observe(m, shot, true)
                 if shot.zone then zone_learn(m, true) end
+                if shot.src == "feet" and shot.cc and event.hitgroup == 1 then
+                    m.feet = m.feet or {}
+                    feet_learn(m.feet, shot.cc, true)
+                    feet_learn(resolver.feet_global, shot.cc, true)
+                end
                 if shot.ctx:sub(1, 1) == "d" and event.hitgroup == 1 then table_learn(m, shot.tkey, shot.value, true) end
                 local hg = event.hitgroup
                 local where = hg == 1 and "head" or (hg == 8 and "neck" or ((hg == 4 or hg == 5 or hg == 6 or hg == 7) and "limb" or "body"))
@@ -2625,6 +2676,7 @@ LPH_NO_VIRTUALIZE(function ()
                 resolver.global, resolver.gtables = {}, {}
                 resolver.dyn_global = { hit = { n = 0, f = 0 }, miss = { n = 0, f = 0 } }
                 resolver.zone_global = { s = 0, f = 0 }
+                resolver.feet_global = {}
             end
 
             -- keep what was learned, forget per-round punishments
@@ -2632,6 +2684,7 @@ LPH_NO_VIRTUALIZE(function ()
                 for _, m in pairs(resolver.memory) do
                     m.lc_misses_round, m.post_hit, m.def_misses_round, m.streak = 0, false, 0, 0
                     m.learn_time = {}
+                    for _, d in pairs(m.dyn or {}) do d.prev = nil end
                 end
                 for _, d in pairs(resolver.database) do
                     d.consecutive_misses, d.def_until, d.lc_until, d.last_origin = 0, 0, 0, nil
@@ -4705,7 +4758,7 @@ LPH_NO_VIRTUALIZE(function ()
             if reason == nil or reason == "native" or reason == "jitter native" or reason == "native warmup" or reason == "defensive native" then return "native" end
             if reason == "jitter" or reason == "jitter low" then return "jitter" end
             if reason == "defensive hold" then return "defensive" end
-            if reason == "freestand" or reason == "pose" or reason == "feet model" then return "desync" end
+            if reason == "freestand" or reason == "pose" or reason == "feet model" or reason == "flip pattern" or reason == "desync" then return "desync" end
             if reason:sub(1, 3) == "db " then return "desync" end
             if reason:sub(1, 6) == "brute " then return "brute" end
             return reason

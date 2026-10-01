@@ -44,7 +44,10 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - Three learned contexts (multi-armed bandit, Beta scoring, per player + session-wide prior):
   `s|<stance>` static desync, `j|ground/air` jitter, `d|s` / `d|j` defensive (only while the target shifts tickbase).
 - STATIC_ARMS: fs/opp full, fs/opp half, zero, `db hit` (last angle that hit), `pose`/`pose inv` (networked body yaw pose param, only a hint:
-  the arms decide whether it is real), fs/opp low (~14 deg). JITTER_ARMS: cur/next +/-, low variants, zero. DEF_ARMS: hold, hold half, hold flip, zero, fresh.
+  the arms decide whether it is real), fs/opp low (~14 deg), `flip pattern` (side tracking, below). JITTER_ARMS: cur/next +/-, low variants, zero.
+  DEF_ARMS: see Defensive below.
+- Every applied override is tagged with the source of its arm (`data.used_src`: feet / pose / dyn / table ...) and the choke class of the record
+  (`choke_class`: n = 0-1, m = 2-5, h = 6+ ticks); the history record and the shot carry both (`src`, `cc`), so a shot is credited to the right thing.
 - Side tracking (static ctx, `dyn_*`, arm `flip pattern`): per player and stance it learns how often the target switches sides after a hit and after
   a miss (win-stay / lose-shift, anti bruteforce on shot / hit / miss, noise); the arms that only guess a side follow the predicted side (the prediction
   is turned down to 30% where the feet model has been hitting). Zone `s|<stance>|z`: the feet model says ~0, the `zero` arm is boosted by how often it
@@ -58,8 +61,7 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - Ping profile: `PROFILES.low` / `PROFILES.high` hold every tunable. Auto switches to high at the "High ping from" slider (default 35 ms,
   scoreboard ping), back 4 ms below it; menu can force Low / High. High = slower decay, bigger prior, hedged half angles,
   safe point / body aim one miss earlier, wider shift tolerance.
-- Defensive: while shifting the angle is not recomputed from the shifted updates (hold the last good value), learned in its own context,
-  safe point + body aim after a defensive miss or when the defensive arms keep failing.
+- Defensive: while shifting the angle is not recomputed from the shifted updates (hold the last good value), learned in its own context.
   Defensive arms (`DEF_ARMS`): hold / hold half / hold flip, zero, fresh, `feet` / `feet inv` (the feet model run on THIS record: the server
   animates the defensive angles too), open / other side, `learned` (angle table per kind and window phase, `table_*`). A defensive update is a
   tickbase shift, a pitch snap or a yaw flick (55+ deg outside the centre / spread of the normal records); the kind (plain / snap / flick /
@@ -76,7 +78,10 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
     (`fres_validate`: yaw AND pitch must match, only samples where the netvar is not ~0 count) before anything is trusted
   * every read goes through `ptr_ok`, a NULL entity never reaches the offset helpers, 25 errors switch the whole FFI part off
   * feet yaw model (`feet_update`): copy of the server's goal feet yaw logic on netvars (standing: feet turn to `m_flLowerBodyYawTarget`
-    at 100 deg/s, moving: follow the eye yaw, clamp to max body yaw); its body yaw feeds the `feet` / `feet inv` arms (static + jitter)
+    at 100 deg/s, moving: follow the eye yaw, clamp to max body yaw); its body yaw feeds the `feet` / `feet inv` arms (static + jitter + defensive)
+  * how much the feet arms are trusted is learned per choke class (`feet_rate` / `feet_learn` / `feet_base`, per player `m.feet` + session
+    `resolver.feet_global`): with heavy fakelag (choke 6+) the model misses the ticks the server animated, so it starts a bit lower there and
+    only a head hit / resolver miss of a shot whose arm came from the feet model moves it
   * polarity of the forced value (does +v turn into +body yaw?) is learned from the animstate (`fres.polarity`) and only biases the arms
   * "Animstate apply (experimental)" writes goal/current feet yaw; default OFF, only runs when the layout was verified (>= 40 informative
     samples) and re-checks the struct right before every write. "Telemetry" prints one line per second for the current threat.
