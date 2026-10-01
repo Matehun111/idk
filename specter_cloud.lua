@@ -11,8 +11,12 @@ do
         return
     end
 
+    -- gamesense has no `os` library: the loader and this gate read the clock the same way
     local _ts = _rg(_G, "_auth_ts") or 0
-    local _now = os.time()
+    local _now = (client and client.unix_time and client.unix_time())
+        or (os and os.time and os.time())
+        or (client and client.timestamp and math.floor(client.timestamp() / 1000))
+        or 0
     if _now - _ts > 30 or _ts > _now + 5 then
         if client and client.error_log then
             client.error_log("[Specter] Auth token expired. Reload the script.")

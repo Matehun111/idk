@@ -231,7 +231,8 @@ app.get('/script', async (req, res) => {
     const prefix = [
         `rawset(_G, "_auth_ok",        true)`,
         `rawset(_G, "_auth_alive",      true)`,
-        `rawset(_G, "_auth_ts",         os.time())`,
+        // gamesense has no `os` library; this must read the clock exactly like the auth gate in the script does
+        `rawset(_G, "_auth_ts",         (client and client.unix_time and client.unix_time()) or (os and os.time and os.time()) or (client and client.timestamp and math.floor(client.timestamp() / 1000)) or 0)`,
         `rawset(_G, "_auth_ticket",     ${JSON.stringify(ticket)})`,
         `rawset(_G, "_auth_ticket_exp", ${license.last_ticket_exp})`,
         `rawset(_G, "_auth_nonce",      ${JSON.stringify(nonce)})`,

@@ -138,7 +138,7 @@ local function load_from_server(key, hwid, on_plan)
             end
 
             info("Downloaded "..#body2.." bytes, starting...")
-            local fn, lerr = (rawget(_G,"load") or load)(body2, "@specter_cloud")
+            local fn, lerr = (rawget(_G,"loadstring") or rawget(_G,"load") or load)(body2, "@specter_cloud")
             if not fn then
                 set_status(255,60,60, "Script load error.")
                 err("Load error: "..tostring(lerr))
