@@ -17,6 +17,7 @@ ENV VARS (set in Discord bot host or .env):
 import os
 import json
 import base64
+import asyncio
 import aiohttp
 import discord
 from discord import app_commands
@@ -51,6 +52,65 @@ PLAN_TO_ROLE = {
     "nightly":  "Nightly",
     "beta":     "Beta",
 }
+
+# ── Prices (edit these to match your pricing) ────────────────────────
+SPECTER_PRICES = {
+    "beta":    {"monthly": "$8",  "lifetime": "$40"},
+    "nightly": {"monthly": "$15", "lifetime": "$75"},
+    "specter": {"monthly": "$25", "lifetime": "$120"},
+}
+PAYMENT_METHODS = ["Crypto", "PayPal", "Revolut", "Other"]
+LOGO_URL = os.getenv("SPECTER_LOGO_URL", "")
+BUY_CONTACT = os.getenv("BUY_CONTACT", "@owner")
+
+# ── Channel structure ────────────────────────────────────────────────
+CHANNEL_STRUCTURE = [
+    {
+        "category": "⭐ Announcements",
+        "channels": [
+            {"name": "news",    "type": "text", "readonly": True, "emoji": "\U0001f4e2", "topic": "Latest Specter news"},
+            {"name": "updates", "type": "text", "readonly": True, "emoji": "\U0001f4dc", "topic": "Version updates and changelogs"},
+            {"name": "rules",   "type": "text", "readonly": True, "emoji": "\U0001f30d", "topic": "Server rules"},
+        ],
+    },
+    {
+        "category": "⭐ Purchase • Support",
+        "channels": [
+            {"name": "prices",         "type": "text", "readonly": True, "emoji": "\U0001f4b2", "topic": "Specter pricing and plans"},
+            {"name": "support-ticket", "type": "text", "access": "member", "emoji": "\U0001f3ab", "topic": "Create a support ticket"},
+            {"name": "how-to-use",     "type": "text", "readonly": True, "emoji": "\U0001f4d5", "topic": "How to set up and use Specter"},
+            {"name": "media-deal",     "type": "text", "access": "member", "emoji": "✨", "topic": "Media deals and promotions"},
+        ],
+    },
+    {
+        "category": "◉ Communication",
+        "channels": [
+            {"name": "chat",  "type": "text", "access": "member", "emoji": "\U0001f4ac", "topic": "General chat"},
+            {"name": "media", "type": "text", "access": "member", "emoji": "\U0001f4f8", "topic": "Screenshots, clips, media"},
+        ],
+    },
+    {
+        "category": "◉ Presentations",
+        "channels": [
+            {"name": "intro", "type": "text", "access": "member", "emoji": "\U0001f465", "topic": "Introduce yourself"},
+        ],
+    },
+    {
+        "category": "⭐ Specter·Gs",
+        "channels": [
+            {"name": "reviews",     "type": "forum", "access": "customer", "emoji": "\U0001f49c", "topic": "Leave a review"},
+            {"name": "suggestions", "type": "forum", "access": "customer", "emoji": "\U0001f4a1", "topic": "Feature suggestions"},
+            {"name": "bug-reports", "type": "forum", "access": "customer", "emoji": "\U0001f534", "topic": "Report bugs"},
+        ],
+    },
+    {
+        "category": "⭐ Staff",
+        "channels": [
+            {"name": "staff", "type": "text", "access": "staff", "emoji": "\U0001f6e0️", "topic": "Staff discussion"},
+            {"name": "logs",  "type": "text", "access": "staff", "emoji": "\U0001f4cb", "topic": "Bot and audit logs"},
+        ],
+    },
+]
 
 # ── Bot setup ─────────────────────────────────────────────────────────
 
@@ -179,6 +239,115 @@ async def find_or_create_role(guild: discord.Guild, name: str) -> discord.Role |
         return None
 
 
+# ── Ticket system (persistent views) ────────────────────────────────
+
+class TicketCreateView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Create Ticket", style=discord.ButtonStyle.blurple,
+        custom_id="specter:ticket:create", emoji="\U0001f3ab",
+    )
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        guild  = interaction.guild
+        member = interaction.user
+        slug   = member.name.lower().replace(" ", "-")[:20]
+
+        existing = discord.utils.get(guild.text_channels, name=f"ticket-{slug}")
+        if existing:
+            await interaction.response.send_message(
+                f"You already have an open ticket: {existing.mention}", ephemeral=True)
+            return
+
+        staff_role = discord.utils.get(guild.roles, name="Staff")
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            member: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True, attach_files=True),
+            guild.me: discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True, manage_channels=True),
+        }
+        if staff_role:
+            overwrites[staff_role] = discord.PermissionOverwrite(
+                view_channel=True, send_messages=True, read_message_history=True)
+
+        category = discord.utils.get(guild.categories, name="Tickets")
+        if not category:
+            try:
+                category = await guild.create_category("Tickets", overwrites={
+                    guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                    guild.me: discord.PermissionOverwrite(view_channel=True, manage_channels=True),
+                })
+            except discord.Forbidden:
+                category = None
+
+        try:
+            channel = await guild.create_text_channel(
+                name=f"ticket-{slug}",
+                category=category,
+                overwrites=overwrites,
+                topic=f"Support ticket for {member.display_name}",
+                reason=f"Ticket by {member}",
+            )
+        except discord.Forbidden:
+            await interaction.response.send_message(
+                "Could not create ticket. Missing permissions.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title="\U0001f3ab Support Ticket",
+            description=(
+                f"Welcome {member.mention}!\n\n"
+                "Describe your issue and a staff member will help you.\n"
+                "Click **Close Ticket** when your issue is resolved."
+            ),
+            color=0x82C3FF,
+        )
+        embed.set_footer(text="Specter Support \U0001f319")
+        await channel.send(embed=embed, view=TicketCloseView())
+        await interaction.response.send_message(f"Ticket created: {channel.mention}", ephemeral=True)
+
+        await log_action(guild, discord.Embed(
+            title="Ticket Opened",
+            description=f"{member.mention} opened {channel.mention}",
+            color=0x82C3FF,
+        ))
+
+
+class TicketCloseView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Close Ticket", style=discord.ButtonStyle.danger,
+        custom_id="specter:ticket:close", emoji="\U0001f512",
+    )
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        channel = interaction.channel
+        if not channel.name.startswith("ticket-"):
+            await interaction.response.send_message("This is not a ticket channel.", ephemeral=True)
+            return
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="\U0001f512 Ticket Closing",
+                description="This ticket will be deleted in 5 seconds...",
+                color=0xFF6060,
+            )
+        )
+        await log_action(interaction.guild, discord.Embed(
+            title="Ticket Closed",
+            description=f"{interaction.user.mention} closed **{channel.name}**",
+            color=0xFF6060,
+        ))
+        await asyncio.sleep(5)
+        try:
+            await channel.delete(reason=f"Ticket closed by {interaction.user}")
+        except discord.Forbidden:
+            await channel.send("Could not delete channel. Please delete manually.")
+
+
 # ── Auto-role on join ─────────────────────────────────────────────────
 
 @client.event
@@ -264,9 +433,9 @@ async def setup_roles(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
-# ── /setup_channels — create plan-locked channels ────────────────────
+# ── /setup_channels — full server structure ──────────────────────────
 
-@tree.command(name="setup_channels", description="Create role-locked channels for each plan + general/support/staff")
+@tree.command(name="setup_channels", description="Create full server channel structure (categories + channels)")
 async def setup_channels(interaction: discord.Interaction):
     if not is_admin(interaction):
         await interaction.response.send_message("No permission.", ephemeral=True)
@@ -278,77 +447,92 @@ async def setup_channels(interaction: discord.Interaction):
     member_role   = await find_or_create_role(guild, "Member")
     customer_role = await find_or_create_role(guild, "Customer")
     staff_role    = await find_or_create_role(guild, "Staff")
-    plan_roles    = {}
-    for plan, rname in PLAN_TO_ROLE.items():
-        plan_roles[plan] = await find_or_create_role(guild, rname)
 
-    channels_spec = [
-        {
-            "name": "general",
-            "allow": [member_role],
-            "topic": "General chat for all members",
-        },
-        {
-            "name": "support",
-            "allow": [customer_role, staff_role],
-            "topic": "Customer support",
-        },
-        {
-            "name": "specter",
-            "allow": [plan_roles.get("specter"), staff_role],
-            "topic": "Specter users only",
-        },
-        {
-            "name": "beta",
-            "allow": [plan_roles.get("beta"), staff_role],
-            "topic": "Beta users only",
-        },
-        {
-            "name": "nightly",
-            "allow": [plan_roles.get("nightly"), staff_role],
-            "topic": "Nightly users only",
-        },
-        {
-            "name": "staff",
-            "allow": [staff_role],
-            "topic": "Staff only",
-        },
-    ]
+    access_map = {
+        "member":   [member_role],
+        "customer": [customer_role, staff_role],
+        "staff":    [staff_role],
+    }
 
     created = []
     existed = []
-    for spec in channels_spec:
-        if discord.utils.get(guild.text_channels, name=spec["name"]):
-            existed.append(f"#{spec['name']}")
-            continue
+    failed  = []
 
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        }
-        for role in spec["allow"]:
-            if role:
-                overwrites[role] = discord.PermissionOverwrite(
-                    view_channel=True,
-                    send_messages=True,
-                    read_message_history=True,
+    for section in CHANNEL_STRUCTURE:
+        cat_name = section["category"]
+        category = discord.utils.get(guild.categories, name=cat_name)
+        if not category:
+            try:
+                category = await guild.create_category(
+                    cat_name,
+                    reason=f"Setup by {interaction.user}",
                 )
+            except discord.Forbidden:
+                failed.append(f"Category: {cat_name}")
+                continue
 
-        try:
-            await guild.create_text_channel(
-                name=spec["name"],
-                topic=spec["topic"],
-                overwrites=overwrites,
-                reason=f"Setup by {interaction.user}",
-            )
-            created.append(f"#{spec['name']}")
-        except discord.Forbidden:
-            pass
+        for ch in section["channels"]:
+            ch_name = ch["name"]
+            ch_type = ch.get("type", "text")
+            existing = discord.utils.get(guild.channels, name=ch_name, category=category)
+            if existing:
+                existed.append(f"#{ch_name}")
+                continue
 
-    embed = discord.Embed(title="Channel Setup", color=0x60FF90)
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True, manage_channels=True,
+                    read_message_history=True),
+            }
+
+            if ch.get("readonly"):
+                if member_role:
+                    overwrites[member_role] = discord.PermissionOverwrite(
+                        view_channel=True, send_messages=False, read_message_history=True)
+                if staff_role:
+                    overwrites[staff_role] = discord.PermissionOverwrite(
+                        view_channel=True, send_messages=True, read_message_history=True)
+            elif ch.get("access") in access_map:
+                for role in access_map[ch["access"]]:
+                    if role:
+                        overwrites[role] = discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True,
+                            read_message_history=True, attach_files=True)
+            else:
+                if member_role:
+                    overwrites[member_role] = discord.PermissionOverwrite(
+                        view_channel=True, send_messages=True, read_message_history=True)
+
+            try:
+                if ch_type == "forum":
+                    await guild.create_forum(
+                        name=ch_name,
+                        topic=ch.get("topic", ""),
+                        category=category,
+                        overwrites=overwrites,
+                        reason=f"Setup by {interaction.user}",
+                    )
+                else:
+                    await guild.create_text_channel(
+                        name=ch_name,
+                        topic=ch.get("topic", ""),
+                        category=category,
+                        overwrites=overwrites,
+                        reason=f"Setup by {interaction.user}",
+                    )
+                created.append(f"#{ch_name}")
+            except discord.Forbidden:
+                failed.append(f"#{ch_name}")
+
+    embed = discord.Embed(title="\U0001f319 Channel Setup Complete", color=0x82C3FF)
     if created:
         embed.add_field(name="Created", value="\n".join(created), inline=False)
     if existed:
         embed.add_field(name="Already exist", value="\n".join(existed), inline=False)
+    if failed:
+        embed.add_field(name="Failed (perms)", value="\n".join(failed), inline=False)
+    embed.set_footer(text="Use /setup_tickets in #support-ticket, /post_prices in #prices, /post_rules in #rules")
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 
@@ -769,10 +953,444 @@ async def redeem(interaction: discord.Interaction, key: str):
     await log_action(guild, log_embed)
 
 
+# ── /setup_tickets — post ticket panel ───────────────────────────────
+
+@tree.command(name="setup_tickets", description="Post the ticket creation panel in the current channel")
+async def setup_tickets(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="\U0001f3ab Specter Support",
+        description=(
+            "Need help? Click the button below to create a private support ticket.\n\n"
+            "A staff member will assist you as soon as possible.\n\n"
+            "**Before opening a ticket:**\n"
+            "• Check #how-to-use for common questions\n"
+            "• Make sure your key is valid\n"
+            "• Describe your issue clearly"
+        ),
+        color=0x82C3FF,
+    )
+    embed.set_footer(text="Specter \U0001f319")
+    if LOGO_URL:
+        embed.set_thumbnail(url=LOGO_URL)
+
+    await interaction.response.send_message("Ticket panel posted!", ephemeral=True)
+    await interaction.channel.send(embed=embed, view=TicketCreateView())
+
+
+# ── /close_ticket — manually close a ticket ──────────────────────────
+
+@tree.command(name="close_ticket", description="Close the current ticket channel")
+async def close_ticket(interaction: discord.Interaction):
+    channel = interaction.channel
+    if not channel.name.startswith("ticket-"):
+        await interaction.response.send_message("This is not a ticket channel.", ephemeral=True)
+        return
+
+    is_staff = is_admin(interaction) or discord.utils.get(interaction.user.roles, name="Staff")
+    is_owner = channel.name == f"ticket-{interaction.user.name.lower().replace(' ', '-')[:20]}"
+    if not is_staff and not is_owner:
+        await interaction.response.send_message("Only staff or the ticket owner can close this.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        embed=discord.Embed(
+            title="\U0001f512 Ticket Closing",
+            description="This ticket will be deleted in 5 seconds...",
+            color=0xFF6060,
+        )
+    )
+    await log_action(interaction.guild, discord.Embed(
+        title="Ticket Closed",
+        description=f"{interaction.user.mention} closed **{channel.name}**",
+        color=0xFF6060,
+    ))
+    await asyncio.sleep(5)
+    try:
+        await channel.delete(reason=f"Ticket closed by {interaction.user}")
+    except discord.Forbidden:
+        await channel.send("Could not delete channel. Please delete manually.")
+
+
+# ── /post_prices — post prices embed ─────────────────────────────────
+
+@tree.command(name="post_prices", description="Post the Specter pricing embed in the current channel")
+async def post_prices(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    embed = discord.Embed(title="Prices", color=0x82C3FF)
+
+    gs_lines = []
+    for plan_name in ["beta", "nightly", "specter"]:
+        p = SPECTER_PRICES.get(plan_name, {})
+        gs_lines.append(f"*{plan_name} version*")
+        if p.get("monthly"):
+            gs_lines.append(f"○ `1 month` — {p['monthly']}")
+        if p.get("lifetime"):
+            gs_lines.append(f"○ `lifetime` — {p['lifetime']}")
+        gs_lines.append("")
+
+    embed.add_field(
+        name="\U0001f319 Specter for GS",
+        value="\n".join(gs_lines),
+        inline=False,
+    )
+
+    pay_lines = [f"○ {m}" for m in PAYMENT_METHODS]
+    if BUY_CONTACT:
+        pay_lines.append(f"○ Tag to buy: **{BUY_CONTACT}**")
+    embed.add_field(
+        name="Payment Methods",
+        value="\n".join(pay_lines),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="\U0001f319 Specter Info",
+        value=(
+            "• *Versions* — `beta` | `nightly` | `specter`\n"
+            "• *Status* — fully updated for 2026\n"
+            "• *Features* — ragebot, resolver, anti-aim, builder, visuals\n"
+            "• *Platform* — gamesense"
+        ),
+        inline=False,
+    )
+
+    embed.add_field(
+        name="Still Have Questions?",
+        value=(
+            "• Open a ticket in #support-ticket\n"
+            "• Check #how-to-use for setup guide"
+        ),
+        inline=False,
+    )
+
+    if LOGO_URL:
+        embed.set_image(url=LOGO_URL)
+    embed.set_footer(text="Specter \U0001f319 • gamesense lua")
+
+    await interaction.response.send_message("Prices posted!", ephemeral=True)
+    await interaction.channel.send(embed=embed)
+
+
+# ── /post_rules — post server rules ──────────────────────────────────
+
+@tree.command(name="post_rules", description="Post server rules embed in the current channel")
+async def post_rules(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="\U0001f30d Rules",
+        color=0x82C3FF,
+    )
+    embed.description = (
+        "**1.** Be respectful to all members.\n"
+        "**2.** No spamming or self-promotion.\n"
+        "**3.** Do not share or resell license keys.\n"
+        "**4.** Do not share the script or any part of it.\n"
+        "**5.** Use #support-ticket for help, don't DM staff.\n"
+        "**6.** No NSFW, illegal content, or doxxing.\n"
+        "**7.** English / Hungarian only.\n"
+        "**8.** Staff decisions are final.\n\n"
+        "*Breaking any rule may result in a mute, kick, or ban.*"
+    )
+    if LOGO_URL:
+        embed.set_thumbnail(url=LOGO_URL)
+    embed.set_footer(text="Specter \U0001f319")
+
+    await interaction.response.send_message("Rules posted!", ephemeral=True)
+    await interaction.channel.send(embed=embed)
+
+
+# ── /post_howto — post how-to-use guide ──────────────────────────────
+
+@tree.command(name="post_howto", description="Post the how-to-use guide in the current channel")
+async def post_howto(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="\U0001f4d5 How to Use Specter",
+        color=0x82C3FF,
+    )
+    embed.add_field(
+        name="Step 1 — Get Your Key",
+        value=(
+            "Purchase a plan in #prices or from staff.\n"
+            "Use `/redeem <key>` in Discord to get your role."
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Step 2 — Load the Script",
+        value=(
+            "1. Open **gamesense** (CS2)\n"
+            "2. Go to **Lua** tab and load the **Specter Loader**\n"
+            "3. Navigate to **AA > Anti-aimbot angles**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Step 3 — Register / Login",
+        value=(
+            "1. Paste your **license key** in the key field\n"
+            "2. Choose a **username** and **password**\n"
+            "3. Click **Register** (first time) or **Login**\n"
+            "4. Your HWID locks on first activation"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Tier Features",
+        value=(
+            "```\n"
+            "Plan       Resolver  Ragebot+  Tuning  Builder  AA Stealer\n"
+            "specter    ✔         ✔         ✔       ✔        ✘\n"
+            "nightly    ✘         ✔         ✔       ✔        ✘\n"
+            "beta       ✘         ✘         ✘       ✘        ✘\n"
+            "```"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="Trouble?",
+        value="Open a ticket in #support-ticket and we'll help.",
+        inline=False,
+    )
+    if LOGO_URL:
+        embed.set_thumbnail(url=LOGO_URL)
+    embed.set_footer(text="Specter \U0001f319")
+
+    await interaction.response.send_message("How-to guide posted!", ephemeral=True)
+    await interaction.channel.send(embed=embed)
+
+
+# ── /setup_server — one-click full server setup ──────────────────────
+
+@tree.command(name="setup_server", description="Full server setup: roles + channels + panels (all-in-one)")
+async def setup_server(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    log_lines = []
+
+    # 1. Create roles
+    for name, cfg in ROLE_CONFIG.items():
+        existing = discord.utils.get(guild.roles, name=name)
+        if existing:
+            continue
+        try:
+            await guild.create_role(
+                name=name,
+                color=discord.Color(cfg["color"]),
+                hoist=cfg["hoist"],
+                mentionable=False,
+                reason=f"Server setup by {interaction.user}",
+            )
+            log_lines.append(f"✅ Role **{name}** created")
+        except discord.Forbidden:
+            log_lines.append(f"❌ Role **{name}** failed")
+
+    member_role   = await find_or_create_role(guild, "Member")
+    customer_role = await find_or_create_role(guild, "Customer")
+    staff_role    = await find_or_create_role(guild, "Staff")
+    access_map = {
+        "member":   [member_role],
+        "customer": [customer_role, staff_role],
+        "staff":    [staff_role],
+    }
+
+    # 2. Create channels
+    prices_ch = None
+    rules_ch  = None
+    howto_ch  = None
+    ticket_ch = None
+
+    for section in CHANNEL_STRUCTURE:
+        cat_name = section["category"]
+        category = discord.utils.get(guild.categories, name=cat_name)
+        if not category:
+            try:
+                category = await guild.create_category(cat_name, reason=f"Setup by {interaction.user}")
+            except discord.Forbidden:
+                log_lines.append(f"❌ Category **{cat_name}** failed")
+                continue
+
+        for ch in section["channels"]:
+            ch_name = ch["name"]
+            ch_type = ch.get("type", "text")
+            existing = discord.utils.get(guild.channels, name=ch_name, category=category)
+            if existing:
+                if ch_name == "prices":     prices_ch = existing
+                if ch_name == "rules":      rules_ch  = existing
+                if ch_name == "how-to-use": howto_ch  = existing
+                if ch_name == "support-ticket": ticket_ch = existing
+                continue
+
+            overwrites = {
+                guild.default_role: discord.PermissionOverwrite(view_channel=False),
+                guild.me: discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True,
+                    manage_channels=True, read_message_history=True),
+            }
+            if ch.get("readonly"):
+                if member_role:
+                    overwrites[member_role] = discord.PermissionOverwrite(
+                        view_channel=True, send_messages=False, read_message_history=True)
+                if staff_role:
+                    overwrites[staff_role] = discord.PermissionOverwrite(
+                        view_channel=True, send_messages=True, read_message_history=True)
+            elif ch.get("access") in access_map:
+                for role in access_map[ch["access"]]:
+                    if role:
+                        overwrites[role] = discord.PermissionOverwrite(
+                            view_channel=True, send_messages=True,
+                            read_message_history=True, attach_files=True)
+            else:
+                if member_role:
+                    overwrites[member_role] = discord.PermissionOverwrite(
+                        view_channel=True, send_messages=True, read_message_history=True)
+
+            try:
+                if ch_type == "forum":
+                    created_ch = await guild.create_forum(
+                        name=ch_name, topic=ch.get("topic", ""),
+                        category=category, overwrites=overwrites,
+                        reason=f"Setup by {interaction.user}")
+                else:
+                    created_ch = await guild.create_text_channel(
+                        name=ch_name, topic=ch.get("topic", ""),
+                        category=category, overwrites=overwrites,
+                        reason=f"Setup by {interaction.user}")
+                log_lines.append(f"✅ #{ch_name}")
+                if ch_name == "prices":     prices_ch = created_ch
+                if ch_name == "rules":      rules_ch  = created_ch
+                if ch_name == "how-to-use": howto_ch  = created_ch
+                if ch_name == "support-ticket": ticket_ch = created_ch
+            except discord.Forbidden:
+                log_lines.append(f"❌ #{ch_name}")
+
+    # 3. Post embeds in the right channels
+    posted = []
+
+    if prices_ch and isinstance(prices_ch, discord.TextChannel):
+        gs_lines = []
+        for plan_name in ["beta", "nightly", "specter"]:
+            p = SPECTER_PRICES.get(plan_name, {})
+            gs_lines.append(f"*{plan_name} version*")
+            if p.get("monthly"):
+                gs_lines.append(f"○ `1 month` — {p['monthly']}")
+            if p.get("lifetime"):
+                gs_lines.append(f"○ `lifetime` — {p['lifetime']}")
+            gs_lines.append("")
+        e = discord.Embed(title="Prices", color=0x82C3FF)
+        e.add_field(name="\U0001f319 Specter for GS", value="\n".join(gs_lines), inline=False)
+        pay = [f"○ {m}" for m in PAYMENT_METHODS]
+        if BUY_CONTACT:
+            pay.append(f"○ Tag to buy: **{BUY_CONTACT}**")
+        e.add_field(name="Payment Methods", value="\n".join(pay), inline=False)
+        e.add_field(name="\U0001f319 Specter Info", value=(
+            "• *Versions* — `beta` | `nightly` | `specter`\n"
+            "• *Status* — fully updated for 2026\n"
+            "• *Platform* — gamesense"
+        ), inline=False)
+        if LOGO_URL:
+            e.set_image(url=LOGO_URL)
+        e.set_footer(text="Specter \U0001f319 • gamesense lua")
+        await prices_ch.send(embed=e)
+        posted.append("#prices")
+
+    if rules_ch and isinstance(rules_ch, discord.TextChannel):
+        e = discord.Embed(title="\U0001f30d Rules", color=0x82C3FF)
+        e.description = (
+            "**1.** Be respectful to all members.\n"
+            "**2.** No spamming or self-promotion.\n"
+            "**3.** Do not share or resell license keys.\n"
+            "**4.** Do not share the script or any part of it.\n"
+            "**5.** Use #support-ticket for help, don't DM staff.\n"
+            "**6.** No NSFW, illegal content, or doxxing.\n"
+            "**7.** English / Hungarian only.\n"
+            "**8.** Staff decisions are final.\n\n"
+            "*Breaking any rule may result in a mute, kick, or ban.*"
+        )
+        e.set_footer(text="Specter \U0001f319")
+        await rules_ch.send(embed=e)
+        posted.append("#rules")
+
+    if howto_ch and isinstance(howto_ch, discord.TextChannel):
+        e = discord.Embed(title="\U0001f4d5 How to Use Specter", color=0x82C3FF)
+        e.add_field(name="Step 1 — Get Your Key", value=(
+            "Purchase a plan in #prices or from staff.\n"
+            "Use `/redeem <key>` to get your role."
+        ), inline=False)
+        e.add_field(name="Step 2 — Load the Script", value=(
+            "1. Open **gamesense** (CS2)\n"
+            "2. Go to **Lua** tab and load the **Specter Loader**\n"
+            "3. Navigate to **AA > Anti-aimbot angles**"
+        ), inline=False)
+        e.add_field(name="Step 3 — Register / Login", value=(
+            "1. Paste your **license key**\n"
+            "2. Choose a **username** and **password**\n"
+            "3. Click **Register** (first time) or **Login**\n"
+            "4. Your HWID locks on first activation"
+        ), inline=False)
+        e.add_field(name="Tier Features", value=(
+            "```\n"
+            "Plan       Resolver  Ragebot+  Tuning  Builder\n"
+            "specter    ✔         ✔         ✔       ✔\n"
+            "nightly    ✘         ✔         ✔       ✔\n"
+            "beta       ✘         ✘         ✘       ✘\n"
+            "```"
+        ), inline=False)
+        e.set_footer(text="Specter \U0001f319")
+        await howto_ch.send(embed=e)
+        posted.append("#how-to-use")
+
+    if ticket_ch and isinstance(ticket_ch, discord.TextChannel):
+        e = discord.Embed(
+            title="\U0001f3ab Specter Support",
+            description=(
+                "Need help? Click the button below to create a private support ticket.\n\n"
+                "A staff member will assist you as soon as possible.\n\n"
+                "**Before opening a ticket:**\n"
+                "• Check #how-to-use for common questions\n"
+                "• Make sure your key is valid\n"
+                "• Describe your issue clearly"
+            ),
+            color=0x82C3FF,
+        )
+        e.set_footer(text="Specter \U0001f319")
+        if LOGO_URL:
+            e.set_thumbnail(url=LOGO_URL)
+        await ticket_ch.send(embed=e, view=TicketCreateView())
+        posted.append("#support-ticket")
+
+    if posted:
+        log_lines.append(f"\U0001f4e8 Embeds posted: {', '.join(posted)}")
+
+    embed = discord.Embed(title="\U0001f319 Server Setup Complete", color=0x60FF90)
+    embed.description = "\n".join(log_lines) if log_lines else "Everything already existed."
+    embed.set_footer(text="Drag roles in Server Settings > Roles to set hierarchy")
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 # ── Events ────────────────────────────────────────────────────────────
 
 @client.event
 async def on_ready():
+    client.add_view(TicketCreateView())
+    client.add_view(TicketCloseView())
     await tree.sync()
     print(f"Bot online: {client.user}  |  Guilds: {len(client.guilds)}")
     print(f"API: {API_URL}")
