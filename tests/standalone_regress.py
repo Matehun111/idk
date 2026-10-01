@@ -21,10 +21,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 SRC = open(os.path.join(ROOT, "specter_resolver.lua"), encoding="utf-8").read()
 
+COVERAGE = "--coverage" in sys.argv     # also report the lines of the script that no check executed (slow: no JIT)
+
 rt = L.LuaRuntime(unpack_returned_tuples=True)
 H = rt.eval("function(src) return load(src)() end")(open(os.path.join(HERE, "standalone", "harness.lua")).read())
 fails = []
 t0 = time.time()
+SEEN = None
+if COVERAGE:
+    SEEN = rt.eval('''
+    function()
+      local seen = {}
+      jit.off()
+      debug.sethook(function(ev, line)
+        local info = debug.getinfo(2, "S")
+        if info and info.source == "@specter_resolver" then seen[line] = true end
+      end, "l")
+      return seen
+    end''')()
 
 
 def check(cond, msg):
@@ -53,6 +67,44 @@ def lua_list(items):
 def errors_of(stats):
     return stats.errors + len(list(stats.ctl.errors.values()))
 
+
+# ── 0. static: the script touches nothing but the globals gamesense has (also in code no test executes) ────────────
+print("== globals used by the script (bytecode scan, all functions)")
+SCAN = rt.eval('''
+function(src)
+  local ju = require("jit.util")
+  local f = assert(loadstring(src, "@x"))
+  local names, seen = {}, {}
+  local function walk(fn)
+    if seen[fn] then return end
+    seen[fn] = true
+    local pc = 1
+    while true do
+      local ins = ju.funcbc(fn, pc)
+      if not ins then break end
+      local op = ins % 256
+      local d = math.floor(ins / 65536)
+      if op == 54 or op == 55 then          -- GGET / GSET
+        local k = ju.funck(fn, -d - 1)
+        names[k] = (names[k] or "") .. (op == 55 and "w" or "r")
+      elseif op == 51 then                  -- FNEW: a child function
+        walk(ju.funck(fn, -d - 1))
+      end
+      pc = pc + 1
+    end
+  end
+  walk(f)
+  local out = {}
+  for k, v in pairs(names) do out[#out + 1] = k .. ":" .. (v:find("w") and "w" or "r") end
+  table.sort(out)
+  return table.concat(out, " ")
+end''')
+ALLOWED = set("""assert error ipairs pairs next pcall xpcall select tonumber tostring type unpack rawget rawset rawequal setmetatable
+getmetatable math string table bit collectgarbage require client entity globals ui plist renderer database vtable_bind _G""".split())
+for item in SCAN(SRC).split():
+    name, mode = item.rsplit(":", 1)
+    check(name in ALLOWED, f"unexpected global '{name}' ({'written' if mode == 'w' else 'read'}) in specter_resolver.lua")
+    check(mode == "r", f"global '{name}' is written: the script must not leak globals (scripts share one table in gamesense)")
 
 # ── 1. hit rate per anti-aim, two pings, four seeds ─────────────────────────────────────────────────────────────
 # (name, driver options, run options, minimum late hit rate at 20 ms, at 80 ms)
@@ -363,6 +415,63 @@ JUMP = rt.eval("""function(k, ctl, S)
 end""")
 s = run("choke_static", driver_opts=dict(choke=6), ticks=3000, on_tick=JUMP)
 check(errors_of(s) == 0, "no errors around a reset of the targets")
+
+# ── 13. less common paths ────────────────────────────────────────────────────────────────────────────────────────
+print("== tickbase shift by sim time, dormant / dead targets, shots without ids, lag compensation flags")
+DEF_ALL = rt.eval("function(ctl) ctl.set_options({'Jitter fix','Defensive fix','Defensive snap fix','LC: body aim','Safe point on misses','Body aim on misses','Native fallback','Log'}) end")
+vals = [run("choke_defensive", driver_opts=dict(choke=6, back=14, seed=7 + sd * 13), ticks=4000, ping=30, seed=sd, configure=DEF_ALL) for sd in (1, 2, 3)]
+check(all(errors_of(v) == 0 for v in vals), "sim time shifts: errors")
+m = sum(v.late_rate for v in vals) / len(vals)
+print(f"  choke_defensive, 14 tick sim time shifts: {m:.2f}")
+check(m >= 0.85, f"defensive shifts detected by sim time: {m:.2f}")
+check("d|s" in [k for k in vals[0].S.R["global"].keys()], "the defensive context was used (d|s)")
+
+GONE = rt.eval("function(tick, idx) return tick > 1200 end")
+for name, key in (("dormant", "dormant_fn"), ("dead", "dead_fn")):
+    s = run("choke_static", driver_opts=dict(choke=6), ticks=1500, **{key: GONE})
+    check(errors_of(s) == 0, f"{name} target: errors")
+    check(s.ctl.plist[2]["Force body yaw"] is False, f"a {name} target is released from the player list")
+    check(len(list(s.S.R.forced.keys())) == 0, f"a {name} target is not kept forced")
+
+s = run("choke_static", driver_opts=dict(choke=6), ticks=4000, no_ids=True)
+check(errors_of(s) == 0 and s.late_rate >= 0.85, f"events without ids: errors {errors_of(s)}, late rate {s.late_rate:.2f}")
+
+TELE = rt.eval("function(k) if k % 55 == 0 then return { teleported = true } end end")
+s = run("choke_static", driver_opts=dict(choke=6), ticks=3000, fire_extra=TELE, configure=DEF_ALL)
+check(errors_of(s) == 0, "teleported shots: errors")
+
+s = run("choke_static", driver_opts=dict(choke=6), ticks=1500, configure=rt.eval("function(ctl) ctl.set_options({'ESP flags'}) end"))
+for flag in ("R", "JIT", "LC", "DEF"):
+    fn = s.ctl.esp[flag]
+    ok, res = True, None
+    try:
+        res = fn(2)
+    except Exception as e:      # noqa
+        ok = False
+    check(ok and res in (True, False, None), f"esp flag {flag} callable")
+
+s = run("choke_static", driver_opts=dict(choke=6), ticks=800)
+s.S.reset_all(True)
+check(len(list(s.S.R.memory.keys())) == 0 and len(list(s.S.R["global"].keys())) == 0, "reset_all(true) forgets everything")
+
+if COVERAGE:
+    rt.eval("function() debug.sethook() end")()
+    lines = SRC.split("\n")
+    skip = ("end", "else", "end)", "}", "},", "do", "then")
+    missing = [i for i, l in enumerate(lines, 1)
+               if l.strip() and not l.strip().startswith("--") and l.strip() not in skip
+               and not l.strip().startswith("local function ") and i not in SEEN]
+    code = sum(1 for l in lines if l.strip() and not l.strip().startswith("--"))
+    print(f"\n== coverage: {len(missing)} of {code} code lines never executed")
+    start = prev = None
+    for i in missing + [None]:
+        if start is None:
+            start = prev = i
+        elif i is not None and i == prev + 1:
+            prev = i
+        else:
+            print(f"  {start}-{prev}" if start != prev else f"  {start}", "|", lines[start - 1].strip()[:100])
+            start = prev = i
 
 print(f"\n{'ALL CHECKS PASSED' if not fails else str(len(fails)) + ' CHECK(S) FAILED'}  ({time.time() - t0:.0f}s)")
 sys.exit(1 if fails else 0)

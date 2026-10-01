@@ -998,7 +998,7 @@ local function update_player(idx, me)
     local data = init_player(idx)
     local tick = globals_tickcount()
     local sim = entity_get_prop(idx, "m_flSimulationTime")
-    if not sim or sim ~= sim or sim <= 0 or sim > 1e9 then return data end
+    if type(sim) ~= "number" or sim ~= sim or sim <= 0 or sim > 1e9 then return data end
     local st = tick_of(sim)
 
     -- a real tickbase shift is at most ~17 ticks; anything bigger is a map change / reconnect

@@ -170,7 +170,7 @@ H.drivers = {
         d.sent = function(k) return k % (c + 1) == c end
         d.shift = function(k)
             local ph = k % 48
-            if ph >= 36 and ph < 42 and k % (c + 1) == c then return { back = 4, theta = 0 } end
+            if ph >= 36 and ph < 42 and k % (c + 1) == c then return { back = o.back or 4, theta = 0 } end
             return nil
         end
         return d
@@ -311,8 +311,8 @@ function H.run(script_src, opts)
     local entity = {}
     entity.get_local_player = function() return 1 end
     entity.get_players = function() local l = {}; for _, e in ipairs(enemies) do l[#l + 1] = e.idx end; return l end
-    entity.is_alive = function() return true end
-    entity.is_dormant = function() return false end
+    entity.is_alive = function(idx) return not (opts.dead_fn and opts.dead_fn(ctl.tick, idx)) end
+    entity.is_dormant = function(idx) return opts.dormant_fn ~= nil and opts.dormant_fn(ctl.tick, idx) or false end
     entity.get_player_resource = function() return 99 end
     entity.hitbox_position = function() return 500, 0, 64 end
     entity.get_player_name = function(idx) return by_idx[idx] and by_idx[idx].name or "me" end
@@ -491,10 +491,10 @@ function H.run(script_src, opts)
                 if p.kind == "impact" then
                     if e.driver.on_shot then e.driver.on_shot(k) end
                 elseif p.kind == "hit" then
-                    okc, errc = pcall(fire, "aim_hit", { id = p.id, target = p.target, damage = 100, hitgroup = 1 })
+                    okc, errc = pcall(fire, "aim_hit", { id = (not opts.no_ids) and p.id or nil, target = p.target, damage = 100, hitgroup = 1 })
                     if e.driver.on_hit then e.driver.on_hit(k) end
                 else
-                    okc, errc = pcall(fire, "aim_miss", { id = p.id, target = p.target, reason = p.reason })
+                    okc, errc = pcall(fire, "aim_miss", { id = (not opts.no_ids) and p.id or nil, target = p.target, reason = p.reason })
                     if e.driver.on_miss then e.driver.on_miss(k) end
                 end
                 if not okc then stats.errors = stats.errors + 1; ctl.errors[#ctl.errors + 1] = "result: " .. tostring(errc) end
@@ -518,7 +518,10 @@ function H.run(script_src, opts)
                 shot_id = shot_id + 1
                 pending[#pending + 1] = { at = k + math.max(1, math.floor(ping_ticks / 2)), kind = "impact", target = e.idx }
                 local bt = math.max(0, e.max_st - r.st)
-                local okf, errf = pcall(fire, "aim_fire", { id = shot_id, target = e.idx, backtrack = bt, tick = k, hitgroup = 1, hit_chance = 80 })
+                local ev = { id = shot_id, target = e.idx, backtrack = bt, tick = k, hitgroup = 1, hit_chance = 80 }
+                if opts.no_ids then ev.id = nil end
+                if opts.fire_extra then for kk, vv in pairs(opts.fire_extra(k, e, r) or {}) do ev[kk] = vv end end
+                local okf, errf = pcall(fire, "aim_fire", ev)
                 if not okf then stats.errors = stats.errors + 1; ctl.errors[#ctl.errors + 1] = "aim_fire: " .. tostring(errf) end
                 stats.shots = stats.shots + 1
                 local late = k > warm
