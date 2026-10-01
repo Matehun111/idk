@@ -68,11 +68,14 @@ function parse_duration(dur) {
     return Date.now() + ms
 }
 
-function gen_key(plan, dur) {
-    const rnd = crypto.randomBytes(3).toString('hex').toUpperCase()
-    // normalize duration label
-    const dlabel = (!dur || dur.toLowerCase()==='lifetime') ? 'LIFE' : dur.toUpperCase()
-    return `ZEN-${plan.toUpperCase()}-${dlabel}-${rnd}`
+function gen_key() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+    const bytes = crypto.randomBytes(24)
+    let parts = ['','','','']
+    for (let i = 0; i < 24; i++) {
+        parts[Math.floor(i/6)] += chars[bytes[i] % chars.length]
+    }
+    return parts.join('-')
 }
 
 function sha256(text) {
@@ -114,7 +117,7 @@ app.post('/admin/create', async (req, res) => {
     let expires_at
     try { expires_at = parse_duration(duration || 'lifetime') }
     catch(e) { return res.status(400).json({ error: e.message }) }
-    const key = gen_key(plan, duration || 'lifetime')
+    const key = gen_key()
     const db  = await db_read()
     db[key] = {
         plan, expires_at, hwid: null, note: note||'',

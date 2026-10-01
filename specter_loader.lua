@@ -1,29 +1,19 @@
 -- ======================================================================
---  SPECTER | Cloud Loader  v1.0.0
+--  SPECTER | Cloud Loader  v2.0.0
 --  Auth: username + password + HWID (local gamesense database)
---  Key activation via Discord bot → keys listed in VALID_KEYS
+--  Keys synced automatically from GitHub (Discord bot manages them)
 --  Cloud script fetched from GitHub on successful auth
 -- ======================================================================
 
 local TIER       = "specter"
-local AUTH_VER   = 1
-local DB_KEYS    = "specter_keys_v1"
-local DB_USERS   = "specter_users_v1"
-local DB_SESSION = "specter_session_v1"
-
--- ── VALID KEYS ───────────────────────────────────────────────────────
--- Discord bot generates these; paste new ones below.
--- Format: ["KEY-STRING"] = { note = "owner/description" }
-local VALID_KEYS = {
-    ["SPEC-AAAA-0001"] = { note = "slot 1" },
-    ["SPEC-BBBB-0002"] = { note = "slot 2" },
-    ["SPEC-CCCC-0003"] = { note = "slot 3" },
-    ["SPEC-DDDD-0004"] = { note = "slot 4" },
-    ["SPEC-EEEE-0005"] = { note = "slot 5" },
-}
+local AUTH_VER   = 2
+local DB_KEYS    = "specter_keys_v2"
+local DB_USERS   = "specter_users_v2"
+local DB_SESSION = "specter_session_v2"
 
 -- ── LIBS ─────────────────────────────────────────────────────────────
 local http  = require "gamesense/http"
+local json  = require "json"
 local pui   = require "gamesense/pui"
 local _sf   = string.format
 local _bxor = bit.bxor
@@ -61,13 +51,45 @@ local function db_read(k)
 end
 local function db_write(k,v) pcall(database.write,k,v) end
 
+-- ── REMOTE KEYS (fetched from GitHub) ────────────────────────────────
+local VALID_KEYS   = {}
+local keys_loaded  = false
+local keys_loading = false
+
+local function fetch_keys(callback)
+    if keys_loading then return end
+    keys_loading = true
+    local url = LPH_ENCSTR("https://raw.githubusercontent.com/Matehun111/idk/main/specter_keys.json")
+    http.get(url, function(success, response)
+        keys_loading = false
+        if not success then
+            err("Failed to fetch keys.")
+            return
+        end
+        local body = type(response)=="table" and response.body or response
+        if not body or #body < 2 then
+            err("Empty key list.")
+            return
+        end
+        local ok, parsed = pcall(json.parse, body)
+        if not ok or type(parsed) ~= "table" then
+            err("Invalid key data.")
+            return
+        end
+        VALID_KEYS  = parsed
+        keys_loaded = true
+        info("Keys synced.")
+        if callback then callback() end
+    end)
+end
+
 -- ── AUTH STATE ───────────────────────────────────────────────────────
 local auth_ok   = false
 local auth_user = nil
 local auth_key  = nil
 
 -- ── STATUS ───────────────────────────────────────────────────────────
-local status_msg = "Enter key, then Register or Login."
+local status_msg = "Loading keys..."
 local status_r, status_g, status_b = 160,160,200
 
 local function set_status(r,g,b,msg)
@@ -109,7 +131,11 @@ local function key_ok(key)
     if saved and saved.hwid and saved.hwid ~= "" then
         return saved.hwid == hwid
     end
-    db[key] = { hwid=hwid, note=VALID_KEYS[key].note }
+    local note = ""
+    if type(VALID_KEYS[key]) == "table" then
+        note = VALID_KEYS[key].note or ""
+    end
+    db[key] = { hwid=hwid, note=note }
     db_write(DB_KEYS, db)
     return true
 end
@@ -120,6 +146,7 @@ local function do_register(key, name, pw)
     name = (name or ""):match("^%s*(.-)%s*$")
     pw   = (pw   or ""):match("^%s*(.-)%s*$")
 
+    if not keys_loaded then set_status(255,120,50,"Keys still loading, wait..."); return end
     if key  == "" then set_status(255,120,50,"Enter your license key."); return end
     if name == "" then set_status(255,120,50,"Enter a username."); return end
     if pw   == "" then set_status(255,120,50,"Enter a password."); return end
@@ -163,6 +190,7 @@ local function do_login(name, pw)
     name = (name or ""):match("^%s*(.-)%s*$")
     pw   = (pw   or ""):match("^%s*(.-)%s*$")
 
+    if not keys_loaded then set_status(255,120,50,"Keys still loading, wait..."); return end
     if name == "" then set_status(255,120,50,"Enter your username."); return end
     if pw   == "" then set_status(255,120,50,"Enter your password."); return end
 
@@ -188,6 +216,7 @@ end
 
 -- ── SESSION RESTORE ──────────────────────────────────────────────────
 local function try_restore()
+    if not keys_loaded then return false end
     local hwid = get_hwid()
     local sess = db_read(DB_SESSION)
     if not (sess.v==AUTH_VER and sess.user and sess.hwid==hwid) then return false end
@@ -205,13 +234,7 @@ local function try_restore()
     return true
 end
 
-try_restore()
-if auth_ok then
-    client.delay_call(0.5, load_cloud)
-end
-
 -- ── PUI MENU ─────────────────────────────────────────────────────────
-if not auth_ok then
 local grp_fl  = pui.group('AA','Fake lag')
 local grp_aa  = pui.group('AA','Anti-aimbot angles')
 local grp_oth = pui.group('AA','Other')
@@ -223,6 +246,7 @@ grp_fl:label(' ')
 
 local fl_user   = grp_fl:label('\f<dot>User:   \ac8c8c8ff—')
 local fl_status = grp_fl:label('\f<dot>Auth:   \aff6060ff✗ Not logged in')
+local fl_keys   = grp_fl:label('\f<dot>Keys:   \affc850ffLoading...')
 grp_fl:label(' ')
 grp_fl:label('\f<dot>\ac8c8c8ffHWID: (console: spec_hwid)')
 grp_fl:label('\f<dot>\ac8c8c8ffLogout: spec_logout')
@@ -238,13 +262,14 @@ grp_aa:label(' ')
 local btn_register = grp_aa:button('Register')
 local btn_login    = grp_aa:button('Login')
 local btn_logout   = grp_aa:button('Logout')
+local btn_refresh  = grp_aa:button('Refresh Keys')
 
 grp_aa:label(' ')
-local lbl_status = grp_aa:label('\f<dot>\ac8c8c8ffEnter key, then Register or Login.')
+local lbl_status = grp_aa:label('\f<dot>\affc850ffLoading keys...')
 
 grp_oth:label('\f<dot>How to use:')
-grp_oth:label('\f<dot>\ac8c8c8ff1. Enter your key')
-grp_oth:label('\f<dot>\ac8c8c8ff   (SPEC-XXXX-XXXX)')
+grp_oth:label('\f<dot>\ac8c8c8ff1. Get key from Discord')
+grp_oth:label('\f<dot>\ac8c8c8ff   (/redeem command)')
 grp_oth:label('\f<dot>\ac8c8c8ff2. Enter a username')
 grp_oth:label('\f<dot>\ac8c8c8ff3. Enter a password')
 grp_oth:label('\f<dot>\ac8c8c8ff4. Click Register')
@@ -269,6 +294,13 @@ btn_logout:set_callback(function()
     warn("Logged out.")
 end)
 
+btn_refresh:set_callback(function()
+    set_status(255,200,80,"Refreshing keys...")
+    fetch_keys(function()
+        set_status(100,255,160,"Keys refreshed!")
+    end)
+end)
+
 client.set_event_callback('paint_ui', function()
     lbl_status:set('\f<dot>\a'.._sf('%02x%02x%02xff',status_r,status_g,status_b)..status_msg)
     if auth_ok and auth_user then
@@ -278,12 +310,17 @@ client.set_event_callback('paint_ui', function()
         fl_user:set('\f<dot>User:   \ac8c8c8ff—')
         fl_status:set('\f<dot>Auth:   \aff6060ff✗ Not logged in')
     end
+    if keys_loaded then
+        local count = 0
+        for _ in pairs(VALID_KEYS) do count = count + 1 end
+        fl_keys:set('\f<dot>Keys:   \a60ff90ff'..count..' loaded')
+    else
+        fl_keys:set('\f<dot>Keys:   \affc850ffLoading...')
+    end
     pcall(function() btn_logout:set_enabled(auth_ok) end)
-    pcall(function() btn_login:set_enabled(not auth_ok) end)
-    pcall(function() btn_register:set_enabled(not auth_ok) end)
+    pcall(function() btn_login:set_enabled(not auth_ok and keys_loaded) end)
+    pcall(function() btn_register:set_enabled(not auth_ok and keys_loaded) end)
 end)
-
-end -- if not auth_ok
 
 -- ── CONSOLE COMMANDS ─────────────────────────────────────────────────
 client.set_event_callback("console_input", function(cmd)
@@ -293,7 +330,16 @@ client.set_event_callback("console_input", function(cmd)
         set_status(160,160,200,"Logged out."); warn("Logged out."); return true
     end
     if t=="spec_hwid" then info("HWID: "..get_hwid()); return true end
+    if t=="spec_refresh" then
+        fetch_keys(function() info("Keys refreshed.") end); return true
+    end
 end)
 
 -- ── STARTUP ──────────────────────────────────────────────────────────
-info("Loader v1.0.0 ready.")
+fetch_keys(function()
+    set_status(160,160,200,"Enter key, then Register or Login.")
+    if try_restore() then
+        client.delay_call(0.5, load_cloud)
+    end
+end)
+info("Loader v2.0.0 ready.")

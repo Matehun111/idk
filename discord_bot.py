@@ -1,6 +1,7 @@
 """
 Specter / Zenith — Discord License Bot
 Slash commands for key management + automatic role system.
+Auto-syncs keys to GitHub so the Lua loader picks them up.
 
 ENV VARS (set in Discord bot host or .env):
   DISCORD_TOKEN       — Bot token from Discord Developer Portal
@@ -9,10 +10,13 @@ ENV VARS (set in Discord bot host or .env):
   ADMIN_ROLE_ID       — Discord role ID that can use admin commands (optional)
   DEFAULT_ROLE_NAME   — Role given to every new member (default: "Member")
   LOG_CHANNEL_ID      — Channel ID for key/role logs (optional)
+  GITHUB_TOKEN        — GitHub PAT with repo write access (for key sync)
+  GITHUB_REPO         — GitHub repo (default: Matehun111/idk)
 """
 
 import os
 import json
+import base64
 import aiohttp
 import discord
 from discord import app_commands
@@ -25,6 +29,8 @@ ADMIN_SECRET      = os.getenv("ADMIN_SECRET", "change_this_secret_now")
 ADMIN_ROLE_ID     = int(os.getenv("ADMIN_ROLE_ID", "0"))
 DEFAULT_ROLE_NAME = os.getenv("DEFAULT_ROLE_NAME", "Member")
 LOG_CHANNEL_ID    = int(os.getenv("LOG_CHANNEL_ID", "0"))
+GITHUB_TOKEN      = os.getenv("GITHUB_TOKEN", "")
+GITHUB_REPO       = os.getenv("GITHUB_REPO", "Matehun111/idk")
 
 VALID_PLANS     = ["beta", "nightly", "specter"]
 VALID_DURATIONS = ["lifetime", "1d", "7d", "14d", "30d", "90d"]
@@ -80,6 +86,66 @@ async def api_get(path: str) -> dict | list:
             if isinstance(body, list):
                 return body
             return {"status": r.status, **body}
+
+
+# ── GitHub key sync ───────────────────────────────────────────────────
+
+KEYS_FILE = "specter_keys.json"
+GH_API    = "https://api.github.com"
+
+async def gh_read_keys() -> tuple[dict, str]:
+    url = f"{GH_API}/repos/{GITHUB_REPO}/contents/{KEYS_FILE}"
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url, headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }) as r:
+            if r.status != 200:
+                return {}, ""
+            data = await r.json()
+            content = base64.b64decode(data["content"]).decode("utf-8")
+            keys = json.loads(content) if content.strip() else {}
+            return keys, data["sha"]
+
+
+async def gh_write_keys(keys: dict, sha: str, message: str) -> bool:
+    url = f"{GH_API}/repos/{GITHUB_REPO}/contents/{KEYS_FILE}"
+    content = json.dumps(keys, indent=2, ensure_ascii=False)
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    async with aiohttp.ClientSession() as s:
+        async with s.put(url, json={
+            "message": message,
+            "content": encoded,
+            "sha": sha,
+        }, headers={
+            "Authorization": f"token {GITHUB_TOKEN}",
+            "Accept": "application/vnd.github.v3+json",
+        }) as r:
+            return r.status in (200, 201)
+
+
+async def gh_add_key(key: str, note: str, plan: str) -> bool:
+    if not GITHUB_TOKEN:
+        return False
+    try:
+        keys, sha = await gh_read_keys()
+        keys[key] = {"note": note, "plan": plan}
+        return await gh_write_keys(keys, sha, f"Add key: {key[:8]}...")
+    except Exception:
+        return False
+
+
+async def gh_remove_key(key: str) -> bool:
+    if not GITHUB_TOKEN:
+        return False
+    try:
+        keys, sha = await gh_read_keys()
+        if key not in keys:
+            return True
+        del keys[key]
+        return await gh_write_keys(keys, sha, f"Remove key: {key[:8]}...")
+    except Exception:
+        return False
 
 
 async def log_action(guild: discord.Guild, embed: discord.Embed):
@@ -372,10 +438,14 @@ async def key_create(
     if res.get("key"):
         exp = res.get("expires_at")
         exp_str = "lifetime" if not exp else f"<t:{int(exp/1000)}:R>"
+
+        synced = await gh_add_key(res["key"], note or "", plan)
+
         embed = discord.Embed(title="Key Created", color=0x60FF90)
         embed.add_field(name="Key",      value=f"```{res['key']}```", inline=False)
         embed.add_field(name="Plan",     value=plan,    inline=True)
         embed.add_field(name="Duration", value=exp_str, inline=True)
+        embed.add_field(name="GitHub",   value="Synced" if synced else "Sync failed", inline=True)
         if note:
             embed.add_field(name="Note", value=note, inline=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -384,6 +454,7 @@ async def key_create(
         log_embed.add_field(name="Plan", value=plan, inline=True)
         log_embed.add_field(name="Duration", value=exp_str, inline=True)
         log_embed.add_field(name="By", value=interaction.user.mention, inline=True)
+        log_embed.add_field(name="GitHub", value="Synced" if synced else "Failed", inline=True)
         if note:
             log_embed.add_field(name="Note", value=note, inline=True)
         await log_action(interaction.guild, log_embed)
@@ -408,8 +479,11 @@ async def key_revoke(interaction: discord.Interaction, key: str, user: discord.M
         return
 
     if res.get("revoked"):
+        synced = await gh_remove_key(key)
+
         embed = discord.Embed(title="Key Revoked", color=0xFF6060)
         embed.add_field(name="Key", value=f"```{key}```", inline=False)
+        embed.add_field(name="GitHub", value="Removed" if synced else "Sync failed", inline=True)
 
         if user:
             removed_roles = []
@@ -565,6 +639,49 @@ async def key_info(interaction: discord.Interaction, key: str):
     if found.get("note"):
         embed.add_field(name="Note", value=found["note"], inline=True)
     await interaction.followup.send(embed=embed, ephemeral=True)
+
+
+# ── /key sync — full sync from server to GitHub ─────────────────────
+
+@tree.command(name="key_sync", description="Sync all keys from server to GitHub (full overwrite)")
+async def key_sync(interaction: discord.Interaction):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    if not GITHUB_TOKEN:
+        await interaction.response.send_message("GITHUB_TOKEN not set.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    try:
+        keys = await api_get("/admin/list")
+    except Exception as e:
+        await interaction.followup.send(f"API error: {e}", ephemeral=True)
+        return
+
+    if isinstance(keys, dict):
+        await interaction.followup.send(f"Error: {keys}", ephemeral=True)
+        return
+
+    gh_keys = {}
+    for k in keys:
+        if not k.get("revoked") and not k.get("expired"):
+            gh_keys[k["key"]] = {"note": k.get("note", ""), "plan": k.get("plan", "")}
+
+    try:
+        _, sha = await gh_read_keys()
+        ok = await gh_write_keys(gh_keys, sha, f"Full sync: {len(gh_keys)} active keys")
+    except Exception as e:
+        await interaction.followup.send(f"GitHub error: {e}", ephemeral=True)
+        return
+
+    if ok:
+        embed = discord.Embed(title="Keys Synced to GitHub", color=0x60FF90)
+        embed.description = f"**{len(gh_keys)}** active keys pushed."
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    else:
+        await interaction.followup.send("GitHub sync failed.", ephemeral=True)
 
 
 # ── /redeem — user-facing key claim + auto role ──────────────────────
