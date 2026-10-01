@@ -924,7 +924,7 @@ LPH_NO_VIRTUALIZE(function ()
                 { false, -1, 0.6, "cur - low" },
             }
             resolver.STATIC_ARMS, resolver.JITTER_ARMS = STATIC_ARMS, JITTER_ARMS
-            local LOW_BIAS = { 0, 0, 0.06, 0.06, 0 }
+            local LOW_BIAS = { -0.15, -0.15, 0.20, 0.20, 0.05 }
 
             local function opt(name)
                 local item = config.resolver and config.resolver.options
@@ -1257,6 +1257,9 @@ LPH_NO_VIRTUALIZE(function ()
                 local avg = 1 - (0.2 + 0.3 * c_math.clamp((speed - 70) / 65, 0, 1)) * run
                 if duck > 0 then avg = avg + duck * run * (0.5 - avg) end
                 data.max_desync = c_math.clamp(math_floor(58 * avg + 0.5), 20, 60)
+                if data.low_desync then
+                    data.max_desync = math_min(data.max_desync, 28)
+                end
 
                 local base_type = data.is_jitter and "jitter" or (data.stance == "stand" and "static" or "normal")
                 data.meta_type = data.def_rate > 0.05 and (base_type .. "+def") or base_type
