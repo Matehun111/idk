@@ -242,6 +242,22 @@ H.drivers = {
         d.sent = function(k) return true end
         return d
     end,
+    -- defensive: every 48 ticks a window of 6 sent ticks with a tickbase shift (sim time goes back `back` ticks) while the
+    -- eye yaw flicks (`flick`, 110 = past the side, 90 = sideways, 0 = pitch only); the true body yaw of those records comes
+    -- from the server feet logic on the flicked angles. o.base: "static" (eye 0) or "jitter" (+-35 every tick)
+    defensive = function(o)
+        local flick, back, base = o.flick or 110, o.back or 10, o.base or "static"
+        local d = {}
+        local function window(k) local ph = k % 48; return ph >= 40 and ph < 46 end
+        function d.eye(k)
+            if window(k) then return flick end
+            if base == "jitter" then return (k % 2 == 0) and 35 or -35 end
+            return 0
+        end
+        d.sent = function(k) return true end
+        d.shift = function(k) if window(k) then return { back = back } end return nil end
+        return d
+    end,
     -- standing choke desync with tickbase shifts every 48 ticks
     choke_defensive = function(o)
         local c = o.choke or 6
@@ -279,7 +295,7 @@ local function enemy_advance(e, k, opts)
 
     local sh = d.shift and d.shift(k) or nil
     local st = sh and (k - sh.back) or k
-    local raw = sh and sh.theta or theta
+    local raw = (sh and sh.theta) or theta
     if d.truth and not sh then raw = d.truth(k) end
     local pose = 0.5
     if opts.pose_real then pose = (raw + 60) / 120 end

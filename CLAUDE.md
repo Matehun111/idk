@@ -51,7 +51,7 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
     to 20 deg). Pattern regular / random / multi way; arms: feet model (server feet logic on netvars) / centre of the jitter / side of the
     record, each also for the NEXT record, low side angles, learned angle table per jitter side (`table_*`), zero, native. Context
     `<stance>` or `<stance>|z` (feet model says ~0). `pol_ema` = which sign hit more, session wide
-  * desync part (`desync_resolve`, `DES_ARMS`): everybody else. +/- full, +/- half, zero per stance (stand / move / air); first guess: the side
+  * desync part (`desync_resolve`, `DES_ARMS`): everybody else (and the defensive records go to `def_resolve`). +/- full, +/- half, zero per stance (stand / move / air); first guess: the side
     open to our eye (traces every 4 ticks, it changes only when two traces agree). Added after the owners asked for "perfect":
     - `feet model` / `feet model inv`: the feet model's body yaw for the record (LBY breakers: 0.55-0.60 -> 0.92 in the sim)
     - `side model` (side tracking, `side_*`): observations = shot results that show the side (head hit: that side, full angle missed: the
@@ -75,6 +75,12 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   offered after `NN_MIN` results, its bias from how often its own call was on the head of the head hits (`nn.agree`). In the sim it
   learns the right angle (1.00 static / anti-brute / jitter, 0.88 LBY breaker) but rarely gets picked: the other arms are already at
   the ceiling there; it is the fallback when they miss on a player. `resolver.nn_info()` = results learned, agreement.
+- Defensive records (tickbase shift: sim time not moving forward) are NOT skipped any more: `ingest` returns "def", the feet model runs on
+  their flicked angles (its clock is the arrival tick for every update), and `def_resolve` gives them their own angle (`DEF_ARMS`: hold,
+  feet model on this record +/-, +/- full, zero; learned in `m.f`, context `def|<stance>`, reason "defensive"). The desync part has a
+  zone context `<stance>|z` like the jitter part (feet model ~0 after a flick / realign: zero first). `applied_for` picks the closest
+  record at or before the target (defensive records go back in time). Sim `defensive` driver (flick 110 / 90 / -70, jitter base):
+  0.33-0.71 -> 0.92 (defensive records 0-21% -> 89-100%).
 - Shots are judged by what the RECORD they went at got (`p.hist` by sim tick, `applied_for`, `event.backtrack`), not by what is forced at
   fire time. Head hit 1.5, body hit 0.5, resolver miss 1 (0.5 when backtracked 12+ ticks); spread / prediction / death misses are ignored.
 - Player list: forced once per new record (Correction active on, Force body yaw on, value); a tickbase shifted update (sim time not moving
@@ -114,6 +120,10 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   The test covers hit rates per anti-aim and ping, ablations, garbage netvars, adversarial animstate memory (bad / zero / shifted offsets: the
   script must never write), player list, menu, ping profile switching, several enemies, remembered priors, options, panel, events.
 - It has nothing to do with the resolver of `specter_cloud.lua` any more: a change to one is never ported to the other unless the owners ask.
+
+## Ragebot
+- Improved Multi-point "Auto" only lowers the scale (moving > 100, air, 2 misses); it no longer ADDS chest / stomach multipoints (with
+  everybody moving that made the aimbot pick body points first: "it shoots the body").
 
 ## Performance
 - `python3 tests/perf_profile.py [--hot N]` runs the WHOLE dev build in `tests/perf/mock.lua` (a mock game: local player, N enemies that

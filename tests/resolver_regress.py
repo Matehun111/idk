@@ -100,6 +100,9 @@ RATES = [
     # side switching: on hit / on miss / on every shot (anti-bruteforce), at random moments -> side tracking
     ("anti_brute", dict(choke=6), 0.88), ("anti_brute", dict(choke=2), 0.88), ("anti_miss", dict(choke=6), 0.86),
     ("anti_miss", dict(choke=2), 0.88), ("anti_shot", dict(choke=6), 0.75), ("choke_random", dict(choke=6), 0.66),
+    # defensive: tickbase shift windows with flicked angles (the body yaw of those records from the server feet logic)
+    ("defensive", dict(flick=110), 0.88), ("defensive", dict(flick=90), 0.88), ("defensive", dict(flick=-70, back=6), 0.85),
+    ("defensive", dict(flick=110, base="jitter"), 0.88),
     # jitter -> jitter part
     ("jitter_tick", {}, 0.88), ("jitter_tick", dict(amp=58), 0.88), ("jitter_delay", dict(period=3), 0.88),
     ("jitter_delay", dict(period=5), 0.88), ("jitter_choke", dict(choke=3), 0.88), ("moving_jitter", {}, 0.88),

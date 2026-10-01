@@ -899,6 +899,18 @@ LPH_NO_VIRTUALIZE(function ()
                 { src = "nn",             bias = 0.00, name = "neural net" },
             }
 
+            -- defensive records (tickbase shift: the sim time goes back, the enemy flicks its angles for a few ticks). They used
+            -- to be skipped (the last value stayed): the head is somewhere else then (sim: 0-21% hits on them), and the feet
+            -- logic the server ran on the flicked angles moved the body yaw of the records after the window too
+            local DEF_ARMS = {
+                { src = "hold",           bias =  0.02, name = "def hold"     },     -- what the last real record got
+                { src = "feet", pol =  1, bias =  0.03, name = "def feet"     },     -- the feet model run on this record
+                { src = "feet", pol = -1, bias =  0.00, name = "def feet inv" },
+                { side =  1,              bias =  0.00, name = "def + full"   },
+                { side = -1,              bias =  0.00, name = "def - full"   },
+                { src = "zero",           bias = -0.05, name = "def zero"     },
+            }
+
             -- jitter part. pol: the sign the angle is given; next: made for the record AFTER the newest one (for the case that
             -- the value reaches the animation one update late); bias: the order of the first guesses
             local JIT_ARMS = {
@@ -929,6 +941,7 @@ LPH_NO_VIRTUALIZE(function ()
             local players = {}        -- [entindex] = see player_of (this round)
             local mem = {}            -- [player key] = { d = desync stats, j = jitter stats, tables, hit_value, streaks }
             local dglobal = {}        -- desync stats over all players
+            local fglobal = {}        -- defensive stats over all players
             local jglobal = {}        -- jitter stats over all players
             local gtable = {}         -- jitter angle tables over all players: the start of a new player
             local pol_ema = 0         -- jitter: > 0 the "+" arms hit more, < 0 the "-" arms
@@ -1002,7 +1015,7 @@ LPH_NO_VIRTUALIZE(function ()
             local function memory_of(key)
                 local m = mem[key]
                 if not m then
-                    m = { d = {}, j = {}, tables = {}, hit_value = {}, jmisses = 0 }
+                    m = { d = {}, j = {}, f = {}, tables = {}, hit_value = {}, jmisses = 0 }
                     mem[key] = m
                 end
                 return m
@@ -1177,9 +1190,17 @@ LPH_NO_VIRTUALIZE(function ()
 
                 -- a jump back by more than a tickbase shift (map change, reconnect) or a long gap (dormant, lag spike): start over
                 if p.max_st and (st < p.max_st - 32 or st - p.max_st > GAP_RESET) then drop_records(p) end
-                -- sim time that does not move forward: a tickbase shift, its angles say nothing about the real AA (the value
-                -- forced for the last real record stays)
-                if p.max_st and st <= p.max_st then return false end
+                -- sim time that does not move forward: a tickbase shift (defensive). Its angles say nothing about the real AA
+                -- (they stay out of the jitter analysis), but the server animates them: the feet model runs on them, and the
+                -- record gets its own angle (def_resolve)
+                if p.max_st and st <= p.max_st then
+                    local _, deye = entity.get_prop(idx, "m_angEyeAngles")
+                    if not finite(deye) then return false end
+                    local dlby = entity.get_prop(idx, "m_flLowerBodyYawTarget")
+                    feet_update(p, deye, finite(dlby) and dlby or nil, globals.tickcount())
+                    p.def_st = st
+                    return "def"
+                end
 
                 local _, eye = entity.get_prop(idx, "m_angEyeAngles")
                 local ox, oy = entity.get_prop(idx, "m_vecOrigin")
@@ -1200,7 +1221,9 @@ LPH_NO_VIRTUALIZE(function ()
 
                 local lby = entity.get_prop(idx, "m_flLowerBodyYawTarget")
                 p.lby_delta = finite(lby) and normalize(lby - eye) or nil
-                feet_update(p, eye, finite(lby) and lby or nil, st)
+                -- the feet model's clock is the arrival tick: a shifted update's sim time says nothing about how long the server
+                -- animated (for the normal updates the two are the same)
+                feet_update(p, eye, finite(lby) and lby or nil, globals.tickcount())
 
                 local rel = normalize(eye - math.deg(math.atan2(my - oy, mx - ox)) - 180)
                 p.records[#p.records + 1] = { rel = rel, st = st }
@@ -1696,7 +1719,11 @@ LPH_NO_VIRTUALIZE(function ()
             -- desync part: the arm with the best score for this stance; returns the value and the arm
             local function desync_resolve(p)
                 local m = memory_of(p.key)
-                local own, all = stats_of(m.d, p.stance, #DES_ARMS), stats_of(dglobal, p.stance, #DES_ARMS)
+                -- the feet model puts the feet on the eye yaw (no desync right now, e.g. after a defensive flick or an lby
+                -- realign): its own situation where zero is the first guess, learned apart (like the jitter part's zone)
+                local zone = p.model ~= nil and math.abs(p.model) < 4
+                local ctx = zone and (p.stance .. "|z") or p.stance
+                local own, all = stats_of(m.d, ctx, #DES_ARMS), stats_of(dglobal, ctx, #DES_ARMS)
                 local best, best_score, best_value = 1, -math.huge, 0
                 for i, a in ipairs(DES_ARMS) do
                     local ok, value, bias = true, nil, a.bias
@@ -1717,13 +1744,42 @@ LPH_NO_VIRTUALIZE(function ()
                     else
                         value = a.side * a.frac * p.maxd_f
                         if a.side ~= 0 and a.side == p.open then bias = bias + 0.06 end
+                        if a.side == 0 and zone then bias = bias + 0.40 end
                     end
                     if ok then
                         local s = score(own, all, i) + bias
                         if s > best_score then best, best_score, best_value = i, s, value end
                     end
                 end
-                return math.floor(clamp(best_value, -60, 60) + 0.5), best, p.stance
+                return math.floor(clamp(best_value, -60, 60) + 0.5), best, ctx
+            end
+
+            -- defensive record: hold / feet model on this record / a full side / zero, learned in its own context
+            local function def_resolve(p)
+                local m = memory_of(p.key)
+                m.f = m.f or {}
+                local ctx = "def|" .. p.stance
+                local own, all = stats_of(m.f, ctx, #DEF_ARMS), stats_of(fglobal, ctx, #DEF_ARMS)
+                local best, best_score, best_value = 1, -math.huge, 0
+                for i, a in ipairs(DEF_ARMS) do
+                    local ok, value = true, nil
+                    if a.src == "hold" then
+                        ok = p.hold_value ~= nil
+                        value = p.hold_value
+                    elseif a.src == "feet" then
+                        ok = p.model ~= nil and math.abs(p.model) >= 4
+                        if ok then value = a.pol * p.model end
+                    elseif a.src == "zero" then
+                        value = 0
+                    else
+                        value = a.side * p.maxd_f
+                    end
+                    if ok then
+                        local sc = score(own, all, i) + a.bias
+                        if sc > best_score then best, best_score, best_value = i, sc, value end
+                    end
+                end
+                return math.floor(clamp(best_value, -60, 60) + 0.5), best, ctx
             end
 
             -- jitter part: the angle for the newest record. Returns the value (nil = native resolver), the arm and the context
@@ -1792,17 +1848,19 @@ LPH_NO_VIRTUALIZE(function ()
                 local h = p.hist
                 if #h == 0 or not p.max_st then return nil end
                 local target = p.max_st - math.max(bt, 0)
+                -- the closest record at or before the target (defensive records go back in time, so the list is not sorted by
+                -- sim tick); among equally close ones the newest
+                local found, gap = nil, 5
                 for i = #h, 1, -1 do
-                    if h[i].st <= target then
-                        if target - h[i].st <= 4 then return h[i] end
-                        return nil
-                    end
+                    local d = target - h[i].st
+                    if d >= 0 and d < gap then found, gap = h[i], d end
+                    if gap == 0 then break end
                 end
-                return nil
+                return found
             end
 
             local function arm_name(mode, arm)
-                local a = (mode == "j" and JIT_ARMS or DES_ARMS)[arm or 0]
+                local a = (mode == "j" and JIT_ARMS or (mode == "f" and DEF_ARMS or DES_ARMS))[arm or 0]
                 return a and a.name or "-"
             end
 
@@ -1865,7 +1923,18 @@ LPH_NO_VIRTUALIZE(function ()
                             p.fs_tick = tick
                             update_open(p, idx, me)
                         end
-                        if ingest(idx, p, me) then
+                        local kind = ingest(idx, p, me)
+                        if kind == "def" then
+                            -- defensive record: its own angle, remembered like any other record
+                            local value, arm, ctx
+                            if use_desync or use_jitter then value, arm, ctx = def_resolve(p) end
+                            local h = p.hist
+                            h[#h + 1] = { st = p.def_st, mode = value ~= nil and "f" or nil, value = value, arm = arm, ctx = ctx, side = 0,
+                                          stance = p.stance, kind = "defensive", maxd = p.maxd_f, at = tick }
+                            while #h > HIST do table.remove(h, 1) end
+                            p.def_count = (p.def_count or 0) + 1
+                            force(idx, value)
+                        elseif kind then
                             local m = memory_of(p.key)
                             p.pred_side, p.pred_conf = side_predict(p, m, tick)
                             p.nn_x, p.nn_value = nil, nil
@@ -1882,6 +1951,7 @@ LPH_NO_VIRTUALIZE(function ()
                                 mode = "d"
                             end
                             p.mode, p.value, p.arm = mode, value, arm
+                            p.hold_value = value
                             -- remember what this record got: a shot at it later (backtrack) is judged by this
                             local h = p.hist
                             h[#h + 1] = { st = p.max_st, mode = mode, value = value, arm = arm, ctx = ctx, side = p.side, stance = p.stance, kind = p.kind,
@@ -1926,6 +1996,8 @@ LPH_NO_VIRTUALIZE(function ()
                     shot.x, shot.nnv = h.x, h.nnv
                     if h.value == nil then
                         shot.reason = "jitter native"
+                    elseif h.mode == "f" then
+                        shot.reason = "defensive"
                     else
                         shot.reason = h.mode == "j" and "jitter" or "desync"
                     end
@@ -1949,8 +2021,12 @@ LPH_NO_VIRTUALIZE(function ()
                 local head = e.hitgroup == 1
                 local weight = head and 1.5 or 0.5        -- body hits say less about the head angle than head hits
                 if head then nn_learn(s, true) end
-                if mine then side_observe(p, s, true, head) end
-                if s.mode == "j" then
+                if mine and s.mode ~= "f" then side_observe(p, s, true, head) end
+                if s.mode == "f" then
+                    local m = memory_of(s.key)
+                    m.f = m.f or {}
+                    learn(m.f, fglobal, "fstreak", s.key, s.ctx, s.arm, #DEF_ARMS, true, weight)
+                elseif s.mode == "j" then
                     jitter_learn(s.key, s.ctx, s.arm, true, weight)
                     if head then table_learn(s.key, s.ctx, s.side, s.value, true) end
                 else
@@ -1958,7 +2034,7 @@ LPH_NO_VIRTUALIZE(function ()
                     if head and s.value ~= nil then memory_of(s.key).hit_value[s.stance or "stand"] = s.value end
                 end
                 log("%s: hit %s with %s (%s %s, %s)", name_of(e.target), head and "head" or "body", tostring(s.value),
-                    s.mode == "j" and "jitter" or "desync", arm_name(s.mode, s.arm), s.mode == "j" and s.kind or s.stance)
+                    s.mode == "j" and "jitter" or (s.mode == "f" and "defensive" or "desync"), arm_name(s.mode, s.arm), s.mode == "j" and s.kind or s.stance)
             end
 
             resolver.on_miss = function(e)
@@ -1977,8 +2053,12 @@ LPH_NO_VIRTUALIZE(function ()
 
                 local weight = s.bt >= 12 and 0.5 or 1      -- an old record carries lag compensation noise too
                 nn_learn(s, false)
-                if mine then side_observe(p, s, false, false) end
-                if s.mode == "j" then
+                if mine and s.mode ~= "f" then side_observe(p, s, false, false) end
+                if s.mode == "f" then
+                    local m = memory_of(s.key)
+                    m.f = m.f or {}
+                    learn(m.f, fglobal, "fstreak", s.key, s.ctx, s.arm, #DEF_ARMS, false, weight)
+                elseif s.mode == "j" then
                     jitter_learn(s.key, s.ctx, s.arm, false, weight)
                     table_learn(s.key, s.ctx, s.side, s.value, false)
                 else
@@ -1999,7 +2079,7 @@ LPH_NO_VIRTUALIZE(function ()
                 players, shots = {}, {}
                 publish()
                 for _, m in pairs(mem) do
-                    for _, store in ipairs({ m.d, m.j }) do
+                    for _, store in ipairs({ m.d, m.j, m.f or {} }) do
                         for _, set in pairs(store) do
                             for i = 1, #set do set[i].hit, set[i].miss = set[i].hit * 0.5, set[i].miss * 0.5 end
                         end
@@ -2018,7 +2098,7 @@ LPH_NO_VIRTUALIZE(function ()
                 nn, nn_dirty = nn_new(), false
                 pcall(database.write, NN_KEY, nil)
                 players, mem, shots = {}, {}, {}
-                dglobal, jglobal, gtable, pol_ema = {}, {}, {}, 0
+                dglobal, jglobal, fglobal, gtable, pol_ema = {}, {}, {}, {}, 0
                 publish()
             end
 
@@ -6752,14 +6832,15 @@ LPH_NO_VIRTUALIZE(function ()
                         for _, name in ipairs(picked) do set[name] = true end
                         if next(set) == nil then set["Head"] = true end
 
+                        -- Auto only pulls the points towards the middle of the hitboxes (more accurate) when the target moves fast, is
+                        -- in the air or was missed twice. It used to ADD chest + stomach multipoints then too: in HvH everybody is
+                        -- moving almost all the time, so the aimbot found body points that passed the hit chance before the head
+                        -- and shot the body
                         if auto_mp then
                             local threat = client.current_threat()
                             local res_data = threat and resolver.database[threat]
                             if res_data then
                                 local t_misses = res_data.consecutive_misses or 0
-                                if res_data.stance == "air" or res_data.stance == "duck" or (res_data.speed or 0) > 100 or t_misses >= 2 then
-                                    set["Chest"], set["Stomach"] = true, true
-                                end
                                 if t_misses >= 2 or res_data.stance == "air" or (res_data.speed or 0) > 100 then
                                     scale = math_max(30, scale - 20)
                                 end
