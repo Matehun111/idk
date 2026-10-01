@@ -469,6 +469,7 @@ function M.new(src, opts)
         return m
     end
     env._G = env
+    w.env = env
     local allowed_nil = { LPH_OBFUSCATED = true, SPECTER_SHARED = true, debug = true, os = true, io = true, jit = true }
     setmetatable(env, { __index = function(t, k)
         if allowed_nil[k] then return nil end
@@ -513,8 +514,20 @@ function M.new(src, opts)
     end
     w.fire = timed
 
+    -- packets: the script chokes with cmd.allow_send_packet = false; otherwise gamesense's fake lag (Enabled + Limit refs)
+    w.choked, w.sent = 0, true
+    local function gs_ref(name, i)
+        for key, list in pairs(refs) do
+            if key:sub(-#name - 1) == "|" .. name and key:sub(1, 3) == "AA|" then
+                local it = items[list[i or 1]]
+                return it and it.value, it
+            end
+        end
+        return nil
+    end
+    w.gs_ref = gs_ref
     local function cmd()
-        return { command_number = w.tick_n, tick_count = w.tick_n, chokedcommands = 0, pitch = 0, yaw = 0, roll = 0,
+        return { command_number = w.tick_n, tick_count = w.tick_n, chokedcommands = w.choked, pitch = 0, yaw = 0, roll = 0,
                  forwardmove = 450, sidemove = 0, upmove = 0, in_attack = 0, in_attack2 = 0, in_jump = 0, in_duck = 0, in_use = 0,
                  in_speed = 0, in_forward = 1, in_back = 0, in_moveleft = 0, in_moveright = 0, in_reload = 0, in_score = 0,
                  allow_send_packet = true, no_choke = false, quick_stop = false, weaponselect = 0, hasbeenpredicted = false,
@@ -535,7 +548,32 @@ function M.new(src, opts)
         timed("setup_command", c)
         timed("run_command", c)
         timed("finish_command", c)
+        local fl_on = gs_ref("Enabled", 1)          -- AA|Fake lag|Enabled is found first only if it exists; fall back below
+        local limit = 1
+        for key, list in pairs(refs) do
+            if key == "AA|Fake lag|Enabled" and items[list[1]].value then
+                local lim = refs["AA|Fake lag|Limit"]
+                limit = lim and items[lim[1]].value or 14
+            end
+        end
+        local send
+        if c.allow_send_packet == false then send = false
+        elseif c.no_choke then send = true
+        else send = w.choked >= math.max(1, (opts.limit or limit)) end
+        w.last_cmd = c
+        w.sent = send
+        w.choked = send and 0 or w.choked + 1
     end
+
+    -- the local player's movement (the AA picks its state from it)
+    function w.set_local(vx, vy, on_ground, duck)
+        local me = ents[ME]
+        me.vx, me.vy = vx or 0, vy or 0
+        me.flags = (on_ground == false) and 0 or 1
+        me.duck = duck or 0
+    end
+    w.refs = refs
+    w.ui = ui
 
     function w.frame()
         w.frame_n = w.frame_n + 1

@@ -61,6 +61,9 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
       between them the target's own switch rate. `side_predict` is a filter over the events (a head hit near certain, a miss `MISS_NOISE`).
       The side model is exempt from the "same arm missed twice" penalty. Sim: anti-bruteforce on hit 0.26 -> 0.92, on miss 0.82 -> 0.90,
       on every shot 0.45 -> 0.82, random switches 0.61 -> 0.79 (each random switch costs about one shot, that is the limit)
+  * the jitter part also has `desync call` (what the desync part would force) and its learned table is offered only when it is sure
+    (mass >= 0.35): against jitterers whose body side is random per packet (like ours) the yaw-based arms miss more often than a coin flip.
+    Side observations come from the shots of both parts
   * both: Beta-like score of the player's own shots + 0.3 x everybody's, decay 0.9 / 0.97 per shot, the same arm missing twice in a row
     loses its hits; memory per steam id (`mem[key].d` / `.j` / `.tables`), survives rounds (halved at a new round)
 - Neural network (`nn_*`, Parts > "Neural network", on by default): 20 inputs (what both parts see about the record: jitter pattern / side /
@@ -125,8 +128,21 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - `vtable_bind` returns a NULL cdata for an invalid entity and a NULL cdata is truthy in Lua: check `p == nil or p == ffi.NULL`.
 
 ## Anti-aim: body yaw side
-- `body_side()` (in `antiaimbot.main`, next to `custom_jitter`) is the side of the body yaw: its own random process (held 1-4 sent packets,
-  flips 70%), NOT a function of the yaw offset. When the side followed the offset (opposite of it, or in lockstep with a native jitter)
-  a resolver that learned that rule hit every shot (simulated with the standalone jitter resolver: 0.93 hit rate vs 0.3-0.4 now).
-  `run_preset` uses it for every preset except the legit AA and the freestanding body yaw; `DECORRELATE_BODY` switches it off.
-- The body yaw slider value is always a whole number (+-1): a fraction can round down to 0 = no desync.
+- `body_side()` (in `antiaimbot.main`, next to `custom_jitter`, also `antiaimbot.body_side`) is the side of the body yaw: a fresh coin flip
+  per SENT packet, NOT a function of the yaw offset and not held. History: when the side followed the offset a resolver that learned the
+  rule hit every shot (0.93); held 1-4 packets (72% same side as the previous packet) it was 0.50-0.59 in `tests/aa_redteam.py`.
+  `run_preset` uses it for every preset except the legit AA; `DECORRELATE_BODY` switches it off. Elite no longer uses a static
+  freestanding body side (0.90 -> ~0.47).
+- The body yaw slider gets `sign * 120`: the sign is the side. +-1 only works if gamesense reads nothing but the sign; 120 is full desync
+  whether the size is the desync amount or the offset of the choked ticks (180 would be the same angle for both sides as an offset).
+- Anti brute-force stages: body "Random" (default, first item) keeps the coin flip and only changes the yaw; "Opposite" / "Same" hold one
+  side for the hold time (a resolver that misses once knows that side, and "flips after a hit" is learnable).
+- `antiaimbot.main:run` keeps gamesense's own AA switch (`reference.antiaim.master`) on while specter's AA is on, `release()` gives it
+  back; it used to be set only by the menu code while the menu was open.
+- Presets: Godmode, Phantom, Elite, Nova, Distort, Mirage (random-hold wide yaw, 5-way air), Void (asymmetric left / right with a random
+  switch delay, 3-way air), Constructor.
+- `python3 tests/aa_redteam.py [preset ...]` (~35 min for all): the REAL anti-aim of the dev build runs in the mock game of
+  `tests/perf/mock.lua`; what gamesense would do with the settings it writes is modelled per sent packet and becomes the enemy of
+  `tests/resolver_world.lua`; the resolver (full / desync part / jitter part) shoots at it, its hits / shots reach our anti brute-force.
+  Fails when the best attacker hits a preset / state above 0.60 (a forced side guess is ~0.47). Now: 0.36-0.51, mean 0.44 (was 0.63).
+  It models the angles only, not the animation layers a real cheat also reads.

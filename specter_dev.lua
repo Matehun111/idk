@@ -766,6 +766,9 @@ LPH_NO_VIRTUALIZE(function ()
                 { src = "zero",                                      bias = -0.10, name = "zero"                },
                 { src = "native",                                    bias = -0.10, name = "native"              },
                 { src = "nn",                                        bias =  0.00, name = "neural net"          },
+                -- what the desync part would force (its side model / feet model): for jitterers whose body side does not
+                -- follow the yaw (a random side per packet) the yaw-based arms above are wrong more often than a coin flip
+                { src = "desync",                                    bias =  0.00, name = "desync call"         },
             }
 
             local players = {}        -- [entindex] = see player_of (this round)
@@ -1598,6 +1601,7 @@ LPH_NO_VIRTUALIZE(function ()
                         if ok then
                             local angle, mass = table_best(t)
                             value = angle
+                            ok = mass >= 0.35      -- an unsure table points near zero, which misses every full desync
                             bias = bias + 0.40 * clamp((mass - 0.30) / 0.60, 0, 1)      -- the more sure, the earlier it is tried
                             if (m.jmisses or 0) >= 3 then bias = bias + 0.25 end      -- everything else keeps missing
                         end
@@ -1611,6 +1615,8 @@ LPH_NO_VIRTUALIZE(function ()
                         ok = p.nn_value ~= nil
                         value = p.nn_value
                         bias = bias + nn_bias()
+                    elseif a.src == "desync" then
+                        value = desync_resolve(p)
                     end                                                    -- native: nil
                     if a.next and p.kind ~= "regular" then bias = bias - 0.12 end    -- "next" is a coin toss then
                     if a.low and noisy then bias = bias + 0.08 end
@@ -1788,12 +1794,12 @@ LPH_NO_VIRTUALIZE(function ()
                 local head = e.hitgroup == 1
                 local weight = head and 1.5 or 0.5        -- body hits say less about the head angle than head hits
                 if head then nn_learn(s, true) end
+                if mine then side_observe(p, s, true, head) end
                 if s.mode == "j" then
                     jitter_learn(s.key, s.ctx, s.arm, true, weight)
                     if head then table_learn(s.key, s.ctx, s.side, s.value, true) end
                 else
                     desync_learn(s.key, s.ctx, s.arm, true, weight)
-                    if mine then side_observe(p, s, true, head) end
                     if head and s.value ~= nil then memory_of(s.key).hit_value[s.stance or "stand"] = s.value end
                 end
                 log("%s: hit %s with %s (%s %s, %s)", name_of(e.target), head and "head" or "body", tostring(s.value),
@@ -1816,12 +1822,12 @@ LPH_NO_VIRTUALIZE(function ()
 
                 local weight = s.bt >= 12 and 0.5 or 1      -- an old record carries lag compensation noise too
                 nn_learn(s, false)
+                if mine then side_observe(p, s, false, false) end
                 if s.mode == "j" then
                     jitter_learn(s.key, s.ctx, s.arm, false, weight)
                     table_learn(s.key, s.ctx, s.side, s.value, false)
                 else
                     desync_learn(s.key, s.ctx, s.arm, false, weight)
-                    if mine then side_observe(p, s, false, false) end
                 end
                 log("%s: missed %s (%s %s, %s)", name_of(e.target), tostring(s.value), s.mode == "j" and "jitter" or "desync",
                     arm_name(s.mode, s.arm), s.mode == "j" and s.kind or s.stance)
@@ -2336,13 +2342,15 @@ LPH_NO_VIRTUALIZE(function ()
                     }
                 end
 
+                -- (Elite used to hold one body yaw side picked by freestanding: tests/aa_redteam.py hit it 0.90 in every
+                -- state, one miss shows the side for good. The sway / offset yaw stays, the body side is the coin flip)
                 local function static_state(yaw_type, a, b, delay, speed, mod, mv, rnd)
                     return {
                         pitch = "Minimal", yaw_base = "At targets", yaw_type = yaw_type,
                         yaw_offset = yaw_type == "180" and a or nil,
                         left_offset = a, right_offset = b, yaw_delay = delay, yaw_speed = speed,
                         yaw_modifier = mod or "Off", modifier_offset = mv or 0, modifier_randomize = rnd,
-                        body_yaw_type = "Static", body_yaw_value = 1, body_yaw_freestanding = true
+                        body_yaw_type = "Sync", body_yaw_value = 1
                     }
                 end
 
@@ -2401,6 +2409,34 @@ LPH_NO_VIRTUALIZE(function ()
                     ["Crouch moving"] = center_state(4, "Center", 52, 5),
                     ["Air"]           = center_state(6, "Skitter", 50, 8),
                     ["Air & Crouch"]  = center_state(5, "Skitter", 44, 8),
+                }
+
+                -- Mirage: a wide yaw that holds each side a random 1-4 packets at 70-100% width (no rhythm to time a brute
+                -- force on), body side a coin flip per packet; 5-way in the air
+                c_constant.antiaim_presets["Specter Mirage"] = {
+                    ["Legit AA"]      = LEGIT,
+                    ["Fake lag"]      = jit_state(2, "Random hold", 62, 4),
+                    ["Standing"]      = jit_state(3, "Random hold", 66, 4),
+                    ["Slow-motion"]   = jit_state(2, "Random hold", 54, 4),
+                    ["Moving"]        = jit_state(4, "Random hold", 62, 5),
+                    ["Crouching"]     = jit_state(3, "Random hold", 60, 4),
+                    ["Crouch moving"] = jit_state(4, "Random hold", 56, 5),
+                    ["Air"]           = jit_state(5, "5-Way", 52, 6),
+                    ["Air & Crouch"]  = jit_state(4, "5-Way", 48, 6),
+                }
+
+                -- Void: an asymmetric left / right yaw that switches after a random number of packets, body side a coin
+                -- flip per packet; 3-way in the air
+                c_constant.antiaim_presets["Specter Void"] = {
+                    ["Legit AA"]      = LEGIT,
+                    ["Fake lag"]      = delay_state(-34, 44, 1, 4),
+                    ["Standing"]      = delay_state(-38, 46, 1, 5),
+                    ["Slow-motion"]   = delay_state(-30, 38, 2, 4),
+                    ["Moving"]        = delay_state(-36, 44, 1, 3),
+                    ["Crouching"]     = delay_state(-34, 42, 2, 5),
+                    ["Crouch moving"] = delay_state(-32, 40, 1, 4),
+                    ["Air"]           = jit_state(5, "3-Way", 50, 6),
+                    ["Air & Crouch"]  = jit_state(4, "3-Way", 46, 6),
                 }
 
                 c_constant.antiaim_presets["Specter Elite"] = {
@@ -4667,6 +4703,8 @@ LPH_NO_VIRTUALIZE(function ()
                     "Specter Elite",
                     "Specter Nova",
                     "Specter Distort",
+                    "Specter Mirage",
+                    "Specter Void",
                     "Constructor"
                 } or {
                     "Specter Godmode",
@@ -4674,6 +4712,8 @@ LPH_NO_VIRTUALIZE(function ()
                     "Specter Elite",
                     "Specter Nova",
                     "Specter Distort",
+                    "Specter Mirage",
+                    "Specter Void",
                 }
             ):record("antiaimbot", "preset"):save()
             config.uix.builder_hint = mui.hint(mui.CONTENT, "presets are fixed  ·  pick Constructor to edit states")
@@ -4855,7 +4895,7 @@ LPH_NO_VIRTUALIZE(function ()
                     string_format("•  Yaw offset\nab_%d", i), -180, 180, ({0, 18, -18, 30, -30, 12, -12, 24, -24, 6})[i] or 0, true, "\xC2\xB0")
                     :record("antiaimbot", "ab_stage_" .. i .. "_yaw"):save()
                 config.antiaimbot.anti_brute_stages[i].body = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles",
-                    string_format("•  Body yaw\nab_%d", i), {"Opposite", "Same", "Jitter"})
+                    string_format("•  Body yaw\nab_%d", i), {"Random", "Opposite", "Same", "Jitter"})
                     :record("antiaimbot", "ab_stage_" .. i .. "_body"):save()
                 config.antiaimbot.anti_brute_stages[i].modifier = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles",
                     string_format("•  Modifier\nab_%d", i), -58, 58, ({0, 25, -25, 40, -40, 55, -55, 30, -30, 0})[i] or 0, true, "\xC2\xB0")
@@ -5007,8 +5047,12 @@ LPH_NO_VIRTUALIZE(function ()
                             body_yaw_value = self.body_yaw_value or 0
                         end
 
+                        -- the slider is -180 .. 180: its sign is the side. +-1 only works if gamesense reads nothing but the sign;
+                        -- if it reads the size too (desync amount, or how far the choked ticks turn away) +-1 is almost no desync.
+                        -- 120: full desync under every reading (180 would be the same angle for both sides as an offset)
+                        local body_sign = (body_yaw_value or 0) > 0 and 1 or ((body_yaw_value or 0) < 0 and -1 or 0)
                         override.set(reference.antiaim.body.yaw.type, body_yaw_type)
-                        override.set(reference.antiaim.body.yaw.value, c_math.clamp(body_yaw_value, -1, 1))
+                        override.set(reference.antiaim.body.yaw.value, body_sign * 120)
 
                         local body_yaw_freestanding = self.body_yaw_freestanding or false
 
@@ -5961,24 +6005,24 @@ LPH_NO_VIRTUALIZE(function ()
 
                 -- The side of the body yaw is its own random process. It used to follow the yaw offset (opposite of it, or
                 -- in lockstep with a native jitter), so a resolver that learned "side = opposite of the visible yaw" hit
-                -- every single shot (simulated: 0.93 hit rate against it, 0.3-0.4 when the side is independent).
-                -- Held 1-4 sent packets, flips 70% of the time; steps once per SENT packet so fake lag never swallows a switch.
+                -- every single shot (simulated: 0.93 hit rate against it). Then it was held 1-4 packets: the next packet was
+                -- on the same side 72% of the time, which a resolver that remembers the last side it saw learns
+                -- (tests/aa_redteam.py: 0.50-0.59). Now every SENT packet gets a fresh coin flip: nothing to learn, a resolver
+                -- that has to pick a side is right half of the time at best. Steps once per sent packet so fake lag never
+                -- swallows a switch.
                 local DECORRELATE_BODY = true
                 local body_side do
-                    local bs = { side = 1, left = 0, last = -1 }
+                    local bs = { side = 1, last = -1 }
                     body_side = function()
                         local p = player.packets or 0
                         if p ~= bs.last then
                             bs.last = p
-                            bs.left = bs.left - 1
-                            if bs.left <= 0 then
-                                if client.random_int(1, 100) <= 70 then bs.side = -bs.side end
-                                bs.left = client.random_int(1, 4)
-                            end
+                            bs.side = client.random_int(0, 1) == 1 and 1 or -1
                         end
                         return bs.side
                     end
                 end
+                antiaimbot.body_side = function() return body_side() end
 
                 local function cj_shuffle(t)
                     for i = #t, 2, -1 do
@@ -6336,7 +6380,11 @@ LPH_NO_VIRTUALIZE(function ()
 
                         instance.yaw_offset = c_math.normalize_yaw((instance.yaw_offset or 0) + yaw_offset)
 
-                        if body_mode == "Opposite" then
+                        if body_mode == "Random" and antiaimbot.body_side then
+                            -- holding one side for seconds after a hit made us EASIER to hit (one miss shows the side,
+                            -- and "flips after a hit" is learnable): keep the per-packet coin flip, only the yaw changes
+                            instance.body_yaw_type, instance.body_yaw_value = 'Static', antiaimbot.body_side()
+                        elseif body_mode == "Opposite" then
                             instance.body_yaw_type, instance.body_yaw_value = 'Static', self.side
                         elseif body_mode == "Same" then
                             instance.body_yaw_type, instance.body_yaw_value = 'Static', -self.side
@@ -6381,6 +6429,10 @@ LPH_NO_VIRTUALIZE(function ()
                         return
                     end
                     antiaimbot.main.master_off = false
+                    -- gamesense's own anti-aim switch has to be on for any of this to show; it used to be turned on only by the
+                    -- menu code while the menu was open (with it off in the gamesense config the anti-aim did nothing until
+                    -- the menu was opened). override.set does not rewrite an unchanged value
+                    override.set(reference.antiaim.master, true)
 
                     instance:tick()
 
@@ -6521,6 +6573,7 @@ LPH_NO_VIRTUALIZE(function ()
                     if antiaimbot.main.master_off then return end
                     antiaimbot.main.master_off = true
                     pcall(instance.reset, instance)
+                    pcall(override.unset, reference.antiaim.master)      -- gamesense's own switch back as it was
                     pcall(antiaimbot.air_exploit.run, false)
                     if antiaimbot.main.efl_active then
                         antiaimbot.main.efl_active = false

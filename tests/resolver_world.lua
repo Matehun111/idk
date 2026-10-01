@@ -128,7 +128,9 @@ H.drivers = {
             elseif mode == "center" then
                 add = (pk % 2 == 0) and w / 2 or -w / 2
             end
-            if scheme == "current" then
+            if scheme == "coin" then
+                side = (rnd() < 0.5) and 1 or -1         -- a fresh coin flip per sent packet (our own anti-aim)
+            elseif scheme == "current" then
                 if mode == "center" then side = (pk % 2 == 0) and -1 or 1
                 elseif add > 0.5 then side = -1 elseif add < -0.5 then side = 1 end
             else
