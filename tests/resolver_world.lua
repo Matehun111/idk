@@ -471,6 +471,13 @@ function H.run(script_src, opts)
     local stats = { shots = 0, hits = 0, late_shots = 0, late_hits = 0, errors = 0, per = {}, spread = 0 }
     for _, e in ipairs(enemies) do stats.per[e.idx] = { shots = 0, hits = 0, late_shots = 0, late_hits = 0 } end
     local pending, shot_id = {}, 0
+    -- the enemy AA reacting to a shot (anti-bruteforce drivers): right away, or opts.react_delay ticks later (in a real game
+    -- the enemy hears about the shot through the server and its new angles come back with its own ping and choke)
+    local function react(e, hook, k)
+        if not e.driver[hook] then return end
+        local delay = opts.react_delay or 0
+        if delay <= 0 then e.driver[hook](k) else pending[#pending + 1] = { at = k + delay, kind = "react", target = e.idx, hook = hook } end
+    end
     local warm = opts.warm or math.floor(ticks / 2)
 
     for k = 1, ticks do
@@ -510,14 +517,16 @@ function H.run(script_src, opts)
             if p.at <= k then
                 local e = by_idx[p.target]
                 local okc, errc = true, nil
-                if p.kind == "impact" then
-                    if e.driver.on_shot then e.driver.on_shot(k) end
+                if p.kind == "react" then
+                    e.driver[p.hook](k)
+                elseif p.kind == "impact" then
+                    react(e, "on_shot", k)
                 elseif p.kind == "hit" then
                     okc, errc = pcall(fire, "aim_hit", { id = (not opts.no_ids) and p.id or nil, target = p.target, damage = 100, hitgroup = 1 })
-                    if e.driver.on_hit then e.driver.on_hit(k) end
+                    react(e, "on_hit", k)
                 else
                     okc, errc = pcall(fire, "aim_miss", { id = (not opts.no_ids) and p.id or nil, target = p.target, reason = p.reason })
-                    if e.driver.on_miss then e.driver.on_miss(k) end
+                    react(e, "on_miss", k)
                 end
                 if not okc then stats.errors = stats.errors + 1; ctl.errors[#ctl.errors + 1] = "result: " .. tostring(errc) end
                 table.remove(pending, i)

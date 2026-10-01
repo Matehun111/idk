@@ -730,6 +730,10 @@ LPH_NO_VIRTUALIZE(function ()
             local BINS, STEP, TOL = 31, 4, 12      -- angle table: -60 .. 60 in steps of 4; an angle within TOL of the body yaw hits
             local FS_INTERVAL = 4         -- ticks between the "which side is open" traces
             local GAP_RESET = 64          -- ticks without an update (dormant, lag spike): the old records say nothing any more
+            local DES_FEET_BIAS = 0.00    -- first-guess order of the feet model arms in the desync part
+            local PRED_GAIN = 0.30        -- how much a sure side prediction moves the side model arm up
+            local REACT_DELAY = 1         -- ticks after the round trip until a reaction to a shot shows in the records (calibrated)
+            local MISS_NOISE = 0.15       -- how likely a resolver miss is although the angle was on the right side
 
             -- desync part: side (1 / -1, 0 = none), part of the max desync, tie-break bonus
             local DES_ARMS = {
@@ -738,6 +742,11 @@ LPH_NO_VIRTUALIZE(function ()
                 { side =  1, frac = 0.5, bias = -0.05, name = "+ half" },
                 { side = -1, frac = 0.5, bias = -0.05, name = "- half" },
                 { side =  0, frac = 0.0, bias = -0.12, name = "zero"   },
+                -- the feet model (the server's feet logic on netvars, see feet_update): its body yaw for this record, both signs
+                { src = "feet", pol =  1, bias = DES_FEET_BIAS, name = "feet model"     },
+                { src = "feet", pol = -1, bias = DES_FEET_BIAS, name = "feet model inv" },
+                -- side tracking: the side the target is expected to be on now, from how it reacted to the last shots (side_predict)
+                { src = "pred",           bias = 0.00, name = "side model" },
             }
 
             -- jitter part. pol: the sign the angle is given; next: made for the record AFTER the newest one (for the case that
@@ -980,6 +989,7 @@ LPH_NO_VIRTUALIZE(function ()
                     key = key, records = {}, hist = {}, jitter = false, kind = "static", side = 0, next = 0, offset = 0,
                     next_offset = 0, next_delta = 0, speed = 0, maxd = MAX_DESYNC, maxd_f = MAX_DESYNC, stance = "stand", choke = 0,
                     open = 0, open_raw = 0, open_n = 0, open_set = false, fs_tick = -100, consecutive_misses = 0,
+                    obs = {}, reacts = {},
                 }
             end
 
@@ -997,6 +1007,7 @@ LPH_NO_VIRTUALIZE(function ()
 
             local function drop_records(p)
                 p.records, p.hist, p.max_st, p.feet, p.feet_st, p.jitter, p.kind = {}, {}, nil, nil, nil, false, "static"
+                p.obs, p.reacts = {}, {}
             end
 
             -- reads a new network update of the enemy; true when there is a new record to resolve
@@ -1058,7 +1069,8 @@ LPH_NO_VIRTUALIZE(function ()
             end
 
             -- one shot result for an arm. The same arm missing twice in a row: what it did before does not count any more
-            local function learn(store, global, streak_field, key, ctx, arm, n, hit, weight)
+            -- (not for the side model: it reads every miss itself, a miss for another reason must not throw it out)
+            local function learn(store, global, streak_field, key, ctx, arm, n, hit, weight, keep_streak)
                 local own, all = stats_of(store, ctx, n), stats_of(global, ctx, n)
                 for i = 1, n do
                     own[i].hit, own[i].miss = own[i].hit * 0.9, own[i].miss * 0.9
@@ -1075,13 +1087,13 @@ LPH_NO_VIRTUALIZE(function ()
                     local st = m[streak_field]
                     if st and st.ctx == ctx and st.arm == arm then st.n = st.n + 1 else st = { ctx = ctx, arm = arm, n = 1 } end
                     m[streak_field] = st
-                    if st.n >= 2 then own[arm].hit = own[arm].hit * 0.3 end
+                    if st.n >= 2 and not keep_streak then own[arm].hit = own[arm].hit * 0.3 end
                 end
             end
 
             local function desync_learn(key, stance, arm, hit, weight)
                 local m = memory_of(key)
-                learn(m.d, dglobal, "dstreak", key, stance, arm, #DES_ARMS, hit, weight)
+                learn(m.d, dglobal, "dstreak", key, stance, arm, #DES_ARMS, hit, weight, DES_ARMS[arm].src == "pred")
             end
 
             local function jitter_learn(key, ctx, arm, hit, weight)
@@ -1160,18 +1172,193 @@ LPH_NO_VIRTUALIZE(function ()
             end
 
             -- ── resolving ──────────────────────────────────────────────────────────
+            -- side tracking (desync part). Two kinds of events, both on the client tick scale:
+            --   * observations: a shot result that shows which side the body yaw was on, at the time the record it went at
+            --     arrived (a head hit: that side; a full angle that missed: the other side). Backtracked shots show old times
+            --   * reactions: every shot the target noticed (hit / miss, any reason). It shows in the records from one round
+            --     trip after firing + the target's own delay (it hears about the shot through the server, its new angles come
+            --     back with its ping and choke). That delay is calibrated per player: the one that explains the observed sides best
+            -- Two observations with exactly one reaction between them tell whether the target switches sides after a hit /
+            -- after a miss (anti-bruteforce AAs: on hit, on miss, on every shot). The side now = the last observation, switched
+            -- once for every reaction since then that usually makes it switch. Plain random switches: the last observation.
+            local DELAYS = { 0, 1, 2, 3, 4, 6, 8, 10, 12, 16 }
+
+            local function side_stats(m)
+                local sd = m.sides
+                if not sd then
+                    sd = { hit = { s = 0, n = 0 }, miss = { s = 0, n = 0 }, own = { s = 0, t = 0 }, delay = REACT_DELAY }
+                    m.sides = sd
+                end
+                return sd
+            end
+
+            local function rate_of(c, res)
+                local prior = res == "hit" and 0.15 or 0.25        -- most targets do not switch on their own
+                return (c.s + prior * 2) / (c.n + 2)
+            end
+
+            local function side_reaction(p, s, res)
+                if not s.fire then return end
+                local r = p.reacts
+                r[#r + 1] = { tb = s.fire + s.rtt, res = res }
+                while #r > 32 do table.remove(r, 1) end
+            end
+
+            local function reactions_between(p, t0, t1, d)
+                local n, last = 0, nil
+                for _, r in ipairs(p.reacts) do
+                    local t = r.tb + d
+                    if t > t0 and t <= t1 then n, last = n + 1, r end
+                end
+                return n, last
+            end
+
+            -- switch counts from the observation window of this round with reaction delay d
+            local function window_counts(p, d)
+                local c = { hit = { s = 0, n = 0 }, miss = { s = 0, n = 0 } }
+                local list = p.obs
+                for i = 2, #list do
+                    local n, r = reactions_between(p, list[i - 1].t, list[i].t, d)
+                    if n == 1 then
+                        local x = c[r.res]
+                        x.s, x.n = x.s + (list[i - 1].side ~= list[i].side and 1 or 0), x.n + 1
+                    end
+                end
+                return c
+            end
+
+            -- how many consecutive observations delay d explains, with the switch rates it implies
+            local function delay_score(p, d)
+                local c = window_counts(p, d)
+                local flips = { hit = rate_of(c.hit, "hit") > 0.5, miss = rate_of(c.miss, "miss") > 0.5 }
+                local list, n = p.obs, 0
+                for i = 2, #list do
+                    local side = list[i - 1].side
+                    for _, r in ipairs(p.reacts) do
+                        local t = r.tb + d
+                        if t > list[i - 1].t and t <= list[i].t and flips[r.res] then side = -side end
+                    end
+                    if side == list[i].side then n = n + 1 end
+                end
+                return n, c
+            end
+
+            local function side_observe(p, s, hit, head)
+                if s.value == nil or not s.maxd or not s.rec_at then return end
+                local known
+                if hit and head then
+                    if math.abs(s.value) >= 12 then known = s.value > 0 and 1 or -1 end
+                elseif not hit and math.abs(s.value) >= 0.75 * s.maxd then
+                    known = s.value > 0 and -1 or 1
+                end
+                if known == nil then return end
+                local sd = side_stats(memory_of(p.key))
+                local list = p.obs
+                local o = { t = s.rec_at, side = known, hit = hit }
+                local at = #list + 1
+                while at > 1 and list[at - 1].t > o.t do at = at - 1 end
+                table.insert(list, at, o)
+                while #list > 12 do table.remove(list, 1); at = at - 1 end
+                -- what happened between this observation and its neighbours: one reaction in between = one lesson
+                for _, pair in ipairs({ { list[at - 1], o }, { o, list[at + 1] } }) do
+                    local a, b = pair[1], pair[2]
+                    if a and b then
+                        local n, r = reactions_between(p, a.t, b.t, sd.delay)
+                        if n == 1 then
+                            local c = sd[r.res]
+                            c.s, c.n = c.s * 0.9 + (a.side ~= b.side and 1 or 0), c.n * 0.9 + 1
+                        elseif n == 0 and b.t > a.t then
+                            -- no shot in between: a switch is the target's own (random side AAs)
+                            local c = sd.own
+                            c.s, c.t = c.s * 0.95 + (a.side ~= b.side and 1 or 0), c.t * 0.95 + (b.t - a.t)
+                        end
+                    end
+                end
+                -- is another reaction delay a better explanation of this round's observations? then switch to it and relearn
+                if #list >= 4 then
+                    local best, best_n, best_c = sd.delay, delay_score(p, sd.delay), nil
+                    for _, d in ipairs(DELAYS) do
+                        local n, c = delay_score(p, d)
+                        if n > best_n then best, best_n, best_c = d, n, c end
+                    end
+                    if best_c then
+                        sd.delay, sd.hit, sd.miss = best, best_c.hit, best_c.miss
+                    end
+                end
+            end
+
+            -- the side the target is expected to be on now and how sure that is (0 .. 1); nil when nothing is known.
+            -- A filter over this round's events in time order: P(side = +1) moves towards 0.5 with the target's own switch
+            -- rate, a reaction switches it with its learned probability, an observation updates it (a head hit is near certain,
+            -- a miss can also be a miss for another reason: MISS_NOISE)
+            local function mix(b, q)
+                return b * (1 - q) + (1 - b) * q
+            end
+
+            local function side_predict(p, m, now)
+                local obs = p.obs
+                if #obs == 0 then return nil, 0 end
+                local sd = side_stats(m)
+                local own = sd.own
+                local lam = (own.s + 0.25) / (own.t + 400)             -- own switches per tick (prior: one per ~1600 ticks)
+                local ev = {}
+                for _, o in ipairs(obs) do ev[#ev + 1] = { t = o.t, o = o } end
+                local first = obs[1].t
+                for _, r in ipairs(p.reacts) do
+                    local t = r.tb + sd.delay
+                    if t > first and t <= now then ev[#ev + 1] = { t = t, r = r } end
+                end
+                -- a reaction at the tick a record arrived is already in that record
+                table.sort(ev, function(x, y)
+                    if x.t ~= y.t then return x.t < y.t end
+                    return x.r ~= nil and y.r == nil
+                end)
+                local b, t0 = 0.5, first
+                for _, e in ipairs(ev) do
+                    if e.t > t0 then b = mix(b, 0.5 * (1 - (1 - 2 * lam) ^ (e.t - t0))) end
+                    t0 = e.t
+                    if e.r then
+                        b = mix(b, rate_of(sd[e.r.res], e.r.res))
+                    else
+                        local o = e.o
+                        local other = o.hit and 0.03 or MISS_NOISE         -- likelihood of this observation on the other side
+                        local lp = o.side == 1 and 1 or other
+                        local lm = o.side == -1 and 1 or other
+                        local z = b * lp + (1 - b) * lm
+                        if z > 0 then b = b * lp / z end
+                    end
+                end
+                if now > t0 then b = mix(b, 0.5 * (1 - (1 - 2 * lam) ^ (now - t0))) end
+                return b >= 0.5 and 1 or -1, math.abs(2 * b - 1)
+            end
+
             -- desync part: the arm with the best score for this stance; returns the value and the arm
             local function desync_resolve(p)
                 local m = memory_of(p.key)
                 local own, all = stats_of(m.d, p.stance, #DES_ARMS), stats_of(dglobal, p.stance, #DES_ARMS)
-                local best, best_score = 1, -math.huge
+                local best, best_score, best_value = 1, -math.huge, 0
                 for i, a in ipairs(DES_ARMS) do
-                    local s = score(own, all, i) + a.bias
-                    if a.side ~= 0 and a.side == p.open then s = s + 0.06 end
-                    if s > best_score then best, best_score = i, s end
+                    local ok, value, bias = true, nil, a.bias
+                    if a.src == "feet" then
+                        ok = p.model ~= nil and math.abs(p.model) >= 4
+                        if ok then value = a.pol * p.model end
+                    elseif a.src == "pred" then
+                        local side, conf = side_predict(p, m, globals.tickcount())
+                        ok = side ~= nil
+                        if ok then
+                            value = side * p.maxd_f
+                            bias = bias + PRED_GAIN * conf
+                        end
+                    else
+                        value = a.side * a.frac * p.maxd_f
+                        if a.side ~= 0 and a.side == p.open then bias = bias + 0.06 end
+                    end
+                    if ok then
+                        local s = score(own, all, i) + bias
+                        if s > best_score then best, best_score, best_value = i, s, value end
+                    end
                 end
-                local a = DES_ARMS[best]
-                return math.floor(clamp(a.side * a.frac * p.maxd_f, -60, 60) + 0.5), best, p.stance
+                return math.floor(clamp(best_value, -60, 60) + 0.5), best, p.stance
             end
 
             -- jitter part: the angle for the newest record. Returns the value (nil = native resolver), the arm and the context
@@ -1304,7 +1491,8 @@ LPH_NO_VIRTUALIZE(function ()
                             p.mode, p.value, p.arm = mode, value, arm
                             -- remember what this record got: a shot at it later (backtrack) is judged by this
                             local h = p.hist
-                            h[#h + 1] = { st = p.max_st, mode = mode, value = value, arm = arm, ctx = ctx, side = p.side, stance = p.stance, kind = p.kind }
+                            h[#h + 1] = { st = p.max_st, mode = mode, value = value, arm = arm, ctx = ctx, side = p.side, stance = p.stance, kind = p.kind,
+                                          maxd = p.maxd_f, at = tick }
                             while #h > HIST do table.remove(h, 1) end
                             force(idx, value)
                         end
@@ -1335,10 +1523,13 @@ LPH_NO_VIRTUALIZE(function ()
                 local p = players[e.target]
                 local bt = resolver.shot_backtrack(e)
                 local h = p and applied_for(p, bt)
-                local shot = { idx = e.target, key = p and p.key, bt = bt, time = now, reason = "native" }
+                local ok, lat = pcall(client.latency)
+                lat = (ok and finite(lat) and lat > 0) and lat or 0
+                local shot = { idx = e.target, key = p and p.key, bt = bt, time = now, reason = "native",
+                               fire = globals.tickcount(), rtt = math.floor(2 * lat / globals.tickinterval() + 0.5) + 1 }
                 if h and h.mode then
                     shot.mode, shot.ctx, shot.arm, shot.value = h.mode, h.ctx, h.arm, h.value
-                    shot.side, shot.stance, shot.kind = h.side, h.stance, h.kind
+                    shot.side, shot.stance, shot.kind, shot.maxd, shot.rec_at = h.side, h.stance, h.kind, h.maxd, h.at
                     if h.value == nil then
                         shot.reason = "jitter native"
                     else
@@ -1357,6 +1548,8 @@ LPH_NO_VIRTUALIZE(function ()
                 local p = players[e.target]
                 if resolver.stats_hook then pcall(resolver.stats_hook, "hit", s, e, p) end
                 if p then p.consecutive_misses = 0 end
+                local mine = s and p and s.key == p.key
+                if mine then side_reaction(p, s, "hit") end
                 if not s or not s.mode or not s.key then return end
 
                 local head = e.hitgroup == 1
@@ -1366,6 +1559,7 @@ LPH_NO_VIRTUALIZE(function ()
                     if head then table_learn(s.key, s.ctx, s.side, s.value, true) end
                 else
                     desync_learn(s.key, s.ctx, s.arm, true, weight)
+                    if mine then side_observe(p, s, true, head) end
                     if head and s.value ~= nil then memory_of(s.key).hit_value[s.stance or "stand"] = s.value end
                 end
                 log("%s: hit %s with %s (%s %s, %s)", name_of(e.target), head and "head" or "body", tostring(s.value),
@@ -1379,6 +1573,8 @@ LPH_NO_VIRTUALIZE(function ()
                 shots[id] = nil
                 local p = players[e.target]
                 if resolver.stats_hook then pcall(resolver.stats_hook, "miss", s, e, p) end
+                local mine = s and p and s.key == p.key
+                if mine then side_reaction(p, s, "miss") end      -- the target noticed it, whatever the reason
                 -- spread, prediction error, death ... are not about the angle
                 if e.reason ~= "?" and e.reason ~= "resolver" then return end
                 if p then p.consecutive_misses = p.consecutive_misses + 1 end
@@ -1390,6 +1586,7 @@ LPH_NO_VIRTUALIZE(function ()
                     table_learn(s.key, s.ctx, s.side, s.value, false)
                 else
                     desync_learn(s.key, s.ctx, s.arm, false, weight)
+                    if mine then side_observe(p, s, false, false) end
                 end
                 log("%s: missed %s (%s %s, %s)", name_of(e.target), tostring(s.value), s.mode == "j" and "jitter" or "desync",
                     arm_name(s.mode, s.arm), s.mode == "j" and s.kind or s.stance)

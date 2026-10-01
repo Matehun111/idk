@@ -52,7 +52,15 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
     record, each also for the NEXT record, low side angles, learned angle table per jitter side (`table_*`), zero, native. Context
     `<stance>` or `<stance>|z` (feet model says ~0). `pol_ema` = which sign hit more, session wide
   * desync part (`desync_resolve`, `DES_ARMS`): everybody else. +/- full, +/- half, zero per stance (stand / move / air); first guess: the side
-    open to our eye (traces every 4 ticks, it changes only when two traces agree)
+    open to our eye (traces every 4 ticks, it changes only when two traces agree). Added after the owners asked for "perfect":
+    - `feet model` / `feet model inv`: the feet model's body yaw for the record (LBY breakers: 0.55-0.60 -> 0.92 in the sim)
+    - `side model` (side tracking, `side_*`): observations = shot results that show the side (head hit: that side, full angle missed: the
+      other side) at the arrival tick of the record shot at; reactions = every shot the target noticed (hit / miss, any reason), visible
+      from fire + round trip + the target's own delay. The delay is calibrated per player (`DELAYS`, `delay_score`: the one that explains
+      this round's observations best). Two observations with one reaction between them teach P(switch | hit) / P(switch | miss), none
+      between them the target's own switch rate. `side_predict` is a filter over the events (a head hit near certain, a miss `MISS_NOISE`).
+      The side model is exempt from the "same arm missed twice" penalty. Sim: anti-bruteforce on hit 0.26 -> 0.92, on miss 0.82 -> 0.90,
+      on every shot 0.45 -> 0.82, random switches 0.61 -> 0.79 (each random switch costs about one shot, that is the limit)
   * both: Beta-like score of the player's own shots + 0.3 x everybody's, decay 0.9 / 0.97 per shot, the same arm missing twice in a row
     loses its hits; memory per steam id (`mem[key].d` / `.j` / `.tables`), survives rounds (halved at a new round)
 - Shots are judged by what the RECORD they went at got (`p.hist` by sim tick, `applied_for`, `event.backtrack`), not by what is forced at
@@ -69,9 +77,10 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   jittering enemies too; with the desync part off non-jittering enemies stay native.
 - Tests: `pip install lupa && python3 tests/resolver_regress.py` runs the real block in `tests/resolver_world.lua` (mock gamesense, enemies on a
   hidden tick level with fakelag / tickbase shifts, a copy of the server feet logic for the true body yaw, aimbot with backtrack and ping
-  delayed results): hit rates per AA and ping, parts, release on disable / death / dormancy / shutdown, Correction active restore, shot
-  attribution (0 shots judged by a value their record did not get), garbage netvars, 5 enemies, slot reuse, sim time jumps, round / memory
-  reset, log. Native alone is ~0.23 there, the ceiling ~0.92.
+  delayed results; `react_delay` makes anti-bruteforce drivers react later, `noise_p` adds misses for other reasons): hit rates per AA and
+  ping, side tracking with reaction delays / noise / inverted sign, parts, release on disable / death / dormancy / shutdown, Correction
+  active restore, shot attribution (0 shots judged by a value their record did not get), garbage netvars, 5 enemies, slot reuse, sim time
+  jumps, round / memory reset, log. Native alone is ~0.23 there, the ceiling ~0.92.
 - Load smoke test: `python3 tests/load_smoke.py [--dev-file] [--plan=nightly|beta|specter]` runs the whole script (or the dev build) in a
   gamesense-like sandbox (no os / io / debug, strict globals, ghost API). Run it after every change that touches load-time code,
   the loaders, the auth gate or the resolver.
