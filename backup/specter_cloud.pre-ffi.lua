@@ -179,7 +179,9 @@ LPH_NO_VIRTUALIZE(function ()
     local clipboard = require 'gamesense/clipboard'
     local surface = require 'gamesense/surface'
     local json = require 'json'
-    local http = require 'gamesense/http'
+    -- only the cloud configs need it: a missing library must not stop the whole script from loading
+    local http_ok, http = pcall(require, 'gamesense/http')
+    if not http_ok then http = nil end
 
     -- ── INTEGRITY MONITOR ────────────────────────────────────────────────
     local _integrity do
@@ -256,10 +258,8 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         local function _verify_debug()
-            if debug and debug.sethook then
-                local ok, info = _snap_pcall(debug.getinfo, 1, "S")
-                if ok and info and info.what == "C" then return false end
-            end
+            -- (no debug library probing here: debug.getinfo(1) called through pcall is always pcall itself, a C
+            --  function, so such a check flags every clean run in any environment that has a debug library)
             if _snap_rawget(_G, "_auth_ok") ~= nil then return false end
             if _snap_rawget(_G, "_auth_alive") ~= nil then return false end
             if _snap_rawget(_G, "_auth_key") ~= nil then return false end
@@ -11940,6 +11940,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 local function cloud_refresh()
+                    if not http then cloud_set_status("Subscribe to gamesense/http for cloud configs."); return end
                     if SERVER == "" then cloud_set_status("Server URL not set."); return end
                     if cloud_busy then return end
                     cloud_busy = true
@@ -11960,6 +11961,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 local function cloud_upload()
+                    if not http then cloud_set_status("Subscribe to gamesense/http for cloud configs."); return end
                     if SERVER == "" then cloud_set_status("Server URL not set."); return end
                     if cloud_busy then return end
                     local name = ""
@@ -12019,6 +12021,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 local function cloud_delete()
+                    if not http then cloud_set_status("Subscribe to gamesense/http for cloud configs."); return end
                     if SERVER == "" then cloud_set_status("Server URL not set."); return end
                     if cloud_idx < 1 or cloud_idx > #cloud_configs then
                         cloud_set_status("Nothing to delete."); return

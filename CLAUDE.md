@@ -56,4 +56,7 @@ When editing `specter_cloud.lua`, ALWAYS also update:
   * backup of the code before the FFI work: `backup/specter_cloud.pre-ffi.lua`
 - Tests: `pip install lupa && python3 tests/resolver_regress.py` runs the real block on a mocked gamesense API (LuaJIT 2.1, real ffi memory
   for layers / animstate) with a simulated enemy, including a server-style feet physics enemy and adversarial memory (garbage, zeros, wrong offsets).
+- Load smoke test: `python3 tests/load_smoke.py [--dev] [--plan=nightly|beta|specter]` runs the whole script (or the dev loader) in a
+  gamesense-like sandbox (no os / io / debug, strict globals, ghost API). Run it after every change that touches load-time code,
+  the loaders or the auth gate.
   Run it after every resolver change; it checks learning logic, not in-game behaviour.
