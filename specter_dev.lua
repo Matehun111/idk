@@ -747,6 +747,8 @@ LPH_NO_VIRTUALIZE(function ()
                 { src = "feet", pol = -1, bias = DES_FEET_BIAS, name = "feet model inv" },
                 -- side tracking: the side the target is expected to be on now, from how it reacted to the last shots (side_predict)
                 { src = "pred",           bias = 0.00, name = "side model" },
+                -- the neural network's call (see nn_*)
+                { src = "nn",             bias = 0.00, name = "neural net" },
             }
 
             -- jitter part. pol: the sign the angle is given; next: made for the record AFTER the newest one (for the case that
@@ -770,6 +772,7 @@ LPH_NO_VIRTUALIZE(function ()
                 { src = "learned", next = true,                      bias = -0.02, name = "learned next"        },
                 { src = "zero",                                      bias = -0.10, name = "zero"                },
                 { src = "native",                                    bias = -0.10, name = "native"              },
+                { src = "nn",                                        bias =  0.00, name = "neural net"          },
             }
 
             local players = {}        -- [entindex] = see player_of (this round)
@@ -1042,6 +1045,7 @@ LPH_NO_VIRTUALIZE(function ()
                 p.maxd = math.floor(p.maxd_f + 0.5)
 
                 local lby = entity.get_prop(idx, "m_flLowerBodyYawTarget")
+                p.lby_delta = finite(lby) and normalize(lby - eye) or nil
                 feet_update(p, eye, finite(lby) and lby or nil, st)
 
                 local rel = normalize(eye - math.deg(math.atan2(my - oy, mx - ox)) - 180)
@@ -1300,7 +1304,7 @@ LPH_NO_VIRTUALIZE(function ()
                 if #obs == 0 then return nil, 0 end
                 local sd = side_stats(m)
                 local own = sd.own
-                local lam = (own.s + 0.25) / (own.t + 400)             -- own switches per tick (prior: one per ~1600 ticks)
+                local lam = clamp((own.s + 0.25) / (own.t + 400), 0, 0.25)     -- own switches per tick (prior: one per ~1600 ticks)
                 local ev = {}
                 for _, o in ipairs(obs) do ev[#ev + 1] = { t = o.t, o = o } end
                 local first = obs[1].t
@@ -1332,6 +1336,209 @@ LPH_NO_VIRTUALIZE(function ()
                 return b >= 0.5 and 1 or -1, math.abs(2 * b - 1)
             end
 
+            -- ── neural network ─────────────────────────────────────────────────────
+            -- A small neural network: 20 inputs -> 16 tanh -> 15 angle bins (-56 .. 56, softmax). One network for all players,
+            -- kept between sessions (database, NN_KEY). The inputs are what the two parts see about the record (jitter pattern
+            -- and side, offset, feet model, side model, lby, speed, choke, open side, the angle that last hit, the learned angle
+            -- table ...), so it can learn which of them to believe in which situation. It learns from every shot result at a
+            -- record it saw: a head hit at an angle = the body yaw is there, a resolver miss = it is not there (+ a few replayed
+            -- older results). Its call is one more arm ("neural net") in both parts: the per-player learning still decides
+            -- whether to trust it, and it is only offered after NN_MIN results.
+            local NN_IN, NN_HID, NN_OUT = 20, 16, 15
+            local NN_KEY, NN_VERSION = "specter_nn_resolver", 1
+            local NN_MIN = 30             -- shot results the network has learned from before it is offered as an arm
+            local NN_LR, NN_L2 = 0.04, 0.0005
+            local NN_BUFFER, NN_REPLAY = 192, 3
+
+            local function nn_center(k)
+                return -56 + (k - 1) * 8
+            end
+
+            local nn
+
+            local function nn_new()
+                local net = { version = NN_VERSION, w1 = {}, b1 = {}, w2 = {}, b2 = {}, n = 0, agree = 0.5, buffer = {}, seed = 12345 }
+                local seed = 987654321
+                local function rnd()
+                    seed = (seed * 1103515245 + 12345) % 2147483648
+                    return seed / 2147483648 - 0.5
+                end
+                for i = 1, NN_IN * NN_HID do net.w1[i] = rnd() * 0.6 end
+                for i = 1, NN_HID do net.b1[i] = 0 end
+                for i = 1, NN_HID * NN_OUT do net.w2[i] = rnd() * 0.2 end
+                for i = 1, NN_OUT do net.b2[i] = 0 end
+                return net
+            end
+
+            local function nn_valid(net)
+                if type(net) ~= "table" or net.version ~= NN_VERSION then return false end
+                if type(net.w1) ~= "table" or type(net.w2) ~= "table" or type(net.b1) ~= "table" or type(net.b2) ~= "table" then return false end
+                for i = 1, NN_IN * NN_HID do if not finite(net.w1[i]) then return false end end
+                for i = 1, NN_HID * NN_OUT do if not finite(net.w2[i]) then return false end end
+                for i = 1, NN_HID do if not finite(net.b1[i]) then return false end end
+                for i = 1, NN_OUT do if not finite(net.b2[i]) then return false end end
+                return finite(net.n) and finite(net.agree)
+            end
+
+            do
+                local ok, saved = pcall(database.read, NN_KEY)
+                nn = (ok and nn_valid(saved)) and saved or nn_new()
+                -- only well-formed replay entries survive a load
+                local buffer = {}
+                for _, e in ipairs(type(nn.buffer) == "table" and nn.buffer or {}) do
+                    local good = type(e) == "table" and type(e.x) == "table" and finite(e.v) and type(e.hit) == "boolean"
+                    if good then
+                        for i = 1, NN_IN do
+                            if not finite(e.x[i]) then good = false; break end
+                        end
+                    end
+                    if good then buffer[#buffer + 1] = e end
+                end
+                nn.buffer = buffer
+                if not finite(nn.seed) then nn.seed = 12345 end
+            end
+            local nn_dirty = false
+
+            local function nn_save()
+                if not nn_dirty then return end
+                nn_dirty = false
+                pcall(database.write, NN_KEY, nn)
+            end
+
+            local function nn_forward(x)
+                local h = {}
+                for j = 1, NN_HID do
+                    local sum, base = nn.b1[j], (j - 1) * NN_IN
+                    for i = 1, NN_IN do sum = sum + nn.w1[base + i] * x[i] end
+                    h[j] = math.tanh(sum)
+                end
+                local z, zmax = {}, -math.huge
+                for k = 1, NN_OUT do
+                    local sum, base = nn.b2[k], (k - 1) * NN_HID
+                    for j = 1, NN_HID do sum = sum + nn.w2[base + j] * h[j] end
+                    z[k] = sum
+                    if sum > zmax then zmax = sum end
+                end
+                local total = 0
+                for k = 1, NN_OUT do
+                    z[k] = math.exp(z[k] - zmax)
+                    total = total + z[k]
+                end
+                for k = 1, NN_OUT do z[k] = z[k] / total end
+                return z, h
+            end
+
+            -- the network's angle for a record (nil while it has not learned enough)
+            local function nn_predict(x, maxd)
+                if nn.n < NN_MIN then return nil end
+                local P = nn_forward(x)
+                local best = 1
+                for k = 2, NN_OUT do
+                    if P[k] > P[best] then best = k end
+                end
+                return math.floor(clamp(nn_center(best), -maxd, maxd) + 0.5)
+            end
+
+            -- one gradient step. hit: the body yaw was within TOL of v (cross entropy on those bins); miss: it was not
+            local function nn_step(x, v, hit, lr)
+                local P, h = nn_forward(x)
+                local near, S = {}, 0
+                for k = 1, NN_OUT do
+                    near[k] = math.abs(nn_center(k) - v) <= TOL
+                    if near[k] then S = S + P[k] end
+                end
+                local g = {}
+                if hit then
+                    S = math.max(S, 1e-9)
+                    for k = 1, NN_OUT do g[k] = P[k] - (near[k] and P[k] / S or 0) end
+                else
+                    local d = math.max(1 - S, 1e-6)
+                    for k = 1, NN_OUT do g[k] = P[k] * ((near[k] and 1 or 0) - S) / d end
+                end
+                local gh = {}
+                for j = 1, NN_HID do gh[j] = 0 end
+                for k = 1, NN_OUT do
+                    local gk = clamp(g[k], -1, 1) * lr
+                    local base = (k - 1) * NN_HID
+                    for j = 1, NN_HID do
+                        local w = nn.w2[base + j]
+                        gh[j] = gh[j] + w * gk
+                        nn.w2[base + j] = w * (1 - lr * NN_L2) - gk * h[j]
+                    end
+                    nn.b2[k] = nn.b2[k] - gk
+                end
+                for j = 1, NN_HID do
+                    local gj = gh[j] * (1 - h[j] * h[j])
+                    local base = (j - 1) * NN_IN
+                    for i = 1, NN_IN do
+                        nn.w1[base + i] = nn.w1[base + i] * (1 - lr * NN_L2) - gj * x[i]
+                    end
+                    nn.b1[j] = nn.b1[j] - gj
+                end
+            end
+
+            -- a shot result at a record the network saw: learn from it and from a few older ones
+            local function nn_learn(s, hit)
+                if not s.x or s.value == nil then return end
+                if hit and s.nnv ~= nil then
+                    -- how often the network's own call was where the head really was
+                    nn.agree = nn.agree * 0.95 + (math.abs(s.nnv - s.value) <= TOL and 0.05 or 0)
+                end
+                nn_step(s.x, s.value, hit, hit and NN_LR or NN_LR * 0.5)
+                local buf = nn.buffer
+                buf[#buf + 1] = { x = s.x, v = s.value, hit = hit }
+                while #buf > NN_BUFFER do table.remove(buf, 1) end
+                for _ = 1, math.min(NN_REPLAY, #buf - 1) do
+                    nn.seed = (nn.seed * 1103515245 + 12345) % 2147483648
+                    local e = buf[1 + math.floor(nn.seed / 2147483648 * (#buf - 1))]
+                    nn_step(e.x, e.v, e.hit, (e.hit and NN_LR or NN_LR * 0.5) * 0.5)
+                end
+                nn.n = nn.n + 1
+                nn_dirty = true
+            end
+
+            -- the inputs for a record: what both parts see about it
+            local function nn_features(p, m, pred_side, pred_conf)
+                local jit = p.jitter and 1 or 0
+                local zone = p.model ~= nil and math.abs(p.model) < 4
+                local ctx = zone and (p.stance .. "|z") or p.stance
+                local t = p.jitter and m.tables[ctx] and m.tables[ctx][p.side]
+                local hv = m.hit_value[p.stance]
+                local x = {
+                    jit,
+                    (p.jitter and p.kind == "regular") and 1 or 0,
+                    (p.jitter and p.kind == "random") and 1 or 0,
+                    (p.jitter and p.kind == "multi") and 1 or 0,
+                    jit * (p.side or 0),
+                    jit * (p.next or 0),
+                    clamp((p.offset or 0) / 60, -1, 1),
+                    p.model and clamp(p.model / 60, -1, 1) or 0,
+                    p.model and 1 or 0,
+                    clamp(p.speed / 250, 0, 1.3),
+                    p.stance == "air" and 1 or 0,
+                    clamp(p.choke / 14, 0, 1),
+                    p.open or 0,
+                    pred_side and pred_side * pred_conf or 0,
+                    hv and clamp(hv / 60, -1, 1) or 0,
+                    p.lby_delta and clamp(p.lby_delta / 180, -1, 1) or 0,
+                    p.maxd / MAX_DESYNC,
+                    clamp(pol_ema, -1, 1),
+                    (t and t.n >= 1) and clamp(table_best(t) / 60, -1, 1) or 0,
+                    zone and 1 or 0,
+                }
+                return x
+            end
+
+            -- how much the arms trust the network: by how often its call was where the head really was
+            local function nn_bias()
+                return 0.30 * (nn.agree - 0.5)
+            end
+
+            -- shot results learned from, how often its call was on the head (for the log / tests)
+            resolver.nn_info = function()
+                return nn.n, nn.agree
+            end
+
             -- desync part: the arm with the best score for this stance; returns the value and the arm
             local function desync_resolve(p)
                 local m = memory_of(p.key)
@@ -1343,12 +1550,16 @@ LPH_NO_VIRTUALIZE(function ()
                         ok = p.model ~= nil and math.abs(p.model) >= 4
                         if ok then value = a.pol * p.model end
                     elseif a.src == "pred" then
-                        local side, conf = side_predict(p, m, globals.tickcount())
+                        local side, conf = p.pred_side, p.pred_conf
                         ok = side ~= nil
                         if ok then
                             value = side * p.maxd_f
                             bias = bias + PRED_GAIN * conf
                         end
+                    elseif a.src == "nn" then
+                        ok = p.nn_value ~= nil
+                        value = p.nn_value
+                        bias = bias + nn_bias()
                     else
                         value = a.side * a.frac * p.maxd_f
                         if a.side ~= 0 and a.side == p.open then bias = bias + 0.06 end
@@ -1400,6 +1611,10 @@ LPH_NO_VIRTUALIZE(function ()
                         value = 0
                         if noisy then bias = bias + 0.12 end
                         if zone then bias = bias + 0.40 end
+                    elseif a.src == "nn" then
+                        ok = p.nn_value ~= nil
+                        value = p.nn_value
+                        bias = bias + nn_bias()
                     end                                                    -- native: nil
                     if a.next and p.kind ~= "regular" then bias = bias - 0.12 end    -- "next" is a coin toss then
                     if a.low and noisy then bias = bias + 0.08 end
@@ -1467,7 +1682,7 @@ LPH_NO_VIRTUALIZE(function ()
                     if next(saved) then release_all() end
                     return
                 end
-                local use_desync, use_jitter = part("Desync resolver"), part("Jitter resolver")
+                local use_desync, use_jitter, use_nn = part("Desync resolver"), part("Jitter resolver"), part("Neural network")
 
                 local tick = globals.tickcount()
                 local seen = {}
@@ -1480,6 +1695,13 @@ LPH_NO_VIRTUALIZE(function ()
                             update_open(p, idx, me)
                         end
                         if ingest(idx, p, me) then
+                            local m = memory_of(p.key)
+                            p.pred_side, p.pred_conf = side_predict(p, m, tick)
+                            p.nn_x, p.nn_value = nil, nil
+                            if use_nn then
+                                p.nn_x = nn_features(p, m, p.pred_side, p.pred_conf)
+                                p.nn_value = nn_predict(p.nn_x, p.maxd)
+                            end
                             local value, arm, ctx, mode
                             if p.jitter and use_jitter then
                                 value, arm, ctx = jitter_resolve(p)
@@ -1492,7 +1714,7 @@ LPH_NO_VIRTUALIZE(function ()
                             -- remember what this record got: a shot at it later (backtrack) is judged by this
                             local h = p.hist
                             h[#h + 1] = { st = p.max_st, mode = mode, value = value, arm = arm, ctx = ctx, side = p.side, stance = p.stance, kind = p.kind,
-                                          maxd = p.maxd_f, at = tick }
+                                          maxd = p.maxd_f, at = tick, x = p.nn_x, nnv = p.nn_value }
                             while #h > HIST do table.remove(h, 1) end
                             force(idx, value)
                         end
@@ -1530,6 +1752,7 @@ LPH_NO_VIRTUALIZE(function ()
                 if h and h.mode then
                     shot.mode, shot.ctx, shot.arm, shot.value = h.mode, h.ctx, h.arm, h.value
                     shot.side, shot.stance, shot.kind, shot.maxd, shot.rec_at = h.side, h.stance, h.kind, h.maxd, h.at
+                    shot.x, shot.nnv = h.x, h.nnv
                     if h.value == nil then
                         shot.reason = "jitter native"
                     else
@@ -1554,6 +1777,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                 local head = e.hitgroup == 1
                 local weight = head and 1.5 or 0.5        -- body hits say less about the head angle than head hits
+                if head then nn_learn(s, true) end
                 if s.mode == "j" then
                     jitter_learn(s.key, s.ctx, s.arm, true, weight)
                     if head then table_learn(s.key, s.ctx, s.side, s.value, true) end
@@ -1581,6 +1805,7 @@ LPH_NO_VIRTUALIZE(function ()
                 if not s or not s.mode or not s.key then return end
 
                 local weight = s.bt >= 12 and 0.5 or 1      -- an old record carries lag compensation noise too
+                nn_learn(s, false)
                 if s.mode == "j" then
                     jitter_learn(s.key, s.ctx, s.arm, false, weight)
                     table_learn(s.key, s.ctx, s.side, s.value, false)
@@ -1596,6 +1821,10 @@ LPH_NO_VIRTUALIZE(function ()
             -- new round: keep what was learned, but as a hint, not as a fact
             resolver.new_round = function()
                 release_all()
+                nn_save()
+                if nn.n > 0 then
+                    log("neural net: learned from %d shots, its call was on the head in %d%% of the head hits", nn.n, math.floor(nn.agree * 100 + 0.5))
+                end
                 players, shots = {}, {}
                 publish()
                 for _, m in pairs(mem) do
@@ -1615,6 +1844,8 @@ LPH_NO_VIRTUALIZE(function ()
 
             resolver.reset_all = function()
                 release_all()
+                nn, nn_dirty = nn_new(), false
+                pcall(database.write, NN_KEY, nil)
                 players, mem, shots = {}, {}, {}
                 dglobal, jglobal, gtable, pol_ema = {}, {}, {}, 0
                 publish()
@@ -1631,6 +1862,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end)
                 client.set_event_callback("shutdown", function()
                     pcall(release_all)
+                    pcall(nn_save)
                 end)
             end
             -- [resolver:end]
@@ -4408,10 +4640,10 @@ LPH_NO_VIRTUALIZE(function ()
                 config.resolver.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Enable Resolver")
                     :record("resolver", "enabled"):save()
                 config.resolver.parts = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "•  Parts\nresolver", {
-                    "Desync resolver", "Jitter resolver", "Log"
+                    "Desync resolver", "Jitter resolver", "Neural network", "Log"
                 }):record("resolver", "parts"):save()
-                pcall(function() config.resolver.parts:set({ "Desync resolver", "Jitter resolver", "Log" }) end)
-                config.uix.res_hint = mui.hint(mui.CONTENT, "jitter: enemies whose yaw jitters  ·  desync: everybody else")
+                pcall(function() config.resolver.parts:set({ "Desync resolver", "Jitter resolver", "Neural network", "Log" }) end)
+                config.uix.res_hint = mui.hint(mui.CONTENT, "jitter: enemies whose yaw jitters  ·  desync: everybody else  ·  neural network: learns from every shot")
                 config.resolver.reset = menu.new_item(ui.new_button, "AA", "Other", "Reset memory\nresolver", function()
                     resolver.reset_all()
                     c_logger.log("Resolver memory cleared.")

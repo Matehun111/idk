@@ -30,7 +30,7 @@ BLOCK = m.group(1)
 PRELUDE = '''
 local resolver = {}
 local enable_item = ui.new_checkbox("RAGE", "Other", "Resolver")
-local parts_item = ui.new_multiselect("RAGE", "Other", "Resolver parts", { "Desync resolver", "Jitter resolver", "Log" })
+local parts_item = ui.new_multiselect("RAGE", "Other", "Resolver parts", { "Desync resolver", "Jitter resolver", "Neural network", "Log" })
 ui.set(parts_item, { "Desync resolver", "Jitter resolver" })
 local function wrap(it) return { get = function() return ui.get(it) end } end
 local config = { resolver = { enabled = wrap(enable_item), parts = wrap(parts_item) } }
@@ -132,6 +132,61 @@ for scn in ("anti_brute", "lby_flick"):
     c = avg(scn, dict(choke=6), 20, truth_pol=-1)
     print(f"   inverted sign {scn:<12} {c:.2f}")
     check(c >= 0.88, f"inverted sign {scn}: hit rate {c:.2f}")
+
+G0 = lua('''function(tick, ent, name)
+    local r = (tick * 7 + ent * 13 + #name) % 19
+    if r == 0 then return 0/0 elseif r == 1 then return math.huge elseif r == 2 then return -1e30 end
+    return nil
+end''')
+
+# ── neural network ─────────────────────────────────────────────────────────────
+print("== neural network (Parts > Neural network)")
+NNON = lua('function(ctl) ctl.item("Resolver parts").value = { "Desync resolver", "Jitter resolver", "Neural network" } end')
+NNACC = lua('''function(acc)
+    return function(k, e, r, hit, ctl, S)
+        if k <= 2000 then return end
+        local best, bt = nil, -1
+        for _, s in pairs(S.resolver.shots) do if s.time > bt then best, bt = s, s.time end end
+        if best and best.nnv ~= nil then
+            acc.n = acc.n + 1
+            if math.abs(best.nnv - r.T) <= 12 then acc.ok = acc.ok + 1 end
+        end
+    end
+end''')
+for scn, d, need_acc in (("choke_static", dict(choke=6), 0.9), ("anti_brute", dict(choke=6), 0.9), ("jitter_tick", {}, 0.9),
+                         ("jitter_choke", dict(choke=3), 0.9), ("lby_flick", {}, 0.75)):
+    off, on = avg(scn, d, 20), avg(scn, d, 20, configure=NNON)
+    acc = lua("function() return { n = 0, ok = 0 } end")()
+    run(scn, dict(d), ticks=4000, ping=20, configure=NNON, on_shot=NNACC(acc))
+    a = acc.ok / max(1, acc.n)
+    print(f"   {scn:<14} hit rate off {off:.2f} / on {on:.2f}   the network's own call on the head: {a:.2f} ({int(acc.n)} shots)")
+    check(on >= off - 0.02, f"neural network on {scn}: {on:.2f} < off {off:.2f}")
+    check(acc.n > 100 and a >= need_acc, f"neural network accuracy {scn}: {a:.2f} over {int(acc.n)} shots")
+
+# kept between sessions (database), a broken save starts over, Reset memory clears it
+db = lua("function() return {} end")()
+s = run("jitter_tick", {}, ticks=2500, configure=NNON, db=db)
+n1 = s.S.resolver.nn_info()[0]
+s.fire("shutdown")
+check(n1 >= 30 and db["specter_nn_resolver"] is not None, f"network saved on shutdown ({n1} results)")
+s = run("jitter_tick", {}, ticks=10, configure=NNON, db=db)
+check(s.S.resolver.nn_info()[0] == n1, f"network loaded in the next session: {s.S.resolver.nn_info()[0]} vs {n1}")
+s.S.resolver.reset_all()
+check(s.S.resolver.nn_info()[0] == 0 and db["specter_nn_resolver"] is None, "Reset memory clears the network and its save")
+bad = lua('function() return { specter_nn_resolver = { version = 1, w1 = { 0/0 }, w2 = {}, b1 = {}, b2 = {}, n = 50, agree = 0.5 } } end')()
+# a save whose replay buffer has broken entries: they are dropped at load, learning goes on without errors
+bad2 = lua('function(src) local t = {}; for k, v in pairs(src) do t[k] = v end; t.buffer = { { x = { 1, 2 }, v = 5, hit = true }, "junk", { x = {}, v = 0/0, hit = false } }; return { specter_nn_resolver = t } end')
+saved_ok = run("jitter_tick", {}, ticks=2500, configure=NNON, db=lua("function() return {} end")())
+saved_ok.fire("shutdown")
+s = run("jitter_tick", {}, ticks=1500, configure=NNON, db=bad2(saved_ok.ctl.db["specter_nn_resolver"]))
+check(s.errors == 0 and not errors_of(s), f"save with broken replay entries: {errors_of(s)[:2]}")
+s = run("jitter_tick", {}, ticks=5, configure=NNON, db=bad)
+check(s.S.resolver.nn_info()[0] == 0, "broken save: a new network")
+s = run("jitter_tick", {}, ticks=1500, configure=NNON, db=bad)
+check(s.errors == 0 and not errors_of(s), f"broken save: {errors_of(s)[:2]}")
+s = run("choke_static", dict(choke=6), ticks=3000, configure=NNON, garbage=G0)
+check(s.errors == 0 and not errors_of(s), f"neural network with garbage netvars: {errors_of(s)[:2]}")
+print(f"   saved / loaded between sessions ({n1} results), broken save and reset handled")
 
 # ── parts ───────────────────────────────────────────────────────────────────────
 print("== parts")

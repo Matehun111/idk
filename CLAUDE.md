@@ -63,6 +63,15 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
       on every shot 0.45 -> 0.82, random switches 0.61 -> 0.79 (each random switch costs about one shot, that is the limit)
   * both: Beta-like score of the player's own shots + 0.3 x everybody's, decay 0.9 / 0.97 per shot, the same arm missing twice in a row
     loses its hits; memory per steam id (`mem[key].d` / `.j` / `.tables`), survives rounds (halved at a new round)
+- Neural network (`nn_*`, Parts > "Neural network", on by default): 20 inputs (what both parts see about the record: jitter pattern / side /
+  offset, feet model, side model, lby delta, speed, choke, open side, last hit angle, learned table angle, ...) -> 16 tanh -> 15 angle bins
+  (-56 .. 56, softmax). One network for all players, saved in `database` under `specter_nn_resolver` (`NN_VERSION`: bump it when the
+  inputs / sizes change; a save that does not match or has non-finite weights is replaced by a new network) on round start and shutdown;
+  Reset memory deletes it. Learns from every shot at a record it saw (hist `x`): head hit = cross entropy on the bins within TOL of the
+  angle, resolver miss = push those bins down, + 3 replayed results from a 192 buffer. It is one more arm ("neural net") in both parts,
+  offered after `NN_MIN` results, its bias from how often its own call was on the head of the head hits (`nn.agree`). In the sim it
+  learns the right angle (1.00 static / anti-brute / jitter, 0.88 LBY breaker) but rarely gets picked: the other arms are already at
+  the ceiling there; it is the fallback when they miss on a player. `resolver.nn_info()` = results learned, agreement.
 - Shots are judged by what the RECORD they went at got (`p.hist` by sim tick, `applied_for`, `event.backtrack`), not by what is forced at
   fire time. Head hit 1.5, body hit 0.5, resolver miss 1 (0.5 when backtracked 12+ ticks); spread / prediction / death misses are ignored.
 - Player list: forced once per new record (Correction active on, Force body yaw on, value); a tickbase shifted update (sim time not moving
@@ -73,7 +82,7 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   desync / jitter / jitter native / native, `value`), `database[idx]` (`stance`, `speed`, `consecutive_misses` for auto multipoint,
   `mode` = "d" / "j" for the header), `memory[key].hit_value[stance]` (aa stealer), `forced`, `stats_hook` (set by the stats module).
   The tiers without the resolver get a stub with the same names.
-- Menu: Enable Resolver, Parts (Desync resolver / Jitter resolver / Log), Reset memory. With the jitter part off the desync part takes the
+- Menu: Enable Resolver, Parts (Desync resolver / Jitter resolver / Neural network / Log), Reset memory. With the jitter part off the desync part takes the
   jittering enemies too; with the desync part off non-jittering enemies stay native.
 - Tests: `pip install lupa && python3 tests/resolver_regress.py` runs the real block in `tests/resolver_world.lua` (mock gamesense, enemies on a
   hidden tick level with fakelag / tickbase shifts, a copy of the server feet logic for the true body yaw, aimbot with backtrack and ping
