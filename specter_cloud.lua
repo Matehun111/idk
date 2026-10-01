@@ -858,10 +858,21 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.animation_data = {}
             resolver.run = function() end
             resolver.release = function() end
+            resolver.release_all = function() end
             resolver.new_round = function() end
+            resolver.reset_player = function() end
+            resolver.reset_all = function() end
+            resolver.on_fire = function() end
+            resolver.on_hit = function() end
+            resolver.on_miss = function() end
+            -- the hitlog still reads the backtrack of every shot on tiers without the resolver
+            resolver.shot_backtrack = function(event)
+                return tonumber(type(event) == "table" and event.backtrack) or 0
+            end
             resolver.debug_opt = function() return false end
             resolver.draw_debugger = function() end
         else
+            -- [resolver:begin]
             resolver.database = {}
             resolver.memory = {}
             resolver.miss_count = {}
@@ -875,56 +886,54 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.debug_log = {}
             resolver.global = {}      -- session-wide arm results per context, used as prior for new players
 
-            local RECORDS       = 24      -- stored eye-angle records per player
-            local WINDOW        = 10      -- clean (non-defensive) records used for classification
-            local JIT_ENTER     = 32      -- yaw spread needed to call it jitter
-            local JIT_EXIT      = 22      -- hysteresis: spread needed to stay jitter
+            local RECORDS       = 32      -- stored eye-angle records per player
             local DEF_CAP       = 14      -- max ticks a single tickbase shift keeps "shifting" on
             local FS_INTERVAL   = 4       -- ticks between freestand traces
             local TRACE_OFFSET  = 22
-            local DECAY_PLAYER  = 0.9     -- older results fade so it re-learns when they change AA
-            local DECAY_GLOBAL  = 0.97
+            local JIT_ENTER     = 32      -- yaw spread needed to call it jitter
+            local JIT_EXIT      = 22      -- hysteresis: spread needed to stay jitter
+            local HIST_SIZE     = 64      -- applied overrides remembered per player (shot attribution)
+            local MAX_YAW       = 58      -- animstate aim yaw max
+            local LC_SQ_BASE    = 4096    -- base squared origin-jump for LC break (64 units)
+            local LC_TICKS_BASE = 10      -- ticks to keep LC flag on after a detected break
             local RESOLVER_MISS = { ["?"] = true, ["resolver"] = true }
 
-            -- ping-aware thresholds: scale with local player latency so the
-            -- resolver stops misclassifying records / states at higher ping
-            local STALE_BASE     = 10      -- min bt ticks before half-penalty on miss learning
-            local LC_SQ_BASE     = 4096    -- base squared origin-jump for LC break (64 units)
-            local LC_TICKS_BASE  = 10      -- ticks to keep LC flag on after a detected break
-
-            local cached_ping_ticks = 0
-
-            local function refresh_ping()
-                local ok, lat = pcall(client.latency)
-                if not ok or type(lat) ~= "number" or lat ~= lat then cached_ping_ticks = 0; return end
-                cached_ping_ticks = math_ceil(math_max(lat, 0) / globals_tickinterval())
-            end
-
-            local function stale_threshold()
-                return math_max(STALE_BASE, STALE_BASE + cached_ping_ticks - 2)
-            end
-
-            -- static / slow AA: body yaw relative to the freestand side
-            -- { side multiplier, desync fraction, name }
-            local STATIC_ARMS = {
-                {  1, 1,   "fs full"  },
-                { -1, 1,   "opp full" },
-                {  1, 0.5, "fs half"  },
-                { -1, 0.5, "opp half" },
-                {  0, 0,   "zero"     },
+            ---
+            --- ping profiles: "low" below the threshold, "high" above it. Switched automatically (see refresh_ping).
+            --- high ping = our view of the target is older and shot feedback arrives later, so the resolver
+            --- reacts slower, hedges with half angles, and falls back to safe point / body aim earlier.
+            ---
+            local PROFILES = {
+                low = {
+                    name = "low",
+                    window = 10,                        -- clean records used to classify the target
+                    shift_tol = 0,                      -- sim-time slack (ticks) before an update counts as a tickbase shift
+                    def_pad = 2,                        -- extra ticks a shift keeps "defensive" on
+                    decay_player = 0.90, decay_global = 0.97,
+                    prior_n = 2,                        -- weight of the session prior against the target's own shots
+                    miss_w = 1.0,                       -- scale of every resolver miss
+                    stale_base = 10,                    -- bt ticks from which a miss counts less
+                    half_bias = 0,                      -- score bonus of the half-angle arms
+                    sp_off = 0, ba_off = 0,             -- offsets of the safe point / body aim miss streaks
+                    conf_sp = 0.30, conf_ba = 0.22,     -- arm confidence below which safe point / body aim kick in
+                },
+                high = {
+                    name = "high",
+                    window = 12,
+                    shift_tol = 1,
+                    def_pad = 4,
+                    decay_player = 0.93, decay_global = 0.985,
+                    prior_n = 3,
+                    miss_w = 0.75,
+                    stale_base = 14,
+                    half_bias = 0.06,
+                    sp_off = -1, ba_off = -1,
+                    conf_sp = 0.36, conf_ba = 0.27,
+                },
             }
-            -- jitter AA: which record side to follow and with what polarity
-            -- { use predicted next side, polarity, desync fraction, name }
-            local JITTER_ARMS = {
-                { false,  1, 0.8, "cur +"     },
-                { false, -1, 0.8, "cur -"     },
-                { true,   1, 0.8, "next +"    },
-                { true,  -1, 0.8, "next -"    },
-                { false,  1, 0.45, "cur + low" },
-                { false, -1, 0.45, "cur - low" },
-            }
-            resolver.STATIC_ARMS, resolver.JITTER_ARMS = STATIC_ARMS, JITTER_ARMS
-            local LOW_BIAS = { -0.15, -0.15, 0.20, 0.20, 0.05 }
+            local profile = PROFILES.low
+            local ping = { ms = 0, lat_ms = 0, ticks = 0, high = false, tick = -1000 }
+            resolver.PROFILES, resolver.profile, resolver.ping = PROFILES, profile, ping
 
             local function opt(name)
                 local item = config.resolver and config.resolver.options
@@ -946,10 +955,111 @@ LPH_NO_VIRTUALIZE(function ()
                 return stance == "air" and "air" or "ground"
             end
 
+            -- scoreboard ping (what the player sees) or, when it is not available yet, the net channel latency
+            local function read_ping_ms()
+                local ms, lat_ms = 0, 0
+                local ok, lat = pcall(client.latency)
+                if ok and type(lat) == "number" and lat == lat and lat > 0 then lat_ms = lat * 1000 end
+                local me = entity_get_local_player()
+                local pr = me and entity.get_player_resource and entity.get_player_resource()
+                if pr then
+                    local ok2, v = pcall(entity_get_prop, pr, "m_iPing", me)
+                    if ok2 and type(v) == "number" and v == v and v > 0 then ms = v end
+                end
+                return math_max(ms, lat_ms), lat_ms
+            end
+
+            -- picks the profile: Auto switches to "high" at the threshold (35 ms by default) and only
+            -- drops back 4 ms below it, so a ping hovering around the limit does not flap
+            local function refresh_ping(force)
+                local tick = globals_tickcount()
+                if not force and tick >= ping.tick and tick - ping.tick < 16 then return end
+                ping.tick = tick
+
+                local ms, lat_ms = read_ping_ms()
+                ping.ms = ping.ms > 0 and (ping.ms * 0.5 + ms * 0.5) or ms
+                ping.lat_ms = lat_ms
+                ping.ticks = math_ceil(math_max(lat_ms, 0) / 1000 / globals_tickinterval())
+
+                local mode_item = config.resolver and config.resolver.ping_mode
+                local thr_item = config.resolver and config.resolver.ping_threshold
+                local mode = mode_item and mode_item:get() or "Auto"
+                local thr = thr_item and thr_item:get() or 35
+                local high
+                if mode == "High ping" then
+                    high = true
+                elseif mode == "Low ping" then
+                    high = false
+                elseif ping.high then
+                    high = ping.ms >= thr - 4
+                else
+                    high = ping.ms >= thr
+                end
+
+                if high ~= ping.high then
+                    ping.high = high
+                    profile = high and PROFILES.high or PROFILES.low
+                    resolver.profile = profile
+                    log("ping %d ms -> %s ping profile", math_floor(ping.ms + 0.5), profile.name)
+                end
+            end
+
+            local function stale_threshold()
+                return math_max(profile.stale_base, profile.stale_base + ping.ticks - 2)
+            end
+
+            ---
+            --- arms: every way the resolver can pick an angle. Learned per player and per context
+            --- (s = static desync per stance, j = jitter, d = defensive / tickbase shift).
+            ---
+            -- static AA: body yaw relative to the freestand side, a remembered hit, or the networked body yaw pose
+            local STATIC_ARMS = {
+                { pol =  1, frac = 1,   name = "fs full"  },
+                { pol = -1, frac = 1,   name = "opp full" },
+                { pol =  1, frac = 0.5, name = "fs half"  },
+                { pol = -1, frac = 0.5, name = "opp half" },
+                { pol =  0, frac = 0,   name = "zero"     },
+                { src = "db",                 name = "db hit"   },
+                { src = "pose", pol =  1,     name = "pose"     },
+                { src = "pose", pol = -1,     name = "pose inv" },
+                { pol =  1, frac = 0.25, name = "fs low"  },
+                { pol = -1, frac = 0.25, name = "opp low" },
+            }
+            -- jitter AA: which record side to follow (current / predicted next) and with what polarity
+            local JITTER_ARMS = {
+                { next = false, pol =  1, frac = 1,   name = "cur +"     },
+                { next = false, pol = -1, frac = 1,   name = "cur -"     },
+                { next = true,  pol =  1, frac = 1,   name = "next +"    },
+                { next = true,  pol = -1, frac = 1,   name = "next -"    },
+                { next = false, pol =  1, frac = 0.6, name = "cur + low" },
+                { next = false, pol = -1, frac = 0.6, name = "cur - low" },
+                { src = "zero",                       name = "zero"      },
+            }
+            -- defensive: what to force while the target is shifting its tickbase
+            local DEF_ARMS = {
+                { src = "hold", pol =  1, frac = 1,   name = "hold"      },
+                { src = "hold", pol =  1, frac = 0.5, name = "hold half" },
+                { src = "hold", pol = -1, frac = 1,   name = "hold flip" },
+                { src = "zero",                       name = "zero"      },
+                { src = "fresh",                      name = "fresh"     },
+            }
+            local ARM_LISTS = { s = STATIC_ARMS, j = JITTER_ARMS, d = DEF_ARMS }
+            resolver.STATIC_ARMS, resolver.JITTER_ARMS, resolver.DEF_ARMS = STATIC_ARMS, JITTER_ARMS, DEF_ARMS
+
+            -- score offsets: arm order of the first guess, plus what the animation layers tell us
+            -- without any evidence the "low" arms are the last resort
+            local STATIC_BIAS = { 0, -0.02, -0.04, -0.06, -0.12, 0.05, 0, 0, -0.14, -0.15 }
+            -- no LBY realign for a while while standing: the desync is probably <= ~35, small angles go first
+            local LOW_BIAS    = { -0.15, -0.15, 0.20, 0.20, 0.05, 0, 0, 0, 0.26, 0.26 }
+            -- balance adjust just played: the desync is > 35
+            local FULL_BIAS   = {  0.10,  0.10, -0.12, -0.12, -0.25, 0, 0, 0, -0.10, -0.10 }
+            local JITTER_BIAS = { 0, 0, 0, 0, -0.03, -0.03, -0.10 }
+            local DEF_BIAS    = { 0.10, 0.04, -0.02, -0.04, 0 }
+
             local function arm_name(ctx, arm)
                 if not ctx or not arm then return "-" end
-                local list = ctx:sub(1, 1) == "j" and JITTER_ARMS or STATIC_ARMS
-                return list[arm] and list[arm][#list[arm]] or tostring(arm)
+                local list = ARM_LISTS[ctx:sub(1, 1)] or STATIC_ARMS
+                return list[arm] and list[arm].name or tostring(arm)
             end
             resolver.arm_name = arm_name
 
@@ -965,23 +1075,27 @@ LPH_NO_VIRTUALIZE(function ()
 
             local function wild(ctx) return ctx:sub(1, 1) .. "|*" end
 
+            -- mean hit rate of an arm: the target's own shots, backed by what worked on everybody else
             local function arm_score(m, ctx, i, n)
                 local own = arm_table(m.arms, ctx, n)[i]
                 local g = arm_table(resolver.global, ctx, n)[i]
                 local w = arm_table(resolver.global, wild(ctx), n)[i]
-                -- session prior: this stance for everyone + every stance for everyone
                 local prior = (g.s + w.s + 1) / (g.s + g.f + w.s + w.f + 2)
-                return (own.s + 2 * prior) / (own.s + own.f + 2) - i * 0.001
+                return (own.s + profile.prior_n * prior) / (own.s + own.f + profile.prior_n)
             end
             resolver.arm_score = arm_score
 
-            local function arm_pick(m, ctx, n, bias)
-                local best, best_score = 1, -math.huge
+            -- best available arm; also returns its unbiased score as the confidence of the pick
+            local function arm_pick(m, ctx, n, bias, avail)
+                local best, best_score, best_raw = nil, -math.huge, 0.5
                 for i = 1, n do
-                    local sc = arm_score(m, ctx, i, n) + (bias and bias[i] or 0)
-                    if sc > best_score then best, best_score = i, sc end
+                    if not avail or avail[i] then
+                        local raw = arm_score(m, ctx, i, n)
+                        local sc = raw + (bias and bias[i] or 0) - i * 0.001
+                        if sc > best_score then best, best_score, best_raw = i, sc, raw end
+                    end
                 end
-                return best, best_score
+                return best or 1, best_raw
             end
             resolver.arm_pick = arm_pick
 
@@ -990,10 +1104,11 @@ LPH_NO_VIRTUALIZE(function ()
                 local own = arm_table(m.arms, ctx, n)
                 local g = arm_table(resolver.global, ctx, n)
                 local w = arm_table(resolver.global, wild(ctx), n)
+                local dp, dg = profile.decay_player, profile.decay_global
                 for k = 1, n do
-                    own[k].s, own[k].f = own[k].s * DECAY_PLAYER, own[k].f * DECAY_PLAYER
-                    g[k].s, g[k].f = g[k].s * DECAY_GLOBAL, g[k].f * DECAY_GLOBAL
-                    w[k].s, w[k].f = w[k].s * DECAY_GLOBAL, w[k].f * DECAY_GLOBAL
+                    own[k].s, own[k].f = own[k].s * dp, own[k].f * dp
+                    g[k].s, g[k].f = g[k].s * dg, g[k].f * dg
+                    w[k].s, w[k].f = w[k].s * dg, w[k].f * dg
                 end
                 if hit then
                     own[i].s, g[i].s, w[i].s = own[i].s + weight, g[i].s + weight * 0.5, w[i].s + weight * 0.5
@@ -1006,15 +1121,19 @@ LPH_NO_VIRTUALIZE(function ()
                 local data = resolver.database[idx]
                 if not data then
                     data = {
-                        key = idx, records = {}, last_sim = nil, max_st = nil, last_origin = nil,
+                        key = idx, records = {}, hist = {}, last_sim = nil, max_st = nil, last_origin = nil,
                         def_until = 0, def_reason = nil, def_rate = 0, lc_until = 0,
-                        stance = "stand", used_stance = "stand", speed = 0, max_desync = 44, choke = 0,
-                        is_jitter = false, jitter_ratio = 0, jitter_side = 0, jitter_next = 0,
+                        stance = "stand", used_stance = "stand", speed = 0, max_desync = MAX_YAW, choke = 0,
+                        is_jitter = false, yaw_jitter = false, jitter_kind = "static", jitter_regular = false, jitter_period = 1,
+                        jitter_ratio = 0, jitter_side = 0, jitter_next = 0,
                         jitter_amp = 0, jitter_run = 1, jitter_flips = 0, spread = 0,
-                        clean_count = 0, freestand = 0,
+                        clean_count = 0, freestand = 0, fs_pending = 0,
                         is_shifting = false, pitch_snap = false, real_pitch = 89, lc_break = false,
                         confidence = 0, consecutive_misses = 0,
                         last_reason = "native", meta_type = "normal",
+                        pose = nil, pose_ok = false, pose_jit_on = false,
+                        low_desync = false, bal_recent = false,
+                        arm_conf = nil, def_conf = nil, new_record = false,
                     }
                     resolver.database[idx] = data
                 end
@@ -1023,7 +1142,7 @@ LPH_NO_VIRTUALIZE(function ()
                 if m and m.name ~= name then m = nil end
                 if not m then
                     m = {
-                        name = name, hit_value = {}, arms = {},
+                        name = name, hit_value = {}, arms = {}, learn_time = {},
                         hits = 0, resolver_misses = 0, streak = 0,
                         def_misses_round = 0, lc_misses_round = 0,
                     }
@@ -1063,13 +1182,60 @@ LPH_NO_VIRTUALIZE(function ()
                 return left < right and 1 or -1
             end
 
-            -- classify from clean records only: jitter vs static, current side, predicted next side
+            -- networked body yaw pose parameter, in degrees (-60..60). Never trusted blindly: whether it is the real
+            -- server value (or just gamesense's own animation) is decided by the target's shots through the "pose" / "pose inv" arms.
+            local function read_pose(idx)
+                local ok, v = pcall(entity_get_prop, idx, "m_flPoseParameter", 11)
+                if not ok or type(v) ~= "number" or v ~= v or v < 0 or v > 1 then return nil end
+                return (v - 0.5) * 120
+            end
+
+            ---
+            --- classification: static desync vs jitter (eye yaw or body yaw), current side, predicted next side
+            ---
+            -- walks a side sequence (newest first) oldest -> newest: side changes, run lengths, length of the current run
+            local function runs_of(sides, n)
+                local flips, runs, run, last = 0, {}, 0, 0
+                for i = n, 1, -1 do
+                    local s = sides[i]
+                    if s ~= 0 then
+                        if last ~= 0 and s ~= last then
+                            flips = flips + 1
+                            runs[#runs + 1] = run
+                            run = 0
+                        end
+                        last, run = s, run + 1
+                    end
+                end
+                return flips, runs, run, last
+            end
+
+            -- period of the flips and whether they are regular. The oldest run is cut by the window,
+            -- so it is ignored whenever there is enough data.
+            local function run_period(runs)
+                local first = #runs >= 3 and 2 or 1
+                local sum, cnt = 0, 0
+                for i = first, #runs do sum, cnt = sum + runs[i], cnt + 1 end
+                if cnt == 0 then return 1, false, 1 end
+                local avg = sum / cnt
+                local var = 0
+                for i = first, #runs do var = var + (runs[i] - avg) * (runs[i] - avg) end
+                var = var / cnt
+                return math_max(1, math_floor(avg + 0.5)), cnt >= 2 and var <= math_max(0.35, 0.2 * avg * avg), avg
+            end
+
+            local function predict_next(cur, run, period)
+                if cur == 0 then return 0 end
+                if run >= period then return -cur end
+                return cur
+            end
+
             local function analyze(data)
                 local clean, r = {}, data.records
                 for i = #r, 1, -1 do
                     if not r[i].def then
                         clean[#clean + 1] = r[i]            -- newest first
-                        if #clean >= WINDOW then break end
+                        if #clean >= profile.window then break end
                     end
                 end
                 local n = #clean
@@ -1080,8 +1246,9 @@ LPH_NO_VIRTUALIZE(function ()
                 data.real_pitch = n > 0 and c_math.clamp(ps / n, -89, 89) or 89
 
                 if n < 3 then
-                    data.is_jitter, data.spread, data.jitter_flips = false, 0, 0
+                    data.is_jitter, data.yaw_jitter, data.spread, data.jitter_flips = false, false, 0, 0
                     data.jitter_ratio, data.jitter_side, data.jitter_next = 0, 0, 0
+                    data.jitter_kind, data.jitter_regular, data.jitter_period = "static", false, 1
                     return
                 end
 
@@ -1104,60 +1271,121 @@ LPH_NO_VIRTUALIZE(function ()
                     sides[i] = d > dead and 1 or (d < -dead and -1 or 0)
                 end
 
-                -- walk oldest -> newest counting side changes and run lengths
-                local flips, runs, run, last = 0, {}, 0, 0
-                for i = n, 1, -1 do
-                    local s = sides[i]
-                    if s ~= 0 then
-                        if last ~= 0 and s ~= last then
-                            flips = flips + 1
-                            runs[#runs + 1] = run
-                            run = 0
-                        end
-                        last, run = s, run + 1
-                    end
-                end
-                local avg_run = 1
-                if #runs > 0 then
-                    local sum = 0
-                    for i = 1, #runs do sum = sum + runs[i] end
-                    avg_run = sum / #runs
+                local flips, runs, run, last = runs_of(sides, n)
+                local period, regular, avg_run = run_period(runs)
+
+                -- eye yaw sitting on 3+ separate values (skitter / multi-way) is not a two-sided jitter
+                local sorted = {}
+                for i = 1, n do sorted[i] = vals[i] end
+                table_sort(sorted)
+                local gap, clusters = math_max(8, spread * 0.22), 1
+                for i = 2, n do
+                    if sorted[i] - sorted[i - 1] > gap then clusters = clusters + 1 end
                 end
 
-                local thr = data.is_jitter and JIT_EXIT or JIT_ENTER
                 -- one turn (peek, flick) is a single flip; jitter keeps going back and forth
-                data.is_jitter = spread >= thr and flips >= 2
+                local thr = data.yaw_jitter and JIT_EXIT or JIT_ENTER
+                local yaw_jitter = spread >= thr and flips >= 2
+                data.yaw_jitter = yaw_jitter
                 data.spread, data.jitter_flips, data.jitter_run = spread, flips, avg_run
                 data.jitter_ratio = flips / (n - 1)
                 data.jitter_amp = spread * 0.5
 
                 local cur = sides[1] ~= 0 and sides[1] or last
-                data.jitter_side = cur
-                if cur == 0 then
-                    data.jitter_next = 0
-                elseif run >= math_max(1, math_floor(avg_run + 0.5)) then
-                    data.jitter_next = -cur
+                local next_side = predict_next(cur, run, period)
+                local kind = "static"
+                if yaw_jitter then
+                    kind = clusters >= 3 and "multi" or (regular and "jitter" or "random")
+                end
+
+                -- desync jitter: the eye yaw is quiet but the networked body yaw keeps switching sides.
+                -- The body yaw reading may just mirror what we forced ourselves, so it only starts counting when
+                -- our own forced value was NOT flipping (that could explain the flips); once on it stays on while the flips go on.
+                if yaw_jitter then data.pose_jit_on = false end
+                if not yaw_jitter and data.pose_ok then
+                    local psides, pamp, pn = {}, 0, 0
+                    for i = 1, n do
+                        local p = clean[i].pose
+                        if p then
+                            pn = pn + 1
+                            if math_abs(p) > pamp then pamp = math_abs(p) end
+                            psides[i] = p > 8 and 1 or (p < -8 and -1 or 0)
+                        else
+                            psides[i] = 0
+                        end
+                    end
+                    local on = false
+                    if pn >= 5 then
+                        local pflips, pruns, prun, plast = runs_of(psides, n)
+                        local own_flips, prev_f = 0, nil
+                        for i = n, 1, -1 do
+                            local f = clean[i].fv
+                            if f ~= nil and prev_f ~= nil and math_abs(f - prev_f) >= 12 then own_flips = own_flips + 1 end
+                            prev_f = f
+                        end
+                        local start = pflips >= 3 and pamp >= 18 and own_flips <= 1
+                        local keep = data.pose_jit_on == true and pflips >= 2 and pamp >= 18
+                        if start or keep then
+                            on = true
+                            local pperiod, preg = run_period(pruns)
+                            local pcur = psides[1] ~= 0 and psides[1] or plast
+                            kind, cur, period, regular = "desync jitter", pcur, pperiod, preg
+                            next_side = predict_next(pcur, prun, pperiod)
+                        end
+                    end
+                    data.pose_jit_on = on
+                end
+
+                data.is_jitter = kind ~= "static"
+                data.jitter_kind = kind
+                data.jitter_side, data.jitter_next = cur, next_side
+                data.jitter_period, data.jitter_regular = period, regular
+            end
+
+            ---
+            --- observation: one pass per new network update of an enemy
+            ---
+            local function read_layers(idx, data, tick)
+                if not (ffi_helpers and ffi_helpers.animlayers and ffi_helpers.activity) or resolver.layers_broken then
+                    data.layers_ok = false
+                    return
+                end
+                -- animation layer 3 running "balance adjust" (979) = the feet just realigned with the eye yaw,
+                -- which only happens for a desync > ~35. Fully optional: if the read fails the resolver just works without it.
+                local ok, active = pcall(function()
+                    local layers = ffi_helpers.animlayers:get(idx)
+                    if layers == nil then return false end
+                    local l = layers[3]
+                    return l.weight > 0.01 and l.cycle < 0.99 and ffi_helpers.activity:get(l.sequence, idx) == 979
+                end)
+                if ok then
+                    data.layers_ok = true
+                    if active then data.balance_tick = tick end
                 else
-                    data.jitter_next = cur
+                    data.layers_ok = false
+                    resolver.layer_errors = (resolver.layer_errors or 0) + 1
+                    if resolver.layer_errors > 50 then resolver.layers_broken = true end
                 end
             end
+
 
             local function update_player(idx, me)
                 local data = resolver.init_player(idx)
                 local tick = globals_tickcount()
                 local sim = entity_get_prop(idx, "m_flSimulationTime")
-                if not sim or sim <= 0 then return data end
+                if not sim or sim ~= sim or sim <= 0 or sim > 1e9 then return data end
                 local st = tick_of(sim)
 
                 -- a real tickbase shift is at most ~17 ticks; anything bigger is a map change / reconnect
                 if data.max_st and st < data.max_st - 32 then
-                    data.max_st, data.records = nil, {}
+                    data.max_st, data.records, data.hist, data.last_sim = nil, {}, {}, nil
                 end
 
+                data.new_record = false
                 if data.last_sim == nil or st ~= data.last_sim then
-                    -- at higher ping (5+ ticks ≈ 78ms+), allow 1 tick of sim-time jitter
-                    -- before calling it a tickbase shift; real shifts are 2+ ticks back
-                    local shift_tol = cached_ping_ticks >= 5 and 1 or 0
+                    data.new_record = true
+                    -- the sim time of a shifted update goes back; at high ping allow a tick of slack before calling it a shift
+                    local shift_tol = profile.shift_tol + (ping.ticks >= 10 and 1 or 0)
                     local shifted = data.max_st ~= nil and st + shift_tol <= data.max_st
                     if data.max_st and st > data.max_st then
                         data.choke = c_math.clamp(st - data.max_st - 1, 0, 64)
@@ -1166,14 +1394,15 @@ LPH_NO_VIRTUALIZE(function ()
                     local pitch, eye_yaw = entity_get_prop(idx, "m_angEyeAngles")
                     local ox, oy, oz = entity_get_prop(idx, "m_vecOrigin")
                     local mx, my = entity_get_prop(me, "m_vecOrigin")
+                    if eye_yaw and (eye_yaw ~= eye_yaw or eye_yaw > 1e5 or eye_yaw < -1e5) then eye_yaw = nil end
+                    if pitch and pitch ~= pitch then pitch = nil end
 
-                    -- lag compensation breaker: big jump between two valid updates
-                    -- at higher ping, legitimate inter-update movement is larger, so
-                    -- scale the distance threshold up to avoid false positives
+                    -- lag compensation breaker: a jump bigger than the target could have walked since the last update
                     if not shifted and ox and data.last_origin then
                         local dx, dy, dz = ox - data.last_origin[1], oy - data.last_origin[2], oz - data.last_origin[3]
-                        local lc_sq = LC_SQ_BASE + cached_ping_ticks * cached_ping_ticks * 16
-                        local lc_window = math_max(LC_TICKS_BASE, 8 + cached_ping_ticks)
+                        local legit = (data.speed or 0) * (data.choke + 1) * globals_tickinterval() * 1.4 + 20
+                        local lc_sq = math_max(LC_SQ_BASE + ping.ticks * ping.ticks * 16, legit * legit)
+                        local lc_window = math_max(LC_TICKS_BASE, 8 + ping.ticks)
                         if dx * dx + dy * dy + dz * dz > lc_sq then data.lc_until = tick + lc_window end
                     end
                     if not shifted and ox then data.last_origin = { ox, oy, oz } end
@@ -1184,7 +1413,7 @@ LPH_NO_VIRTUALIZE(function ()
                     local def_reason
                     if shifted then
                         def_reason = "tickbase shift"
-                        data.def_until = math_max(data.def_until, tick + c_math.clamp(data.max_st - st + 2, 2, DEF_CAP))
+                        data.def_until = math_max(data.def_until, tick + c_math.clamp(data.max_st - st + profile.def_pad, 2, DEF_CAP))
                     elseif pitch and data.clean_count >= 3 and data.real_pitch > 60 and pitch < data.real_pitch - 45 then
                         def_reason = "pitch flick"
                         data.def_until = math_max(data.def_until, tick + 2)
@@ -1196,13 +1425,24 @@ LPH_NO_VIRTUALIZE(function ()
                     end
                     data.def_rate = data.def_rate * 0.9 + (def_reason and 0.1 or 0)
 
+                    -- networked body yaw (not from shifted updates: those carry nonsense)
+                    local pose
+                    if not def_reason then
+                        pose = read_pose(idx)
+                        if pose then data.pose = pose end
+                        data.pose_ok = data.pose ~= nil
+                    end
+
                     if eye_yaw and ox and mx then
-                        local r = data.records
-                        r[#r + 1] = {
-                            rel = c_math.normalize_yaw(eye_yaw - math.deg(math.atan2(my - oy, mx - ox)) - 180),
-                            pitch = pitch or 0, def = def_reason ~= nil, tick = tick,
-                        }
-                        while #r > RECORDS do table_remove(r, 1) end
+                        local rel = c_math.normalize_yaw(eye_yaw - math.deg(math.atan2(my - oy, mx - ox)) - 180)
+                        if rel == rel then
+                            local r = data.records
+                            r[#r + 1] = {
+                                rel = rel, pitch = pitch or 0, def = def_reason ~= nil, tick = tick, st = st, pose = pose,
+                                fv = resolver.forced[idx],
+                            }
+                            while #r > RECORDS do table_remove(r, 1) end
+                        end
                     end
 
                     if not shifted then data.max_st = st end
@@ -1210,7 +1450,15 @@ LPH_NO_VIRTUALIZE(function ()
                     if not data.fs_tick or tick - data.fs_tick >= FS_INTERVAL or tick < data.fs_tick then
                         data.fs_tick = tick
                         local ok, side = pcall(freestand_side, idx, me)
-                        data.freestand = ok and side or 0
+                        side = ok and side or 0
+                        -- a new side has to be seen twice in a row, so one odd trace does not flip the first guess
+                        if data.freestand == 0 or side == data.freestand then
+                            data.freestand, data.fs_pending = side, 0
+                        elseif side == data.fs_pending then
+                            data.freestand, data.fs_pending = side, 0
+                        else
+                            data.fs_pending = side
+                        end
                     end
 
                     data.stance = get_stance(idx)
@@ -1218,31 +1466,16 @@ LPH_NO_VIRTUALIZE(function ()
                         data.prev_stance, data.stance_since = data.stance, tick
                     end
 
-                    -- ffi: animation layer 3 running "balance adjust" (979) = they are breaking LBY -> full desync.
-                    -- Fully optional: if the memory read fails the resolver just works without it.
-                    if ffi_helpers and ffi_helpers.animlayers and ffi_helpers.activity and not resolver.layers_broken then
-                        local ok, active = pcall(function()
-                            local layers = ffi_helpers.animlayers:get(idx)
-                            if layers == nil then return false end
-                            local l = layers[3]
-                            return l.weight > 0.01 and l.cycle < 0.99 and ffi_helpers.activity:get(l.sequence, idx) == 979
-                        end)
-                        if ok then
-                            data.layers_ok = true
-                            if active then data.balance_tick = tick end
-                        else
-                            resolver.layer_errors = (resolver.layer_errors or 0) + 1
-                            if resolver.layer_errors > 50 then resolver.layers_broken = true end
-                        end
-                    end
+                    read_layers(idx, data, tick)
                     local window = math_floor(1.2 / globals_tickinterval())
                     local standing_long = data.stance == "stand"
                         and data.stance_since ~= nil and tick - data.stance_since > window
-                    data.low_desync = (data.layers_ok == true and standing_long
-                        and (data.balance_tick == nil or tick - data.balance_tick > window))
-                        or (not data.layers_ok and standing_long
-                            and tick - data.stance_since > window * 2
-                            and (data.choke or 0) <= 2)
+                    -- realigned within the last second: the desync is bigger than ~35.
+                    -- standing for a while without one: it is smaller. Only believed when the layers are readable,
+                    -- without them there is no evidence either way.
+                    data.bal_recent = data.layers_ok == true and data.balance_tick ~= nil and tick - data.balance_tick <= window
+                    data.low_desync = data.layers_ok == true and standing_long
+                        and (data.balance_tick == nil or tick - data.balance_tick > window)
 
                     analyze(data)
                 end
@@ -1256,16 +1489,19 @@ LPH_NO_VIRTUALIZE(function ()
                 if speed ~= speed then speed = 0 end
                 speed = c_math.clamp(speed, 0, 320)
                 data.speed = speed
+                -- animstate: the usable desync shrinks with speed (and ducking while moving)
                 local duck = entity_get_prop(idx, "m_flDuckAmount") or 0
                 local run = c_math.clamp(speed / 135, 0, 1)
                 local avg = 1 - (0.2 + 0.3 * c_math.clamp((speed - 70) / 65, 0, 1)) * run
                 if duck > 0 then avg = avg + duck * run * (0.5 - avg) end
-                data.max_desync = c_math.clamp(math_floor(44 * avg + 0.5), 16, 48)
-                if data.low_desync then
-                    data.max_desync = math_min(data.max_desync, 22)
-                end
+                data.max_desync = c_math.clamp(math_floor(MAX_YAW * avg + 0.5), 20, MAX_YAW)
 
-                local base_type = data.is_jitter and "jitter" or (data.stance == "stand" and "static" or "normal")
+                local base_type = "normal"
+                if data.is_jitter then
+                    base_type = data.jitter_kind == "desync jitter" and "d-jitter" or data.jitter_kind
+                elseif data.stance == "stand" then
+                    base_type = "static"
+                end
                 data.meta_type = data.def_rate > 0.05 and (base_type .. "+def") or base_type
 
                 resolver.animation_data[idx] = {
@@ -1275,6 +1511,124 @@ LPH_NO_VIRTUALIZE(function ()
                 return data
             end
 
+            ---
+            --- 1) static desync
+            ---
+            -- first guess goes to the OPEN side (live logs showed the covered side missing);
+            -- the learning still flips it per player / globally if that turns out wrong
+            local function hint_side(data)
+                return data.freestand ~= 0 and -data.freestand or 1
+            end
+
+            local function resolve_static(idx, data, m)
+                local stance = data.stance
+                local ctx = "s|" .. stance
+                local n = #STATIC_ARMS
+                local avail, bias = {}, {}
+                for i = 1, n do avail[i], bias[i] = true, STATIC_BIAS[i] or 0 end
+
+                -- animation layers: realigned recently = big desync, standing a while without = small desync
+                local ev = data.low_desync and LOW_BIAS or (data.bal_recent and FULL_BIAS or nil)
+                if ev then
+                    for i = 1, #ev do bias[i] = bias[i] + ev[i] end
+                end
+                bias[3], bias[4] = bias[3] + profile.half_bias, bias[4] + profile.half_bias
+
+                -- the angle that last hit this player in this stance, and the networked body yaw (when it is not an echo)
+                local hv = m.hit_value[stance]
+                avail[6] = hv ~= nil
+                local pose_arm = data.pose_ok and data.pose ~= nil and math_abs(data.pose) >= 6
+                avail[7], avail[8] = pose_arm, pose_arm
+
+                local arm, conf = arm_pick(m, ctx, n, bias, avail)
+                data.arm_conf = conf
+                local a = STATIC_ARMS[arm]
+                local side = hint_side(data)
+                local maxd = data.max_desync
+                local value, reason
+                if a.src == "db" then
+                    value, reason = hv, "db hit"
+                elseif a.src == "pose" then
+                    value, reason = a.pol * data.pose, "pose"
+                else
+                    value = a.pol * side * math_floor(maxd * a.frac + 0.5)
+                    reason = arm == 1 and (data.freestand ~= 0 and "freestand" or "desync") or ("brute " .. arm)
+                end
+                value = math_floor(c_math.clamp(value, -60, 60) + 0.5)
+
+                data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
+                data.used_pol, data.used_side, data.used_step = a.pol or 1, side, arm
+                return value, reason
+            end
+
+            ---
+            --- 2) jitter
+            ---
+            local function resolve_jitter(idx, data, m)
+                if not opt("Jitter fix") then return nil, "native" end
+                local ctx = "j|" .. jit_group(data.stance)
+                local n = #JITTER_ARMS
+                local avail, bias = {}, {}
+                for i = 1, n do avail[i], bias[i] = true, JITTER_BIAS[i] or 0 end
+
+                -- an irregular flip pattern cannot be predicted: "next" is a coin toss, the smaller / centred angles are safer
+                if not data.jitter_regular then
+                    bias[3], bias[4] = bias[3] - 0.10, bias[4] - 0.10
+                end
+                if data.jitter_kind == "random" or data.jitter_kind == "multi" then
+                    bias[5], bias[6], bias[7] = bias[5] + 0.08, bias[6] + 0.08, bias[7] + 0.12
+                end
+
+                local arm, conf = arm_pick(m, ctx, n, bias, avail)
+                data.arm_conf = conf
+                local a = JITTER_ARMS[arm]
+                local side = a.next and data.jitter_next or data.jitter_side
+                if side == 0 then side = data.jitter_side ~= 0 and data.jitter_side or 1 end
+                local value = 0
+                if a.src ~= "zero" then
+                    value = a.pol * side * math_floor(data.max_desync * a.frac + 0.5)
+                end
+                value = math_floor(c_math.clamp(value, -60, 60) + 0.5)
+
+                data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
+                data.used_pol, data.used_side, data.used_step = a.pol or 1, side, arm
+                return value, a.frac and a.frac < 1 and "jitter low" or "jitter"
+            end
+
+            ---
+            --- 3) defensive: while the target shifts its tickbase the updates carry nonsense, so the angle is
+            --- not recomputed from them. It holds what worked right before the shift (or a hedge of it), and what
+            --- works is learned in its own context so defensive shots never poison the normal arms.
+            ---
+            local function resolve_defensive(idx, data, m)
+                local tick = globals_tickcount()
+                local ctx = data.is_jitter and "d|j" or "d|s"
+                local n = #DEF_ARMS
+                local lg = data.last_good_value
+                local have = lg ~= nil and data.last_good_tick ~= nil and tick - data.last_good_tick <= 192
+                local avail, bias = {}, {}
+                for i = 1, n do avail[i], bias[i] = true, DEF_BIAS[i] or 0 end
+                avail[1], avail[2], avail[3] = have, have, have
+
+                local arm, conf = arm_pick(m, ctx, n, bias, avail)
+                data.def_conf = conf
+                local a = DEF_ARMS[arm]
+                local value
+                if a.src == "hold" then
+                    value = a.pol * math_floor(lg * a.frac + 0.5)
+                elseif a.src == "zero" then
+                    value = 0
+                else
+                    -- what the normal resolver would pick right now
+                    value = (data.is_jitter and resolve_jitter or resolve_static)(idx, data, m)
+                end
+
+                data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
+                data.used_pol, data.used_side, data.used_step = a.pol or 1, 1, arm
+                if value == nil then return nil, "native" end
+                return value, "defensive hold"
+            end
+
             -- always returns a forced body yaw (native gamesense resolver is never trusted),
             -- except when "Jitter fix" is off and the target is jittering
             resolver.get_override = function(idx)
@@ -1282,33 +1636,15 @@ LPH_NO_VIRTUALIZE(function ()
                 data.used_stance = data.stance
                 data.used_ctx, data.used_arm, data.used_n = nil, nil, nil
                 data.used_pol, data.used_side, data.used_step = nil, nil, nil
-                local maxd = data.max_desync
+                data.arm_conf, data.def_conf = nil, nil
 
-                if data.is_jitter then
-                    if not opt("Jitter fix") then return nil, "native" end
-                    local ctx = "j|" .. jit_group(data.stance)
-                    local arm = arm_pick(m, ctx, #JITTER_ARMS)
-                    local a = JITTER_ARMS[arm]
-                    local side = a[1] and data.jitter_next or data.jitter_side
-                    if side == 0 then side = data.jitter_side ~= 0 and data.jitter_side or 1 end
-                    data.used_ctx, data.used_arm, data.used_n = ctx, arm, #JITTER_ARMS
-                    data.used_pol, data.used_side, data.used_step = a[2], side, arm
-                    return a[2] * side * math_floor(maxd * a[3] + 0.5), "jitter"
+                if data.is_shifting and opt("Defensive fix") then
+                    return resolve_defensive(idx, data, m)
                 end
-
-                local ctx = "s|" .. data.stance
-                -- no LBY break for a while while standing -> low desync is more likely: try half angles first
-                local bias = data.low_desync and LOW_BIAS or nil
-                local arm = arm_pick(m, ctx, #STATIC_ARMS, bias)
-                local a = STATIC_ARMS[arm]
-                -- first guess goes to the OPEN side (live logs showed the covered side missing);
-                -- the learning below still flips it per player / globally if that turns out wrong
-                local fs = data.freestand ~= 0 and -data.freestand or 1
-                data.used_ctx, data.used_arm, data.used_n = ctx, arm, #STATIC_ARMS
-                data.used_pol, data.used_side, data.used_step = a[1], fs, arm
-                local value = a[1] * fs * math_floor(maxd * a[2] + 0.5)
-                if arm == 1 then return value, data.freestand ~= 0 and "freestand" or "desync" end
-                return value, "brute " .. arm
+                if data.is_jitter then
+                    return resolve_jitter(idx, data, m)
+                end
+                return resolve_static(idx, data, m)
             end
 
             resolver.plist_read = function(idx, field)
@@ -1367,15 +1703,29 @@ LPH_NO_VIRTUALIZE(function ()
                 store[idx] = on or nil
             end
 
+            -- aim levers besides the angle: safe point / body aim when the resolver is not sure
             local function write_extras(idx, data, m)
                 local streak = m.streak or 0
-                local sa = (config.resolver.safe_after and config.resolver.safe_after:get()) or 2
-                local ba = (config.resolver.baim_after and config.resolver.baim_after:get()) or 3
-                local want_sp = opt("Safe point on misses") and streak > 0 and streak >= sa
-                local want_ba = opt("Body aim on misses") and streak > 0 and streak >= ba
-                if data.is_shifting and opt("Defensive fix") and (m.def_misses_round or 0) > 0 then
-                    want_sp, want_ba = true, true
+                local sa = math_max(1, ((config.resolver.safe_after and config.resolver.safe_after:get()) or 2) + profile.sp_off)
+                local ba = math_max(1, ((config.resolver.baim_after and config.resolver.baim_after:get()) or 3) + profile.ba_off)
+                local use_sp, use_ba = opt("Safe point on misses"), opt("Body aim on misses")
+                local want_sp = use_sp and streak > 0 and streak >= sa
+                local want_ba = use_ba and streak > 0 and streak >= ba
+
+                -- every arm of this target keeps failing: stop gambling on the head
+                if data.arm_conf ~= nil and (m.resolver_misses or 0) >= 2 then
+                    if use_sp and data.arm_conf < profile.conf_sp then want_sp = true end
+                    if use_ba and data.arm_conf < profile.conf_ba then want_ba = true end
                 end
+
+                -- shifting: the angle is a guess by definition. After a defensive miss (or when the defensive arms
+                -- are failing) play it safe until the target stops shifting.
+                if data.is_shifting and opt("Defensive fix") then
+                    local bad = data.def_conf ~= nil and data.def_conf < 0.40
+                    if (m.def_misses_round or 0) > 0 or bad then want_sp = true end
+                    if (m.def_misses_round or 0) > 0 and (bad or (m.def_misses_round or 0) >= 2) then want_ba = true end
+                end
+
                 if opt("LC: body aim") and (data.lc_break or (m.lc_misses_round or 0) > 0) then want_ba = true end
                 write_override(resolver.forced_sp, idx, "Override safe point", want_sp and true or false)
                 write_override(resolver.forced_ba, idx, "Override prefer body aim", want_ba and true or false)
@@ -1469,6 +1819,21 @@ LPH_NO_VIRTUALIZE(function ()
                         else
                             write_pitch(idx, nil)
                         end
+
+                        -- remember what was applied to this record: a shot at an older (backtracked) record
+                        -- has to be judged by the angle that record got, not by what is forced by the time we fire
+                        if data.new_record then
+                            local hist = data.hist
+                            hist[#hist + 1] = {
+                                st = data.last_sim, tick = globals_tickcount(), value = value, reason = reason,
+                                ctx = data.used_ctx, arm = data.used_arm, n = data.used_n,
+                                pol = data.used_pol, side = data.used_side, step = data.used_step,
+                                shifted = data.is_shifting, stance = data.used_stance,
+                                jside = data.jitter_side, jnext = data.jitter_next, maxd = data.max_desync,
+                            }
+                            while #hist > HIST_SIZE do table_remove(hist, 1) end
+                        end
+
                         local vh = data.vhist or {}
                         data.vhist = vh
                         vh[#vh + 1] = value == nil and false or value
@@ -1502,12 +1867,12 @@ LPH_NO_VIRTUALIZE(function ()
                 if shot.value == nil then return "native", "native resolver picked the wrong side" end
                 local an = resolver.arm_name(shot.ctx, shot.arm)
                 if shot.shifting then
-                    return "defensive", string_format("forced %d (%s) while target shifted (%s) - half penalty", shot.value, an, tostring(shot.def_reason))
+                    return "defensive", string_format("forced %d (%s) on a shifted record (%s)", shot.value, an, tostring(shot.def_reason))
                 end
                 if (shot.bt or 0) >= stale_threshold() then
-                    return "stale record", string_format("%d-tick old record (threshold %d), forced %d (%s) - half penalty", shot.bt, stale_threshold(), shot.value, an)
+                    return "stale record", string_format("%d-tick old record (limit %d), forced %d (%s)", shot.bt, stale_threshold(), shot.value, an)
                 end
-                if shot.reason == "jitter" then
+                if shot.reason == "jitter" or shot.reason == "jitter low" then
                     return "jitter", string_format("forced %d (%s, side %d next %d, spread %d)", shot.value, an, shot.jside or 0, shot.jnext or 0, math_floor(shot.spread or 0))
                 end
                 return "wrong side", string_format("forced %d (%s)", shot.value, an)
@@ -1528,11 +1893,12 @@ LPH_NO_VIRTUALIZE(function ()
                     local s = shot or {}
                     client.color_log(180, 160, 255, "specter resolver  \0")
                     client.color_log(kind == "miss" and 255 or 150, kind == "miss" and 125 or 230, kind == "miss" and 125 or 165,
-                        string_format("%s %s | %s | forced %s (%s / %s) | %s %s spd %d maxd %d choke %d | jit %d%% side %d | bt %d%s | %s",
+                        string_format("%s %s | %s | forced %s (%s / %s) | %s %s spd %d maxd %d choke %d | jit %d%% side %d | bt %d%s | %s ping | %s",
                             kind, e.name, tag, s.value ~= nil and tostring(s.value) or "-", s.reason or "native", resolver.arm_name(s.ctx, s.arm),
                             s.meta or "?", s.stance or "?", math_floor(s.speed or 0), s.maxd or 0, s.choke or 0,
                             math_floor((s.jratio or 0) * 100), s.jside or 0, s.bt or 0,
                             (s.shifting and (" def:" .. tostring(s.def_reason)) or ""),
+                            s.profile or "?",
                             detail ~= "" and detail or "ok"))
                 end
             end
@@ -1564,6 +1930,23 @@ LPH_NO_VIRTUALIZE(function ()
                 return best_key
             end
 
+            -- the override that was applied to the record a shot went at: `bt` ticks behind the newest one
+            local function applied_for(data, bt)
+                local hist = data.hist
+                if not hist or #hist == 0 then return nil end
+                if not bt or bt <= 0 or not data.max_st then return hist[#hist] end
+                local target = data.max_st - bt
+                for i = #hist, 1, -1 do
+                    local e = hist[i]
+                    if e.st <= target then
+                        if target - e.st <= 4 then return e end
+                        return nil
+                    end
+                end
+                return nil
+            end
+            resolver.applied_for = applied_for
+
             resolver.on_fire = function(event)
                 event = type(event) == "table" and event or {}
                 local idx = event.target
@@ -1578,19 +1961,31 @@ LPH_NO_VIRTUALIZE(function ()
                     resolver.next_shot_id = (resolver.next_shot_id or 0) + 1
                     key = "local:" .. tostring(resolver.next_shot_id)
                 end
-                resolver.shots[key] = {
-                    idx = idx, time = now, value = resolver.forced[idx], reason = data.last_reason or "native",
-                    stance = data.used_stance or data.stance, shifting = data.is_shifting, def_reason = data.def_reason,
-                    ctx = data.used_ctx, arm = data.used_arm, n = data.used_n,
-                    pol = data.used_pol, side = data.used_side, step = data.used_step,
-                    bt = resolver.shot_backtrack(event),
+
+                local bt = resolver.shot_backtrack(event)
+                local e = applied_for(data, bt)
+                local shot = {
+                    idx = idx, time = now, bt = bt, profile = profile.name,
                     extrap = event.extrapolated == true, teleported = event.teleported == true,
-                    lc = data.lc_break, jside = data.jitter_side, jnext = data.jitter_next, jratio = data.jitter_ratio,
-                    spread = data.spread, meta = data.meta_type, maxd = data.max_desync, speed = data.speed, choke = data.choke,
-                    hitgroup = event.hitgroup,
+                    lc = data.lc_break, jratio = data.jitter_ratio, spread = data.spread, meta = data.meta_type,
+                    speed = data.speed, choke = data.choke, hitgroup = event.hitgroup, def_reason = data.def_reason,
                 }
+                if e then
+                    shot.value, shot.reason = e.value, e.reason or "native"
+                    shot.stance, shot.shifting = e.stance or data.stance, e.shifted
+                    shot.ctx, shot.arm, shot.n = e.ctx, e.arm, e.n
+                    shot.pol, shot.side, shot.step = e.pol, e.side, e.step
+                    shot.jside, shot.jnext, shot.maxd = e.jside, e.jnext, e.maxd
+                else
+                    shot.value, shot.reason = resolver.forced[idx], data.last_reason or "native"
+                    shot.stance, shot.shifting = data.used_stance or data.stance, data.is_shifting
+                    shot.ctx, shot.arm, shot.n = data.used_ctx, data.used_arm, data.used_n
+                    shot.pol, shot.side, shot.step = data.used_pol, data.used_side, data.used_step
+                    shot.jside, shot.jnext, shot.maxd = data.jitter_side, data.jitter_next, data.max_desync
+                end
+                resolver.shots[key] = shot
                 data.last_shot_time = now
-                if resolver.stats_hook then pcall(resolver.stats_hook, "fire", resolver.shots[key], event, data) end
+                if resolver.stats_hook then pcall(resolver.stats_hook, "fire", shot, event, data) end
             end
 
             resolver.on_miss = function(event)
@@ -1628,19 +2023,25 @@ LPH_NO_VIRTUALIZE(function ()
                     return
                 end
 
-                -- a miss on a defensive or very old record is weaker evidence against the angle
-                -- stale threshold scales with ping so high-latency players don't get
-                -- permanently half-penalised on every shot
-                local weight = 1
+                -- how much this miss says about the arm that was applied to that record:
+                --  * a shifted record resolved with the normal arms (Defensive fix off) is weak evidence
+                --  * an old backtrack record carries lag compensation noise on top
+                --  * the call predates the last update of this context (slow feedback at high ping): already acted on
+                local weight = profile.miss_w
                 local bt = shot.bt or 0
                 if shot.shifting then
-                    weight = 0.4
+                    if shot.ctx:sub(1, 1) ~= "d" then weight = weight * 0.5 end
                     m.def_misses_round = (m.def_misses_round or 0) + 1
-                elseif bt >= 20 then
-                    weight = 0.15
-                elseif bt >= stale_threshold() then
-                    weight = 0.4
                 end
+                if bt >= 24 then
+                    weight = weight * 0.4
+                elseif bt >= stale_threshold() then
+                    weight = weight * 0.6
+                end
+                m.learn_time = m.learn_time or {}
+                local last = m.learn_time[shot.ctx]
+                if last and shot.time < last then weight = weight * 0.5 end
+                m.learn_time[shot.ctx] = globals_curtime()
 
                 arm_learn(m, shot.ctx, shot.arm, shot.n, false, weight)
                 local next_arm = arm_pick(m, shot.ctx, shot.n)
@@ -1663,13 +2064,21 @@ LPH_NO_VIRTUALIZE(function ()
                 data.confidence = math_min(data.confidence + 0.35, 1)
                 m.hits = m.hits + 1
                 m.streak = 0
+                if shot and shot.shifting then
+                    m.def_misses_round = math_max(0, (m.def_misses_round or 0) - 1)
+                end
 
                 if not shot or shot.value == nil or not shot.ctx then return end
                 data.working_angle = shot.value
-                m.hit_value[shot.stance or "stand"] = shot.value
+                -- a hit on a shifted record says little about the real AA: keep it out of the "last hit" memory
+                if shot.ctx:sub(1, 1) ~= "d" then
+                    m.hit_value[shot.stance or "stand"] = shot.value
+                end
 
                 -- body hits say less about the head angle than head hits
                 local weight = (event.hitgroup == 1) and 1.5 or 0.5
+                m.learn_time = m.learn_time or {}
+                m.learn_time[shot.ctx] = globals_curtime()
                 arm_learn(m, shot.ctx, shot.arm, shot.n, true, weight)
                 log("%s: hit with %d (%s, %s)", entity_get_player_name(idx) or tostring(idx), shot.value,
                     arm_name(shot.ctx, shot.arm), shot.stance or "?")
@@ -1693,9 +2102,12 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.new_round = function()
                 for _, m in pairs(resolver.memory) do
                     m.lc_misses_round, m.post_hit, m.def_misses_round, m.streak = 0, false, 0, 0
+                    m.learn_time = {}
                 end
                 for _, d in pairs(resolver.database) do
                     d.consecutive_misses, d.def_until, d.lc_until, d.last_origin = 0, 0, 0, nil
+                    d.last_good_value, d.last_good_tick = nil, nil
+                    d.hist = {}
                 end
             end
 
@@ -1749,15 +2161,17 @@ LPH_NO_VIRTUALIZE(function ()
                     local m = data and resolver.memory[data.key]
 
                     local rows = {}
+                    rows[#rows + 1] = { "ping", string_format("%d ms", math_floor(ping.ms + 0.5)), "profile", string.upper(profile.name) }
                     if data then
                         local val = resolver.forced[threat]
                         rows[#rows + 1] = { "mode", string_format("%s %s", data.last_reason or "native", val ~= nil and (tostring(val) .. "\194\176") or ""), "type", data.meta_type or "-" }
-                        rows[#rows + 1] = { "stance", data.stance or "-", "speed", string_format("%d  max %d\194\176", math_floor(data.speed or 0), data.max_desync or 44) }
+                        rows[#rows + 1] = { "stance", data.stance or "-", "speed", string_format("%d  max %d\194\176", math_floor(data.speed or 0), data.max_desync or MAX_YAW) }
                         rows[#rows + 1] = { "yaw", string_format("spread %d  flips %d", math_floor(data.spread or 0), data.jitter_flips or 0), "choke", tostring(data.choke or 0) }
                         rows[#rows + 1] = { "side", string_format("cur %d  next %d", data.jitter_side or 0, data.jitter_next or 0), "fs", tostring(data.freestand or 0) }
+                        rows[#rows + 1] = { "pose", data.pose and string_format("%d\194\176", math_floor(data.pose + 0.5)) or "n/a", "period", string_format("%d%s", data.jitter_period or 1, data.jitter_regular and "" or " ~") }
                         rows[#rows + 1] = { "defensive", data.is_shifting and (data.def_reason or "yes") or "-", "rate", string_format("%d%%", math_floor((data.def_rate or 0) * 100)) }
                         local lby = not data.layers_ok and "n/a" or (data.balance_tick and string_format("%.1fs ago", (globals_tickcount() - data.balance_tick) * globals_tickinterval()) or "never")
-                        rows[#rows + 1] = { "lby break", lby, "desync", data.low_desync and "low" or "full" }
+                        rows[#rows + 1] = { "lby break", lby, "desync", data.low_desync and "low" or (data.bal_recent and "full" or "?") }
                         if m and data.used_ctx then
                             rows[#rows + 1] = { "arm", resolver.arm_name(data.used_ctx, data.used_arm), "score",
                                 string_format("%.2f", resolver.arm_score(m, data.used_ctx, data.used_arm, data.used_n)) }
@@ -1770,6 +2184,7 @@ LPH_NO_VIRTUALIZE(function ()
                     local shots = resolver.debug_log
                     local shown = math_min(#shots, 4)
                     local h = 28 + (data and (#rows * 14 + 22 + GH) or 18) + (shown > 0 and (18 + shown * 27) or 0) + 4
+                    if not data then h = h + 14 end
 
                     renderer.rectangle(x, y, w, h, 12, 12, 16, 235)
                     renderer.gradient(x, y, w, 2, ar, ag, ab, 255, ar, ag, ab, 30, true)
@@ -1781,6 +2196,13 @@ LPH_NO_VIRTUALIZE(function ()
 
                     local cy = y + 28
                     if not data then
+                        for _, r in ipairs(rows) do
+                            renderer.text(x + 10, cy, 115, 115, 128, 255, "", 0, r[1])
+                            renderer.text(x + 78, cy, 230, 230, 235, 255, "", 0, r[2])
+                            renderer.text(x + 185, cy, 115, 115, 128, 255, "", 0, r[3])
+                            renderer.text(x + 240, cy, 230, 230, 235, 255, "", 0, r[4])
+                            cy = cy + 14
+                        end
                         renderer.text(x + 10, cy, 120, 120, 130, 255, "", 0, "no target")
                         cy = cy + 18
                     else
@@ -1793,7 +2215,7 @@ LPH_NO_VIRTUALIZE(function ()
                         end
                         cy = cy + 4
                         local gx, gw = x + 10, w - 20
-                        renderer.text(gx, cy, 115, 115, 128, 255, "", 0, "eye yaw (last 16 records, red = defensive)")
+                        renderer.text(gx, cy, 115, 115, 128, 255, "", 0, string_format("eye yaw (last %d records, red = defensive)", RECORDS))
                         cy = cy + 13
                         renderer.rectangle(gx, cy, gw, GH, 20, 20, 26, 255)
                         renderer.rectangle(gx, cy + GH / 2, gw, 1, 255, 255, 255, 25)
@@ -1846,6 +2268,7 @@ LPH_NO_VIRTUALIZE(function ()
                     end
                 end)
             end
+            -- [resolver:end]
         end
         end -- TIER.HAS_RESOLVER else
 
@@ -3749,8 +4172,8 @@ LPH_NO_VIRTUALIZE(function ()
             if reason == nil or reason == "native" or reason == "jitter native" or reason == "native warmup" or reason == "defensive native" then return "native" end
             if reason == "jitter" or reason == "jitter low" then return "jitter" end
             if reason == "defensive hold" then return "defensive" end
-            if reason == "freestand" then return "desync" end
-            if reason:sub(1, 3) == "db " then return "database" end
+            if reason == "freestand" or reason == "pose" then return "desync" end
+            if reason:sub(1, 3) == "db " then return "desync" end
             if reason:sub(1, 6) == "brute " then return "brute" end
             return reason
         end
@@ -4635,6 +5058,12 @@ LPH_NO_VIRTUALIZE(function ()
                     "Safe point on misses", "Body aim on misses", "ESP flags", "Log"
                 }) end)
                 config.uix.res_hint = mui.hint(mui.CONTENT, "overrides gamesense's resolver on every enemy")
+                config.resolver.ping_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "•  Ping profile\nresolver", {
+                    "Auto", "Low ping", "High ping"
+                }):record("resolver", "ping_mode"):save()
+                config.resolver.ping_threshold = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  High ping from", 15, 120, 35, true, "ms")
+                    :record("resolver", "ping_threshold"):save()
+                config.uix.res_hint_ping = mui.hint(mui.CONTENT, "auto: switches to the high ping profile above this ping")
                 config.resolver.safe_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Safe point after misses", 1, 5, 2)
                     :record("resolver", "safe_after"):save()
                 config.resolver.baim_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Body aim after misses", 1, 6, 3)
@@ -12071,13 +12500,14 @@ LPH_NO_VIRTUALIZE(function ()
                     ov[1] = row("☾", "Anti-aim", OFF .. "off  (gamesense settings)")
                 end
 
-                if config.resolver.enabled:get() then
+                if config.resolver.enabled and config.resolver.enabled:get() then
                     local forced, seen = 0, 0
                     for _ in pairs(resolver.forced or {}) do forced = forced + 1 end
                     for _, e in ipairs(entity.get_players(true)) do
                         if entity.is_alive(e) and not entity.is_dormant(e) then seen = seen + 1 end
                     end
-                    ov[2] = row("◎", "Resolver", GREEN .. "on" .. SEP .. W .. forced .. " / " .. seen .. " forced")
+                    local prof = resolver.profile and resolver.profile.name or "low"
+                    ov[2] = row("◎", "Resolver", GREEN .. "on" .. SEP .. W .. forced .. " / " .. seen .. " forced" .. SEP .. W .. prof .. " ping")
                 else
                     ov[2] = row("◎", "Resolver", OFF .. "off")
                 end
@@ -12182,6 +12612,11 @@ LPH_NO_VIRTUALIZE(function ()
                     if RS.enabled:get() then
                         RS.options:display()
                         config.uix.res_hint:display()
+                        RS.ping_mode:display()
+                        if RS.ping_mode:get() == "Auto" then
+                            RS.ping_threshold:display()
+                            config.uix.res_hint_ping:display()
+                        end
                         local ropts = RS.options:get() or {}
                         if c_table.contains(ropts, "Safe point on misses") then RS.safe_after:display() end
                         if c_table.contains(ropts, "Body aim on misses") then RS.baim_after:display() end

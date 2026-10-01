@@ -1,11 +1,11 @@
 -- ======================================================================
---  SPECTER | Dev Loader  v2.1
+--  SPECTER | Dev Loader  v2.2
 --  For owners/developers only — runs specter_cloud.lua directly
 --  from the gamesense scripts folder with full debug-tier access.
 --
 --  Features loaded via specter_cloud.lua:
---    • Resolver (multi-arm bandit, low-desync capping 22°, base 44°)
---    • Jitter resolver (0.8x / 0.45x fractions)
+--    • Resolver: desync / jitter / defensive contexts, learned per record
+--    • Automatic ping profile (high ping from 35 ms, menu: Resolver > Ping profile)
 --    • Cloud config sync (upload / download / delete)
 --    • Anti-tamper integrity monitor (10s crash delay)
 --    • Full AA, visuals, misc
@@ -62,4 +62,4 @@ end
 rawset(_G, "_specter_loader_loaded", true)
 client.color_log(180, 160, 255, "[Specter Dev] Loaded with full debug access.")
 client.color_log(130, 195, 255, "[Specter Dev] Cloud configs: " .. (SERVER_URL ~= "" and "enabled" or "no server URL set"))
-client.color_log(130, 195, 255, "[Specter Dev] Resolver: base 44°, low-desync cap 22°, jitter 0.8x")
+client.color_log(130, 195, 255, "[Specter Dev] Resolver: desync / jitter / defensive, auto ping profile (high from 35 ms)")
