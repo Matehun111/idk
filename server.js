@@ -295,6 +295,65 @@ app.get('/configs/upload', async (req, res) => {
     }
 })
 
+// ── GET /configs/upload_part — chunked upload ──────────────────────────────
+// A whole config does not fit into one URL (and gamesense's http.post sends no content-type), so the script
+// sends it in small parts, one GET each. The parts only live in memory between the requests of one upload.
+const uploads = new Map()                       // `${key}|${name}` -> { total, parts, ts }
+setInterval(() => {
+    const now = Date.now()
+    for (const [id, u] of uploads) if (now - u.ts > 120000) uploads.delete(id)
+}, 30000).unref()
+
+app.get('/configs/upload_part', async (req, res) => {
+    const { key, hwid } = req.query
+    const name  = typeof req.query.name === 'string' ? req.query.name.trim() : ''
+    const part  = req.query.data
+    const idx   = parseInt(req.query.idx, 10)
+    const total = parseInt(req.query.total, 10)
+    if (!key || !hwid || !name || typeof part !== 'string' || !part)
+        return res.status(400).json({ ok: false, reason: 'missing_params' })
+    if (name.length < 1 || name.length > 32)
+        return res.status(400).json({ ok: false, reason: 'invalid_name' })
+    if (!Number.isInteger(idx) || !Number.isInteger(total) || total < 1 || total > 150 || idx < 0 || idx >= total || part.length > 6000)
+        return res.status(400).json({ ok: false, reason: 'invalid_part' })
+
+    const db = await db_read()
+    const license = db[key]
+    if (!license || license.revoked) return res.status(403).json({ ok: false, reason: 'invalid_key' })
+    if (license.expires_at && Date.now() > license.expires_at) return res.status(403).json({ ok: false, reason: 'expired' })
+    if (license.hwid !== hwid) return res.status(403).json({ ok: false, reason: 'hwid_mismatch' })
+
+    // the first part always starts a fresh upload, so an abandoned one cannot mix into the next
+    const id = `${key}|${name}`
+    let u = uploads.get(id)
+    if (!u || idx === 0 || u.total !== total) {
+        u = { total, parts: new Array(total).fill(null), ts: Date.now() }
+        uploads.set(id, u)
+    }
+    u.parts[idx] = part
+    u.ts = Date.now()
+    if (u.parts.some(p => p === null)) return res.json({ ok: true, done: false })
+
+    uploads.delete(id)
+    let data = ''
+    try { data = Buffer.from(u.parts.join(''), 'base64').toString('utf8') } catch (e) {}
+    if (data.length < 10 || data.length > 200000)
+        return res.status(400).json({ ok: false, reason: 'invalid_data' })
+
+    const author = license.note || key.slice(-6)
+    try {
+        let configs = await redis.get('specter:configs') || []
+        configs = configs.filter(c => !(c.name === name && c.author === author))
+        if (configs.length >= 200) configs = configs.slice(-199)
+        configs.push({ name, author, data, plan: license.plan, ts: Date.now() })
+        await redis.set('specter:configs', configs)
+        console.log(`[CONFIG UPLOAD] ${name} by ${author} (${total} parts)`)
+        res.json({ ok: true, done: true, name, author })
+    } catch (e) {
+        res.status(500).json({ ok: false, reason: 'server_error' })
+    }
+})
+
 app.post('/configs', async (req, res) => {
     const { key, hwid, name, data } = req.body
     if (!key || !hwid || !name || !data)

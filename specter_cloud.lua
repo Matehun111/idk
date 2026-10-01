@@ -12378,25 +12378,48 @@ LPH_NO_VIRTUALIZE(function ()
                     local config_str = config_system.export_to_str()
                     local encoded = base64.encode(config_str)
 
-                    local url = SERVER .. "/configs/upload"
-                        .. "?key="  .. _ue(KEY)
-                        .. "&hwid=" .. _ue(HWID)
-                        .. "&name=" .. _ue(name)
-                        .. "&data=" .. _ue(encoded)
-
-                    http.get(url, function(ok, resp)
+                    -- a whole config does not fit into one URL: it goes up in small parts, one request each
+                    local CHUNK = 3000
+                    local parts = {}
+                    for i = 1, #encoded, CHUNK do parts[#parts + 1] = encoded:sub(i, i + CHUNK - 1) end
+                    if #parts > 150 then
                         cloud_busy = false
-                        if not ok then cloud_set_status("Upload failed."); return end
-                        local body = type(resp) == "table" and resp.body or resp
-                        local s, data = pcall(json.parse, body)
-                        if s and type(data) == "table" and data.ok then
+                        cloud_set_status("Config too large.")
+                        return
+                    end
+
+                    local base = SERVER .. "/configs/upload_part"
+                        .. "?key="   .. _ue(KEY)
+                        .. "&hwid="  .. _ue(HWID)
+                        .. "&name="  .. _ue(name)
+                        .. "&total=" .. #parts
+
+                    local function send(i)
+                        cloud_set_status(string_format("Uploading %d/%d...", i, #parts))
+                        http.get(base .. "&idx=" .. (i - 1) .. "&data=" .. _ue(parts[i]), function(ok, resp)
+                            if not ok then
+                                cloud_busy = false
+                                cloud_set_status(string_format("Upload failed (part %d/%d).", i, #parts))
+                                return
+                            end
+                            local body = type(resp) == "table" and resp.body or resp
+                            local s, data = pcall(json.parse, body)
+                            if not (s and type(data) == "table" and data.ok) then
+                                cloud_busy = false
+                                cloud_set_status("Upload error: " .. (type(data) == "table" and data.reason or "?"))
+                                return
+                            end
+                            if i < #parts then
+                                send(i + 1)
+                                return
+                            end
+                            cloud_busy = false
                             cloud_set_status("Uploaded: " .. name)
                             c_logger.log("Cloud config '%s' uploaded.", name)
                             cloud_refresh()
-                        else
-                            cloud_set_status("Upload error: " .. (data and data.reason or "?"))
-                        end
-                    end)
+                        end)
+                    end
+                    send(1)
                 end
 
                 local function cloud_load()

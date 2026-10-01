@@ -17,7 +17,9 @@ When editing `specter_cloud.lua`, ALWAYS also update:
 
 ## Gamesense Lua Constraints
 - `ui.new_combobox` items are fixed at creation — cannot be updated dynamically
-- `http.post` has no content-type support — use `http.get` with query params for all API calls
+- `http.post` has no content-type support — use `http.get` with query params for all API calls. A URL cannot carry a whole config
+  (it is tens of KB, Node's header limit is 16 KB), so cloud config uploads go through `GET /configs/upload_part` in 3000 char parts
+  (the server keeps the parts in memory until the last one arrives)
 - `client.latency()` returns one-way latency in seconds
 - Use `pui` library for UI elements
 - LPH directives: `LPH_NO_VIRTUALIZE`, `LPH_CRASH`, `LPH_ENCSTR` (Luraph obfuscator)
