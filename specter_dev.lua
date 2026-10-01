@@ -6590,6 +6590,27 @@ LPH_NO_VIRTUALIZE(function ()
                 local CUSTOM_JITTER = { ["3-Way"] = true, ["5-Way"] = true, ["Delayed center"] = true, ["Distortion"] = true, ["Random hold"] = true }
                 local cj = { last = -1, step = 0, order = { 1, 2, 3, 4, 5 }, hold = 0, dir = 1, side = 1, snap = nil, snap_dir = 1 }
 
+                -- The side of the body yaw is its own random process. It used to follow the yaw offset (opposite of it, or
+                -- in lockstep with a native jitter), so a resolver that learned "side = opposite of the visible yaw" hit
+                -- every single shot (simulated: 0.93 hit rate against it, 0.3-0.4 when the side is independent).
+                -- Held 1-4 sent packets, flips 70% of the time; steps once per SENT packet so fake lag never swallows a switch.
+                local DECORRELATE_BODY = true
+                local body_side do
+                    local bs = { side = 1, left = 0, last = -1 }
+                    body_side = function()
+                        local p = player.packets or 0
+                        if p ~= bs.last then
+                            bs.last = p
+                            bs.left = bs.left - 1
+                            if bs.left <= 0 then
+                                if client.random_int(1, 100) <= 70 then bs.side = -bs.side end
+                                bs.left = client.random_int(1, 4)
+                            end
+                        end
+                        return bs.side
+                    end
+                end
+
                 local function cj_shuffle(t)
                     for i = #t, 2, -1 do
                         local j = client.random_int(1, i)
@@ -6772,16 +6793,16 @@ LPH_NO_VIRTUALIZE(function ()
                             end
                         end
 
-                        if body_yaw_type == 'Jitter' then
-                            local jitter_intensity = (enhanced_aa.chaos_rng() - 0.5) * 0.4
-                            body_yaw_value = c_math.clamp(body_yaw_value + jitter_intensity, -1, 1)
-                        elseif body_yaw_type == 'Static' then
-                            local static_variance = (tick % enhanced_aa.get_prime_offset()) > 5 and 0.05 or -0.05
-                            body_yaw_value = c_math.clamp(body_yaw_value + static_variance, -1, 1)
-                        end
-
+                        -- the slider is a whole number: a fraction (0.95, -0.8) can round down to 0, which is no desync at all
                         instance.body_yaw_type = body_yaw_type
                         instance.body_yaw_value = body_yaw_value
+                    end
+
+                    -- the side is decided here, independent of the yaw offset (see body_side). Left alone: the legit AA and the
+                    -- freestanding body yaw (the game picks that side from the geometry)
+                    if DECORRELATE_BODY and data.yaw_base ~= 'Local view'
+                        and not (data.body_yaw_freestanding or data.body_yaw_type == 'Freestand' or data.body_yaw_type == 'Static') then
+                        instance.body_yaw_type, instance.body_yaw_value = 'Static', body_side()
                     end
 
                     instance.body_yaw_freestanding = data.body_yaw_freestanding or data.body_yaw_type == 'Freestand'

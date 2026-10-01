@@ -86,3 +86,10 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   script must never write), player list, menu, ping profile switching, several enemies, remembered priors, options, panel, events.
 - When the resolver logic changes in `specter_resolver.lua` and the same idea belongs in the cloud script (or the other way round), port it by
   hand: the two are separate files on purpose.
+
+## Anti-aim: body yaw side
+- `body_side()` (in `antiaimbot.main`, next to `custom_jitter`) is the side of the body yaw: its own random process (held 1-4 sent packets,
+  flips 70%), NOT a function of the yaw offset. When the side followed the offset (opposite of it, or in lockstep with a native jitter)
+  a resolver that learned that rule hit every shot (simulated with the standalone jitter resolver: 0.93 hit rate vs 0.3-0.4 now).
+  `run_preset` uses it for every preset except the legit AA and the freestanding body yaw; `DECORRELATE_BODY` switches it off.
+- The body yaw slider value is always a whole number (+-1): a fraction can round down to 0 = no desync.
