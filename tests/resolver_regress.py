@@ -99,6 +99,76 @@ check((n.ba_ticks or 0) == 0 and (n.sp_ticks or 0) == 0, "easy target must not g
 n = run("nopose_static", ping=20, tol=8)
 check((n.ba_ticks or 0) > 1500, "target where every arm fails must end on body aim")
 
+LT = lambda *a: rt.table_from(list(a))
+APPLY_ON = LT("Animation layers", "Feet model", "Animstate apply (experimental)")
+
+print("== FFI: animstate layout verification, adversarial memory (apply is ON in all of these)")
+ffi_cases = [
+    # label, scenario, opts, expected layout, writes allowed
+    ("real layout, jittering target",              "phys_stand_jitter", dict(anim="native"),               "ok",      True),
+    ("real layout, target looks straight",         "static_pos",        dict(anim="native"),               "unknown", False),
+    ("garbage memory",                             "phys_stand_jitter", dict(anim="bad"),                  "bad",     False),
+    ("garbage memory, target looks straight",      "static_pos",        dict(anim="bad"),                  "unknown", False),
+    ("zeroed memory",                              "phys_stand_jitter", dict(anim="zero"),                 "bad",     False),
+    ("zeroed memory, target looks straight",       "static_pos",        dict(anim="zero"),                 "unknown", False),
+    ("offset error +8",                            "phys_stand_jitter", dict(anim="native", anim_shift=8), "bad",     False),
+    ("offset error +4",                            "phys_stand_jitter", dict(anim="native", anim_shift=4), "bad",     False),
+    ("offset error -4",                            "phys_stand_jitter", dict(anim="native", anim_shift=-4), "bad",    False),
+    ("NaN memory",                                 "phys_stand_jitter", dict(anim="nan"),                  "unknown", False),
+    ("NULL animstate pointer",                     "phys_stand_jitter", dict(anim="null"),                 "unknown", False),
+]
+for label, scn, kw, layout, writes_ok in ffi_cases:
+    n = run(scn, ping=30, ffi=True, ticks=900, ffi_opts=APPLY_ON, **kw)
+    f = n.resolver.fres
+    check(n.errors == 0, f"ffi {label}: {n.errors} errors")
+    check(f.layout == layout, f"ffi {label}: layout {f.layout}, expected {layout}")
+    if not writes_ok:
+        check(f.writes == 0, f"ffi {label}: wrote {f.writes} times into memory that is not a verified animstate")
+    else:
+        check(f.writes > 0, f"ffi {label}: apply never wrote although the layout is verified")
+n = run("phys_stand_jitter", ping=30, ffi=True, ticks=900, anim="native")
+check(n.resolver.fres.writes == 0, "apply wrote with the option off")
+
+print("== FFI: feet model on server-style physics (tolerance 8): model vs no model")
+OFF = LT("Animation layers")
+for scn in ("phys_stand_jitter", "phys_lby_flick", "phys_slow_turn", "phys_move_jitter"):
+    for ping in (20, 80):
+        on = run(scn, ping=ping, tol=8, anim="native", ffi=True)
+        off = run(scn, ping=ping, tol=8, anim="native", ffi=True, ffi_opts=OFF)
+        check(on.errors == 0, f"{scn} {ping}ms: errors")
+        check(on.late_rate >= 0.9, f"{scn} {ping}ms: feet model late hit rate {on.late_rate:.2f}")
+        check(on.late_rate >= off.late_rate - 0.02, f"{scn} {ping}ms: feet model is worse than none ({on.late_rate:.2f} vs {off.late_rate:.2f})")
+        if scn in ("phys_stand_jitter", "phys_lby_flick"):
+            check(on.late_rate > off.late_rate + 0.3, f"{scn} {ping}ms: feet model gives no gain ({on.late_rate:.2f} vs {off.late_rate:.2f})")
+
+print("== FFI: polarity of the forced value is learned from the animstate")
+for pol in (1, -1):
+    for anim in ("forced", "native"):
+        n = run("phys_stand_jitter", ping=40, tol=8, anim=anim, anim_pol=pol, truth_pol=pol, ffi=True)
+        f = n.resolver.fres
+        check(f.polarity == pol, f"polarity {pol} / {anim}: learned {f.polarity}")
+        check(n.late_rate >= 0.9, f"polarity {pol} / {anim}: late hit rate {n.late_rate:.2f}")
+
+print("== FFI: realign tracking from the adjust layer")
+n = run("static_pos", ping=20, ffi=True, balance_every=70, ticks=1000, anim="native")
+d = n.resolver.database[2]
+check(d.layers_ok and d.realign_gap is not None and abs(d.realign_gap - 70 / 64) < 0.05, f"realign gap {d.realign_gap}")
+n = run("static_pos", ping=20, ffi=True, layers_null=True, ticks=300)
+check(not n.resolver.database[2].layers_ok and n.errors == 0, "NULL layers pointer")
+
+print("== FFI: a NULL entity pointer must never reach the offset helpers")
+n = run("jitter_pos", ping=30, ffi=True, anim="native", ent_null=True, ticks=600, ffi_opts=APPLY_ON)
+check(n.resolver.fres.errors == 0 and n.errors == 0, "helpers were called with a NULL entity pointer")
+check(not n.resolver.database[2].layers_ok, "layers must not be trusted without an entity")
+
+print("== FFI: telemetry output and read errors")
+for mode in ("native", "bad", "null", "nan"):
+    n = run("jitter_pos", ping=60, ffi=True, anim=mode, ticks=900, ffi_opts=LT("Animation layers", "Feet model", "Telemetry"), panel=True)
+    check(n.errors == 0, f"telemetry with animstate {mode}: {n.errors} errors")
+n = run("static_pos", ping=20, ffi=True, anim="native", anim_throw=True, ticks=900)
+check(n.resolver.fres.disabled, "repeated ffi errors must switch the ffi part off")
+check(n.errors == 0 and n.late_rate >= 0.9, "resolver must keep working after the ffi part switched itself off")
+
 print("== lifecycle")
 n = run("jitter_pos", ping=40, ticks=600)
 res = n.resolver

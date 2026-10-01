@@ -55,11 +55,48 @@ M.scenarios = {
     pose_static = function() return function(k) return { rel = 0, T = -45, pose = -45 } end end,
     nopose_static = function() return function(k) return { rel = 0, T = -45 } end end,
     mapchange = function() return function(k) if k >= 1000 then return { rel = 0, T = 58, st = k - 900 } end return { rel = 0, T = 58 } end end,
+    -- server-style physics: the true body yaw comes from the feet yaw logic of the animstate (see srv_update),
+    -- the resolver only sees eye yaw / lower body yaw target / velocity
+    phys_stand_jitter = function() return function(k) return { rel = (k % 2 == 0) and 25 or -40, phys = true } end end,
+    phys_lby_flick = function() return function(k) return { rel = (k % 80 < 60) and 0 or 50, phys = true } end end,
+    phys_move_jitter = function() return function(k) return { rel = (k % 2 == 0) and 35 or -35, vel = 200, phys = true } end end,
+    phys_slow_turn = function() return function(k) return { rel = ((k * 1.5) % 360) - 180, phys = true } end end,
     -- desync that depends on the freestand-ish side, then flips mid-run (player changes AA)
     static_flip = function()
         return function(k) return { rel = 0, T = (k < 900) and 58 or -58 } end
     end,
 }
+
+local function norm(a)
+    while a > 180 do a = a - 360 end
+    while a < -180 do a = a + 360 end
+    return a
+end
+local function approach(target, value, step)
+    local d = norm(target - value)
+    if d > step then return norm(value + step) end
+    if d < -step then return norm(value - step) end
+    return norm(target)
+end
+-- server side, once per tick: feet follow the lower body yaw target standing, the eye yaw moving; the lower body
+-- yaw target is set to the eye yaw when the realign timer is up and the feet are more than 35 away.
+local function srv_update(s, eye, moving, speed, t, ti)
+    if moving then
+        local w2r = math.max(0, math.min(1, (speed - 70) / 65))
+        s.feet = approach(eye, s.feet, ti * (30 + 20 * w2r))
+        s.lby = eye
+        s.timer = t + 0.22
+    else
+        s.feet = approach(s.lby, s.feet, ti * 100)
+        if t > s.timer and math.abs(norm(s.feet - eye)) > 35 then
+            s.timer = t + 1.1
+            s.lby = eye
+        end
+    end
+    local d = norm(eye - s.feet)
+    if d > 58 then s.feet = norm(eye - 58) elseif d < -58 then s.feet = norm(eye + 58) end
+    return norm(eye - s.feet)
+end
 
 function M.run(block_src, scenario_name, opts)
     opts = opts or {}
@@ -109,6 +146,7 @@ function M.run(block_src, scenario_name, opts)
             flip = { get = function() return false end, rawget = function() return opts.flip == true end },
             ping_mode = item(function() return opts.ping_mode or "Auto" end),
             ping_threshold = item(function() return opts.ping_threshold or 35 end),
+            ffi = item(function() return opts.ffi_opts or { "Animation layers", "Feet model" } end),
         },
         visuals = {},
     }
@@ -140,6 +178,7 @@ function M.run(block_src, scenario_name, opts)
                 if name == "m_vecOrigin" then return 0, 0, 0 end
                 return 0
             end
+            if name == "m_flLowerBodyYawTarget" then return state.lby or 0 end
             if name == "m_flSimulationTime" then return state.sim * TI end
             if name == "m_angEyeAngles" then return state.pitch, state.eye_yaw end
             if name == "m_vecOrigin" then return 500, 0, 0 end
@@ -186,15 +225,42 @@ function M.run(block_src, scenario_name, opts)
         realtime = function() return curtime end,
     }
     W.renderer = setmetatable({ measure_text = function() return 40 end }, { __index = function() return function() end end })
-    local layer3 = { weight = 0, cycle = 0.5, sequence = 0 }
-    local ffi_helpers = nil
-    if opts.ffi then
-        ffi_helpers = {
-            animlayers = { get = function(self, idx) return { [3] = layer3 } end },
-            activity = { get = function(self, seq, idx) return seq end },
-        }
+    local ffi = require("ffi")
+    if not pcall(ffi.typeof, "bt_animlayer_t") then
+        ffi.cdef[[ typedef struct { float anim_time; float fade_out_time; int nil_; int activty; int priority; int order;
+                                    int sequence; float prev_cycle; float weight; float weight_delta_rate; float playback_rate;
+                                    float cycle; int owner; int bits; } bt_animlayer_t; ]]
     end
-    state.layer3 = layer3
+    local layer_buf = ffi.new("bt_animlayer_t[13]")
+    local anim_buf = ffi.new("char[?]", 0x400)
+    local act_map = { [12] = 979 }        -- sequence 12 is the balance adjust activity in this fake model
+    local ffi_helpers = nil
+    if opts.ffi or opts.anim then
+        ffi_helpers = {
+            get_client_entity = function(idx)
+                if opts.ent_null then return ffi.cast("void*", 0) end
+                return ffi.cast("void*", layer_buf)
+            end,
+            animlayers = { get = function(self, idx)
+                if opts.ent_null then error("layers helper reached with a NULL entity") end
+                if opts.layers_null then return nil end
+                return ffi.cast("bt_animlayer_t*", layer_buf)
+            end },
+            activity = { get = function(self, seq, idx) return act_map[seq] or 0 end },
+        }
+        if opts.anim then
+            ffi_helpers.animstate = { get = function(self, idx)
+                if opts.ent_null then error("animstate helper reached with a NULL entity") end
+                if opts.anim_throw then error("animstate read failed") end
+                if opts.anim == "null" then return nil end
+                return ffi.cast("void*", anim_buf)
+            end }
+        end
+    end
+    state.layer3 = layer_buf[3]
+    state.layer6 = layer_buf[6]
+    local srv = { feet = 0, lby = 0, timer = 0 }
+    state.srv = srv
     local logs = {}
     local c_logger = { log = function(fmt, ...) logs[#logs + 1] = string.format(fmt, ...) end }
     local c_table = { contains = function(t, v) for _, x in ipairs(t) do if x == v then return true end end return false end }
@@ -202,6 +268,7 @@ function M.run(block_src, scenario_name, opts)
 
     local prelude = [[
 local W, config, c_math, c_table, c_logger, TIER, ffi_helpers = ...
+local ffi = require("ffi")
 local entity, client, plist, globals, renderer = W.entity, W.client, W.plist, W.globals, W.renderer
 local math_abs, math_min, math_max, math_sqrt, math_floor, math_ceil = math.abs, math.min, math.max, math.sqrt, math.floor, math.ceil
 local table_insert, table_remove, table_sort, table_concat = table.insert, table.remove, table.sort, table.concat
@@ -220,6 +287,7 @@ local resolver = {}
     local scn = M.scenarios[scenario_name](opts)
     local rec = {}        -- arrival tick -> { T, applied, shifted, st }
     local pending = {}
+    state.last_goal = 0
     local stats = { shots = 0, hits = 0, misses_res = 0, hits_late = 0, shots_late = 0, errors = 0, def_shots = 0, def_hits = 0, normal_shots = 0, normal_hits = 0 }
     local shot_id = 0
     local max_st = 0
@@ -251,12 +319,57 @@ local resolver = {}
         state.flags = r.air and 0 or 1
         state.garbage = fz
 
+        if r.phys then
+            local moving = (r.vel or 0) > 5
+            r.T = srv_update(srv, r.rel, moving, r.vel or 0, k * TI, TI)
+            if opts.truth_pol then r.T = r.T * opts.truth_pol end
+            state.lby = srv.lby
+        end
         if opts.balance_every then
             local ph = k % opts.balance_every
             state.layer3.weight = (ph < 6) and 1 or 0
-            state.layer3.sequence = (ph < 6) and 979 or 0
+            state.layer3.sequence = (ph < 6) and 12 or 0
+            state.layer3.cycle = (ph < 6) and (ph / 6) or 0
         end
+        state.layer6.weight = ((r.vel or 0) > 5) and 1 or 0
+        state.layer6.cycle = 0.3
         local ok, err2 = pcall(resolver.net_update)
+
+        -- the client animation pass that runs after the net update: what the animstate shows from now on
+        if opts.anim and pcall(ffi.typeof, "fres_animstate_t") then
+            local a = ffi.cast("fres_animstate_t*", ffi.cast("char*", anim_buf) + (opts.anim_shift or 0))
+            local fv = plist_store["Force body yaw"] and plist_store["Force body yaw value"] or nil
+            if opts.anim == "bad" then
+                for i = 0, 0x3FF do anim_buf[i] = (i * 37 + k) % 251 end
+            elseif opts.anim == "zero" then
+                ffi.fill(anim_buf, 0x400, 0)
+            elseif opts.anim == "nan" then
+                a.eye_yaw, a.goal_feet_yaw = 0/0, 1/0
+            elseif opts.anim ~= "null" then
+                a.eye_yaw = r.rel
+                a.eye_pitch = 89
+                local goal
+                if opts.anim == "forced" and fv ~= nil then
+                    goal = norm(r.rel - (opts.anim_pol or 1) * fv)      -- gamesense left our forced value in the animstate
+                elseif r.phys then
+                    goal = srv.feet                                       -- the engine's own copy of the server logic
+                else
+                    goal = norm(r.rel - (r.T or 0))
+                end
+                -- remember what the resolver wrote before the engine overwrites it
+                if opts.apply_check then
+                    stats.apply_seen = (stats.apply_seen or 0) + 1
+                    if math.abs(norm(a.goal_feet_yaw - state.last_goal)) > 0.01 then stats.apply_changed = (stats.apply_changed or 0) + 1 end
+                end
+                a.goal_feet_yaw = goal
+                a.cur_feet_yaw = goal
+                state.last_goal = goal
+                a.duration_still = ((r.vel or 0) > 5) and 0 or (k * TI)
+                a.duration_moving = ((r.vel or 0) > 5) and (k * TI) or 0
+                a.vel_len_xy = r.vel or 0
+                a.on_ground = r.air and 0 or 1
+            end
+        end
         if opts.panel and k % 40 == 0 then
             local okp, ep = pcall(resolver.draw_debugger)
             if not okp then stats.errors = stats.errors + 1; print("draw_debugger error:", ep) end

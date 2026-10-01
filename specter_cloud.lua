@@ -1028,6 +1028,8 @@ LPH_NO_VIRTUALIZE(function ()
                 { src = "pose", pol = -1,     name = "pose inv" },
                 { pol =  1, frac = 0.25, name = "fs low"  },
                 { pol = -1, frac = 0.25, name = "opp low" },
+                { src = "feet", pol =  1,     name = "feet"     },
+                { src = "feet", pol = -1,     name = "feet inv" },
             }
             -- jitter AA: which record side to follow (current / predicted next) and with what polarity
             local JITTER_ARMS = {
@@ -1038,6 +1040,8 @@ LPH_NO_VIRTUALIZE(function ()
                 { next = false, pol =  1, frac = 0.6, name = "cur + low" },
                 { next = false, pol = -1, frac = 0.6, name = "cur - low" },
                 { src = "zero",                       name = "zero"      },
+                { src = "feet", pol =  1,             name = "feet"      },
+                { src = "feet", pol = -1,             name = "feet inv"  },
             }
             -- defensive: what to force while the target is shifting its tickbase
             local DEF_ARMS = {
@@ -1052,12 +1056,12 @@ LPH_NO_VIRTUALIZE(function ()
 
             -- score offsets: arm order of the first guess, plus what the animation layers tell us
             -- without any evidence the "low" arms are the last resort
-            local STATIC_BIAS = { 0, -0.02, -0.04, -0.06, -0.12, 0.05, 0, 0, -0.14, -0.15 }
+            local STATIC_BIAS = { 0, -0.02, -0.04, -0.06, -0.12, 0.05, 0, 0, -0.14, -0.15, 0, 0 }
             -- no LBY realign for a while while standing: the desync is probably <= ~35, small angles go first
             local LOW_BIAS    = { -0.15, -0.15, 0.20, 0.20, 0.05, 0, 0, 0, 0.26, 0.26 }
             -- balance adjust just played: the desync is > 35
             local FULL_BIAS   = {  0.10,  0.10, -0.12, -0.12, -0.25, 0, 0, 0, -0.10, -0.10 }
-            local JITTER_BIAS = { 0, 0, 0, 0, -0.03, -0.03, -0.10 }
+            local JITTER_BIAS = { 0, 0, 0, 0, -0.03, -0.03, -0.10, 0, 0 }
             local DEF_BIAS    = { 0.10, 0.04, -0.02, -0.04, 0 }
 
             local function arm_name(ctx, arm)
@@ -1138,6 +1142,9 @@ LPH_NO_VIRTUALIZE(function ()
                         pose = nil, pose_ok = false, pose_jit_on = false,
                         low_desync = false, bal_recent = false,
                         arm_conf = nil, def_conf = nil, new_record = false,
+                        feet = nil, feet_st = nil, model_body = 0, model_ok = false,
+                        fx = nil, fx_delta = nil, act_cache = {}, adj_prev_active = false,
+                        realign_tick = nil, realign_gap = nil, still_s = nil,
                     }
                     resolver.database[idx] = data
                 end
@@ -1347,31 +1354,341 @@ LPH_NO_VIRTUALIZE(function ()
             end
 
             ---
-            --- observation: one pass per new network update of an enemy
+            --- FFI resolver. Reads what the server networked about the enemy's animation (animation layers) and what the
+            --- client animstate currently shows, through ffi, and runs a copy of the server's feet yaw logic on the netvars.
+            --- Everything here is optional: any failure only switches this part off and the resolver keeps running on
+            --- netvars + learning. Reads are pointer-checked, the animstate layout is verified against the netvars before
+            --- anything is trusted, and nothing is ever written unless "Animstate apply" is on AND the layout checked out.
             ---
-            local function read_layers(idx, data, tick)
-                if not (ffi_helpers and ffi_helpers.animlayers and ffi_helpers.activity) or resolver.layers_broken then
-                    data.layers_ok = false
-                    return
-                end
-                -- animation layer 3 running "balance adjust" (979) = the feet just realigned with the eye yaw,
-                -- which only happens for a desync > ~35. Fully optional: if the read fails the resolver just works without it.
-                local ok, active = pcall(function()
-                    local layers = ffi_helpers.animlayers:get(idx)
-                    if layers == nil then return false end
-                    local l = layers[3]
-                    return l.weight > 0.01 and l.cycle < 0.99 and ffi_helpers.activity:get(l.sequence, idx) == 979
+            local OPT_LAYERS = "Animation layers"
+            local OPT_MODEL  = "Feet model"
+            local OPT_APPLY  = "Animstate apply (experimental)"
+            local OPT_TELE   = "Telemetry"
+            SPECTER_SHARED = SPECTER_SHARED or {}
+            SPECTER_SHARED.resolver_ffi_opts = { OPT_LAYERS, OPT_MODEL, OPT_APPLY, OPT_TELE }
+
+            local fres = {
+                types_ok = false, disabled = false, errors = 0, last_note = "",
+                layout = "unknown",                       -- animstate layout check: unknown / ok / bad
+                y_n = 0, y_rate = 0,                      -- samples where the netvar eye yaw is not ~0, and how many the animstate eye yaw matched
+                p_n = 0, p_rate = 0,                      -- the same for the pitch
+                g_n = 0, goal_rate = 0,                   -- goal feet yaw within the max body yaw of the eye yaw
+                pol_n = 0, pol_ema = 0, polarity = nil,   -- sign relation between a forced value and the animstate body yaw
+                apply_err = nil, writes = 0,
+            }
+            resolver.fres = fres
+
+            -- CCSGOPlayerAnimState, only the part up to on_ground (0x108 is the offset the script already uses for it).
+            -- The pointer fields are plain ints so the layout is the same on any pointer size.
+            do
+                local ok = pcall(function()
+                    if not pcall(ffi.typeof, "fres_animstate_t") then
+                        ffi.cdef[[
+                            typedef struct {
+                                char         pad0[0x60];
+                                unsigned int base_entity;       // 0x60
+                                unsigned int active_weapon;     // 0x64
+                                unsigned int last_weapon;       // 0x68
+                                float        last_update_time;  // 0x6C
+                                int          last_update_frame; // 0x70
+                                float        last_update_inc;   // 0x74
+                                float        eye_yaw;           // 0x78
+                                float        eye_pitch;         // 0x7C
+                                float        goal_feet_yaw;     // 0x80
+                                float        cur_feet_yaw;      // 0x84
+                                float        torso_yaw;         // 0x88
+                                float        unk_vel_lean;      // 0x8C
+                                float        lean_amount;       // 0x90
+                                float        unk94;             // 0x94
+                                float        feet_cycle;        // 0x98
+                                float        feet_yaw_rate;     // 0x9C
+                                float        unkA0;             // 0xA0
+                                float        duck_amount;       // 0xA4
+                                float        landing_duck_add;  // 0xA8
+                                float        unkAC;             // 0xAC
+                                float        origin[3];         // 0xB0
+                                float        last_origin[3];    // 0xBC
+                                float        velocity[3];       // 0xC8
+                                float        vel_norm[3];       // 0xD4
+                                float        vel_norm_nz[3];    // 0xE0
+                                float        vel_len_xy;        // 0xEC
+                                float        vel_len_z;         // 0xF0
+                                float        speed_run_frac;    // 0xF4
+                                float        speed_walk_frac;   // 0xF8
+                                float        speed_crouch_frac; // 0xFC
+                                float        duration_moving;   // 0x100
+                                float        duration_still;    // 0x104
+                                bool         on_ground;         // 0x108
+                                bool         in_hit_ground;     // 0x109
+                            } fres_animstate_t;
+                        ]]
+                    end
+                    -- a typo in the struct above must not turn into a wrong read in game
+                    local expect = {
+                        eye_yaw = 0x78, eye_pitch = 0x7C, goal_feet_yaw = 0x80, cur_feet_yaw = 0x84, duck_amount = 0xA4,
+                        vel_len_xy = 0xEC, duration_moving = 0x100, duration_still = 0x104, on_ground = 0x108,
+                    }
+                    for name, off in pairs(expect) do
+                        if ffi.offsetof("fres_animstate_t", name) ~= off then error("struct offset " .. name) end
+                    end
                 end)
-                if ok then
-                    data.layers_ok = true
-                    if active then data.balance_tick = tick end
-                else
-                    data.layers_ok = false
-                    resolver.layer_errors = (resolver.layer_errors or 0) + 1
-                    if resolver.layer_errors > 50 then resolver.layers_broken = true end
+                fres.types_ok = ok
+            end
+
+            local ADDR_MAX = ffi.abi("32bit") and 0x7FFE0000 or 0x7FFFFFFFFFFF
+            local function ptr_ok(p)
+                if p == nil then return false end
+                local addr = tonumber(ffi.cast("uintptr_t", p))
+                return addr ~= nil and addr >= 0x10000 and addr <= ADDR_MAX
+            end
+
+            local function fres_opt(name)
+                local item = config.resolver and config.resolver.ffi
+                if not item then return name == OPT_LAYERS or name == OPT_MODEL end
+                local list = item:get()
+                return type(list) == "table" and c_table.contains(list, name)
+            end
+
+            local function fres_fail(why)
+                fres.errors = fres.errors + 1
+                fres.last_note = tostring(why)
+                if fres.errors > 25 and not fres.disabled then
+                    fres.disabled = true
+                    c_logger.log("FFI resolver: too many errors (%s) - the FFI part is off, the resolver keeps running without it", tostring(why))
                 end
             end
 
+            local function layer_sane(l)
+                local w, c = l.weight, l.cycle
+                return w == w and c == c and w >= -0.01 and w <= 1.01 and c >= -0.01 and c <= 1.01
+            end
+
+            local ACT_BALANCE_ADJUST = 979   -- ACT_CSGO_IDLE_TURN_BALANCEADJUST: the feet realign with the eye yaw
+
+            -- one read of the server animation layers and the client animstate of an enemy
+            local function fres_sample(idx, data)
+                if fres.disabled or not ffi_helpers or not ffi_helpers.get_client_entity then return nil end
+                local use_layers = fres_opt(OPT_LAYERS) and ffi_helpers.animlayers and ffi_helpers.activity and not resolver.layers_broken
+                local use_anim = fres.types_ok and fres.layout ~= "bad" and ffi_helpers.animstate
+                    and (fres_opt(OPT_MODEL) or fres_opt(OPT_APPLY) or fres_opt(OPT_TELE))
+                if not use_layers and not use_anim then return nil end
+
+                local ok, fx = pcall(function()
+                    -- the helpers add an offset to this pointer and dereference it: a NULL entity must never get that far
+                    if not ptr_ok(ffi_helpers.get_client_entity(idx)) then return nil end
+                    local fx = {}
+                    if use_layers then
+                        local layers = ffi_helpers.animlayers:get(idx)
+                        if layers ~= nil and ptr_ok(layers) then
+                            local l3, l6, l7, l12 = layers[3], layers[6], layers[7], layers[12]
+                            if layer_sane(l3) and layer_sane(l6) then
+                                fx.layers = true
+                                fx.adj_w, fx.adj_cycle, fx.adj_seq = l3.weight, l3.cycle, l3.sequence
+                                fx.mov_w, fx.mov_rate, fx.mov_seq = l6.weight, l6.playback_rate, l6.sequence
+                                fx.str_w, fx.lean_w = l7.weight, l12.weight
+                                -- which activity the adjust layer runs (native lookup, cached per sequence)
+                                fx.adj_act = 0
+                                if fx.adj_w > 0.01 and fx.adj_cycle < 0.99 then
+                                    local act = data.act_cache[fx.adj_seq]
+                                    if act == nil then
+                                        act = ffi_helpers.activity:get(fx.adj_seq, idx) or -1
+                                        data.act_cache[fx.adj_seq] = act
+                                    end
+                                    fx.adj_act = act
+                                end
+                            else
+                                resolver.layer_bad = (resolver.layer_bad or 0) + 1
+                                if resolver.layer_bad > 40 then resolver.layers_broken = true end
+                            end
+                        end
+                    end
+                    if use_anim then
+                        local st = ffi_helpers.animstate:get(idx)
+                        if st ~= nil and ptr_ok(st) then
+                            local a = ffi.cast("fres_animstate_t*", st)
+                            local eye, goal = a.eye_yaw, a.goal_feet_yaw
+                            local pit = a.eye_pitch
+                            if eye == eye and goal == goal and pit == pit and eye > -1e4 and eye < 1e4 and goal > -1e4 and goal < 1e4
+                                and pit > -1e4 and pit < 1e4 then
+                                fx.anim = true
+                                fx.a_eye, fx.a_goal, fx.a_cur, fx.a_pitch = eye, goal, a.cur_feet_yaw, a.eye_pitch
+                                fx.a_still, fx.a_moving, fx.a_vel = a.duration_still, a.duration_moving, a.vel_len_xy
+                            end
+                        end
+                    end
+                    return fx
+                end)
+                if not ok then
+                    fres_fail(fx)
+                    return nil
+                end
+                return fx
+            end
+
+            -- does the animstate eye yaw / pitch belong to one of the last records (netvars)?
+            local function eye_matches(data, a_eye, a_pitch)
+                local recs = data.records
+                local n = #recs
+                local yaw_inf, yaw_match = false, false
+                local pit_inf, pit_match = false, false
+                for i = math_max(1, n - 5), n do
+                    local e, pt = recs[i].eye, recs[i].pitch
+                    if e then
+                        if math_abs(e) >= 5 then yaw_inf = true end
+                        if math_abs(c_math.normalize_yaw(a_eye - e)) < 1.5 then yaw_match = true end
+                    end
+                    if pt and i >= n - 2 then
+                        if math_abs(pt) >= 5 then pit_inf = true end
+                        if math_abs(a_pitch - pt) < 2.5 then pit_match = true end
+                    end
+                end
+                return yaw_inf, yaw_match, pit_inf, pit_match
+            end
+
+            -- is the struct we read really the animstate? Its eye yaw and pitch have to be eye yaws / pitches the netvars just
+            -- showed, and the goal feet yaw can never be further than the max body yaw (58) away from the eye yaw.
+            -- Only samples where the netvar value is not ~0 prove anything (a zeroed or tiny-garbage struct would "match"
+            -- a target that looks straight ahead), so a layout is only accepted after enough of those.
+            local function fres_validate(data, fx)
+                if not fx.anim or fres.layout == "bad" then return end
+                if #data.records < 2 then return end
+                local yaw_inf, yaw_match, pit_inf, pit_match = eye_matches(data, fx.a_eye, fx.a_pitch)
+                if yaw_inf then
+                    fres.y_n = fres.y_n + 1
+                    fres.y_rate = fres.y_rate + ((yaw_match and 1 or 0) - fres.y_rate) * math_max(1 / fres.y_n, 0.03)
+                end
+                if pit_inf then
+                    fres.p_n = fres.p_n + 1
+                    fres.p_rate = fres.p_rate + ((pit_match and 1 or 0) - fres.p_rate) * math_max(1 / fres.p_n, 0.03)
+                end
+                fres.g_n = fres.g_n + 1
+                local goal_ok = math_abs(c_math.normalize_yaw(fx.a_eye - fx.a_goal)) <= 62
+                fres.goal_rate = fres.goal_rate + ((goal_ok and 1 or 0) - fres.goal_rate) * math_max(1 / fres.g_n, 0.03)
+
+                if fres.y_n >= 16 then
+                    local pitch_known = fres.p_n >= 8
+                    local pitch_good = not pitch_known or fres.p_rate >= 0.7
+                    local pitch_bad = pitch_known and (fres.p_rate < 0.4 or (fres.layout == "ok" and fres.p_rate < 0.5))
+                    if fres.layout ~= "ok" and fres.y_rate >= 0.75 and fres.goal_rate >= 0.9 and pitch_good then
+                        fres.layout = "ok"
+                        c_logger.log("FFI resolver: animstate layout verified (eye yaw %d%%, pitch %s)", math_floor(fres.y_rate * 100),
+                            pitch_known and (math_floor(fres.p_rate * 100) .. "%") or "n/a")
+                    elseif fres.y_rate <= 0.3 or fres.goal_rate < 0.6 or pitch_bad or (fres.layout == "ok" and fres.y_rate < 0.4) then
+                        fres.layout = "bad"
+                        c_logger.log("FFI resolver: animstate layout does NOT match this build (eye yaw %d%%, feet %d%%) - animstate reads and apply are off",
+                            math_floor(fres.y_rate * 100), math_floor(fres.goal_rate * 100))
+                    end
+                end
+            end
+
+            -- everything derived from one sample: realign tracking (layer 3), animstate checks, polarity of the forced values
+            local function fres_observe(idx, data, fx, tick)
+                data.fx = fx
+                data.layers_ok = fx ~= nil and fx.layers == true
+                if fx == nil then return end
+
+                if fx.layers then
+                    local active = fx.adj_act == ACT_BALANCE_ADJUST
+                    if active then
+                        data.balance_tick = tick
+                        if not data.adj_prev_active then
+                            -- rising edge: the feet start turning towards the eye yaw now
+                            if data.realign_tick then
+                                local gap = (tick - data.realign_tick) * globals_tickinterval()
+                                data.realign_gap = data.realign_gap and (data.realign_gap * 0.5 + gap * 0.5) or gap
+                            end
+                            data.realign_tick = tick
+                        end
+                    end
+                    data.adj_prev_active = active
+                end
+
+                if fx.anim then
+                    fres_validate(data, fx)
+                    data.still_s = fx.a_still
+                    -- the body yaw the client animstate shows, against the value that was forced while it was produced.
+                    -- Whether gamesense leaves its forced value in the animstate decides if this means anything: the
+                    -- polarity is only taken over when the two clearly follow each other.
+                    local delta = c_math.normalize_yaw(fx.a_eye - fx.a_goal)
+                    data.fx_delta = delta
+                    local f = resolver.forced[idx]
+                    if fres.layout == "ok" and f ~= nil and math_abs(f) >= 15 and math_abs(delta) >= 8 then
+                        local agree = ((f > 0) == (delta > 0)) and 1 or -1
+                        fres.pol_n = fres.pol_n + 1
+                        fres.pol_ema = fres.pol_ema + (agree - fres.pol_ema) * math_max(1 / fres.pol_n, 0.04)
+                        local err = math_abs(math_abs(delta) - math_abs(f))
+                        fres.apply_err = fres.apply_err and (fres.apply_err * 0.9 + err * 0.1) or err
+                        if fres.pol_n >= 30 and math_abs(fres.pol_ema) >= 0.5 then
+                            fres.polarity = fres.pol_ema > 0 and 1 or -1
+                        else
+                            fres.polarity = nil
+                        end
+                    end
+                end
+            end
+
+            ---
+            --- feet yaw model: how the server's animstate moves the feet, run on the netvars. Standing, the feet turn towards
+            --- the lower body yaw target (100 deg/s); moving, they follow the eye yaw (30-50 deg/s); they are never further
+            --- than the max body yaw away from the eye yaw. Eye yaw minus feet is the body yaw (desync) of that record.
+            ---
+            local function approach_angle(target, value, step)
+                local d = c_math.normalize_yaw(target - value)
+                if d > step then return c_math.normalize_yaw(value + step) end
+                if d < -step then return c_math.normalize_yaw(value - step) end
+                return c_math.normalize_yaw(target)
+            end
+
+            local function feet_update(data, eye, lby, st, speed, maxd)
+                if eye == nil then data.model_ok = false; return end
+                local moving = speed > 5 or data.stance == "air"
+                local target = moving and eye or lby
+                if target == nil then data.model_ok = false; return end
+                if data.feet == nil or data.feet_st == nil or st < data.feet_st then
+                    data.feet, data.feet_st = target, st
+                end
+                local dt = c_math.clamp((st - data.feet_st) * globals_tickinterval(), 0, 0.25)
+                data.feet_st = st
+                local rate = moving and (30 + 20 * c_math.clamp((speed - 70) / 65, 0, 1)) or 100
+                data.feet = approach_angle(target, data.feet, rate * dt)
+                local d = c_math.normalize_yaw(eye - data.feet)
+                if d > maxd then
+                    data.feet = c_math.normalize_yaw(eye - maxd)
+                elseif d < -maxd then
+                    data.feet = c_math.normalize_yaw(eye + maxd)
+                end
+                data.model_body = c_math.normalize_yaw(eye - data.feet)
+                data.model_ok = true
+            end
+
+            -- experimental: put the resolved body yaw straight into the client animstate (goal + current feet yaw).
+            -- Never runs unless "Animstate apply" is on and the animstate layout was verified.
+            local function fres_apply(idx, data, value)
+                if value == nil or fres.disabled or fres.layout ~= "ok" or fres.y_n < 40 or data.is_shifting then return end
+                if not fres_opt(OPT_APPLY) or not (data.fx and data.fx.anim) then return end
+                local ok, err = pcall(function()
+                    local st = ffi_helpers.animstate:get(idx)
+                    if st == nil or not ptr_ok(st) then return end
+                    local a = ffi.cast("fres_animstate_t*", st)
+                    local eye, pit = a.eye_yaw, a.eye_pitch
+                    if eye ~= eye or eye < -1e4 or eye > 1e4 or pit ~= pit or pit < -1e4 or pit > 1e4 then return end
+                    -- the struct must still look like this player's animstate right now, not just when it was verified
+                    local _, yaw_match, _, pit_match = eye_matches(data, eye, pit)
+                    if not yaw_match or not pit_match or math_abs(c_math.normalize_yaw(eye - a.goal_feet_yaw)) > 62 then return end
+                    local feet = c_math.normalize_yaw(eye - (fres.polarity or 1) * c_math.clamp(value, -60, 60))
+                    a.goal_feet_yaw = feet
+                    a.cur_feet_yaw = feet
+                    fres.writes = fres.writes + 1
+                end)
+                if not ok then fres_fail(err) end
+            end
+
+            local function fres_status(data)
+                if fres.disabled then return "off (errors)" end
+                local s = fres.layout
+                if data and data.layers_ok then s = s .. " +layers" end
+                return s
+            end
 
             local function update_player(idx, me)
                 local data = resolver.init_player(idx)
@@ -1383,7 +1700,20 @@ LPH_NO_VIRTUALIZE(function ()
                 -- a real tickbase shift is at most ~17 ticks; anything bigger is a map change / reconnect
                 if data.max_st and st < data.max_st - 32 then
                     data.max_st, data.records, data.hist, data.last_sim = nil, {}, {}, nil
+                    data.feet, data.feet_st, data.act_cache = nil, nil, {}
                 end
+
+                -- speed, and the usable desync: it shrinks with speed (and with ducking while moving)
+                local vx, vy = entity_get_prop(idx, "m_vecVelocity")
+                local speed = (vx and vy) and math_sqrt(vx * vx + vy * vy) or 0
+                if speed ~= speed then speed = 0 end
+                speed = c_math.clamp(speed, 0, 320)
+                data.speed = speed
+                local duck = entity_get_prop(idx, "m_flDuckAmount") or 0
+                local run = c_math.clamp(speed / 135, 0, 1)
+                local avg = 1 - (0.2 + 0.3 * c_math.clamp((speed - 70) / 65, 0, 1)) * run
+                if duck > 0 then avg = avg + duck * run * (0.5 - avg) end
+                data.max_desync = c_math.clamp(math_floor(MAX_YAW * avg + 0.5), 20, MAX_YAW)
 
                 data.new_record = false
                 if data.last_sim == nil or st ~= data.last_sim then
@@ -1400,11 +1730,13 @@ LPH_NO_VIRTUALIZE(function ()
                     local mx, my = entity_get_prop(me, "m_vecOrigin")
                     if eye_yaw and (eye_yaw ~= eye_yaw or eye_yaw > 1e5 or eye_yaw < -1e5) then eye_yaw = nil end
                     if pitch and pitch ~= pitch then pitch = nil end
+                    local lby_ok, lby = pcall(entity_get_prop, idx, "m_flLowerBodyYawTarget")
+                    if not lby_ok or type(lby) ~= "number" or lby ~= lby or lby > 1e5 or lby < -1e5 then lby = nil end
 
                     -- lag compensation breaker: a jump bigger than the target could have walked since the last update
                     if not shifted and ox and data.last_origin then
                         local dx, dy, dz = ox - data.last_origin[1], oy - data.last_origin[2], oz - data.last_origin[3]
-                        local legit = (data.speed or 0) * (data.choke + 1) * globals_tickinterval() * 1.4 + 20
+                        local legit = speed * (data.choke + 1) * globals_tickinterval() * 1.4 + 20
                         local lc_sq = math_max(LC_SQ_BASE + ping.ticks * ping.ticks * 16, legit * legit)
                         local lc_window = math_max(LC_TICKS_BASE, 8 + ping.ticks)
                         if dx * dx + dy * dy + dz * dz > lc_sq then data.lc_until = tick + lc_window end
@@ -1429,6 +1761,11 @@ LPH_NO_VIRTUALIZE(function ()
                     end
                     data.def_rate = data.def_rate * 0.9 + (def_reason and 0.1 or 0)
 
+                    data.stance = get_stance(idx)
+                    if data.stance ~= data.prev_stance then
+                        data.prev_stance, data.stance_since = data.stance, tick
+                    end
+
                     -- networked body yaw (not from shifted updates: those carry nonsense)
                     local pose
                     if not def_reason then
@@ -1437,14 +1774,16 @@ LPH_NO_VIRTUALIZE(function ()
                         data.pose_ok = data.pose ~= nil
                     end
 
+                    local rec
                     if eye_yaw and ox and mx then
                         local rel = c_math.normalize_yaw(eye_yaw - math.deg(math.atan2(my - oy, mx - ox)) - 180)
                         if rel == rel then
                             local r = data.records
-                            r[#r + 1] = {
+                            rec = {
                                 rel = rel, pitch = pitch or 0, def = def_reason ~= nil, tick = tick, st = st, pose = pose,
-                                fv = resolver.forced[idx],
+                                fv = resolver.forced[idx], eye = eye_yaw, lby = lby,
                             }
+                            r[#r + 1] = rec
                             while #r > RECORDS do table_remove(r, 1) end
                         end
                     end
@@ -1465,15 +1804,21 @@ LPH_NO_VIRTUALIZE(function ()
                         end
                     end
 
-                    data.stance = get_stance(idx)
-                    if data.stance ~= data.prev_stance then
-                        data.prev_stance, data.stance_since = data.stance, tick
+                    -- ffi: server animation layers + client animstate of this enemy
+                    fres_observe(idx, data, fres_sample(idx, data), tick)
+
+                    -- feet yaw model (not on shifted updates)
+                    if not def_reason and fres_opt(OPT_MODEL) then
+                        feet_update(data, eye_yaw, lby, st, speed, data.max_desync)
+                        if rec then rec.model = data.model_ok and data.model_body or nil end
                     end
 
-                    read_layers(idx, data, tick)
                     local window = math_floor(1.2 / globals_tickinterval())
                     local standing_long = data.stance == "stand"
                         and data.stance_since ~= nil and tick - data.stance_since > window
+                    if data.still_s and fres.layout == "ok" then
+                        standing_long = data.stance == "stand" and data.still_s > 1.2
+                    end
                     -- realigned within the last second: the desync is bigger than ~35.
                     -- standing for a while without one: it is smaller. Only believed when the layers are readable,
                     -- without them there is no evidence either way.
@@ -1487,18 +1832,6 @@ LPH_NO_VIRTUALIZE(function ()
                 data.is_shifting = tick < data.def_until
                 data.pitch_snap = data.is_shifting and data.def_reason == "pitch flick"
                 data.lc_break = tick < data.lc_until
-
-                local vx, vy = entity_get_prop(idx, "m_vecVelocity")
-                local speed = (vx and vy) and math_sqrt(vx * vx + vy * vy) or 0
-                if speed ~= speed then speed = 0 end
-                speed = c_math.clamp(speed, 0, 320)
-                data.speed = speed
-                -- animstate: the usable desync shrinks with speed (and ducking while moving)
-                local duck = entity_get_prop(idx, "m_flDuckAmount") or 0
-                local run = c_math.clamp(speed / 135, 0, 1)
-                local avg = 1 - (0.2 + 0.3 * c_math.clamp((speed - 70) / 65, 0, 1)) * run
-                if duck > 0 then avg = avg + duck * run * (0.5 - avg) end
-                data.max_desync = c_math.clamp(math_floor(MAX_YAW * avg + 0.5), 20, MAX_YAW)
 
                 local base_type = "normal"
                 if data.is_jitter then
@@ -1518,6 +1851,22 @@ LPH_NO_VIRTUALIZE(function ()
             ---
             --- 1) static desync
             ---
+            -- the feet yaw model is a candidate when it has a value for this record and it is not just ~0 (the zero arm covers that)
+            local function feet_usable(data)
+                return data.model_ok and fres_opt(OPT_MODEL) and not data.is_shifting and math_abs(data.model_body) >= 4
+            end
+
+            -- first guess of the two polarity arms: even when nothing is known about the sign convention, and
+            -- clearly in favour of the right one once the animstate showed which way forced values turn out.
+            -- A target that chokes a lot moves its feet through updates we never see, so the model is less reliable there.
+            local function feet_bias(data)
+                local base = (data.choke or 0) <= 3 and 0 or -0.08
+                local pol = fres.polarity
+                if pol == 1 then return base + 0.15, base - 0.10 end
+                if pol == -1 then return base - 0.10, base + 0.15 end
+                return base, base
+            end
+
             -- first guess goes to the OPEN side (live logs showed the covered side missing);
             -- the learning still flips it per player / globally if that turns out wrong
             local function hint_side(data)
@@ -1544,6 +1893,13 @@ LPH_NO_VIRTUALIZE(function ()
                 local pose_arm = data.pose_ok and data.pose ~= nil and math_abs(data.pose) >= 6
                 avail[7], avail[8] = pose_arm, pose_arm
 
+                -- the feet yaw model: what the server's animstate logic gives for this record
+                local feet_arm = feet_usable(data)
+                avail[11], avail[12] = feet_arm, feet_arm
+                if feet_arm then
+                    bias[11], bias[12] = feet_bias(data)
+                end
+
                 local arm, conf = arm_pick(m, ctx, n, bias, avail)
                 data.arm_conf = conf
                 local a = STATIC_ARMS[arm]
@@ -1554,6 +1910,8 @@ LPH_NO_VIRTUALIZE(function ()
                     value, reason = hv, "db hit"
                 elseif a.src == "pose" then
                     value, reason = a.pol * data.pose, "pose"
+                elseif a.src == "feet" then
+                    value, reason = a.pol * data.model_body, "feet model"
                 else
                     value = a.pol * side * math_floor(maxd * a.frac + 0.5)
                     reason = arm == 1 and (data.freestand ~= 0 and "freestand" or "desync") or ("brute " .. arm)
@@ -1583,19 +1941,29 @@ LPH_NO_VIRTUALIZE(function ()
                     bias[5], bias[6], bias[7] = bias[5] + 0.08, bias[6] + 0.08, bias[7] + 0.12
                 end
 
+                -- the feet yaw model gives the body yaw of the record that is being resolved
+                local feet_arm = feet_usable(data)
+                avail[8], avail[9] = feet_arm, feet_arm
+                if feet_arm then
+                    bias[8], bias[9] = feet_bias(data)
+                end
+
                 local arm, conf = arm_pick(m, ctx, n, bias, avail)
                 data.arm_conf = conf
                 local a = JITTER_ARMS[arm]
                 local side = a.next and data.jitter_next or data.jitter_side
                 if side == 0 then side = data.jitter_side ~= 0 and data.jitter_side or 1 end
                 local value = 0
-                if a.src ~= "zero" then
+                if a.src == "feet" then
+                    value = a.pol * data.model_body
+                elseif a.src ~= "zero" then
                     value = a.pol * side * math_floor(data.max_desync * a.frac + 0.5)
                 end
                 value = math_floor(c_math.clamp(value, -60, 60) + 0.5)
 
                 data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
                 data.used_pol, data.used_side, data.used_step = a.pol or 1, side, arm
+                if a.src == "feet" then return value, "feet model" end
                 return value, a.frac and a.frac < 1 and "jitter low" or "jitter"
             end
 
@@ -1800,7 +2168,8 @@ LPH_NO_VIRTUALIZE(function ()
                 local seen = {}
                 -- manual tool: flip the resolved side on the aimbot's current target while the key is active
                 local flip_item = config.resolver.flip
-                local flip_target = flip_item and flip_item:rawget() and client.current_threat() or nil
+                local threat = client.current_threat()
+                local flip_target = flip_item and flip_item:rawget() and threat or nil
                 for _, idx in ipairs(entity.get_players(true)) do
                     if entity.is_alive(idx) and not entity.is_dormant(idx) then
                         seen[idx] = true
@@ -1817,6 +2186,7 @@ LPH_NO_VIRTUALIZE(function ()
                             data.last_good_stance = data.stance
                         end
                         write(idx, value)
+                        fres_apply(idx, data, value)
                         write_extras(idx, data, resolver.memory[data.key])
                         if opt("Defensive snap fix") and data.is_shifting then
                             write_pitch(idx, data.real_pitch)
@@ -1842,6 +2212,21 @@ LPH_NO_VIRTUALIZE(function ()
                         data.vhist = vh
                         vh[#vh + 1] = value == nil and false or value
                         while #vh > 32 do table_remove(vh, 1) end
+
+                        -- one line per second for the current threat: what the ffi layer sees, for tuning from logs
+                        if idx == threat and fres_opt(OPT_TELE) and globals_tickcount() % 64 == 0 then
+                            local fx = data.fx or {}
+                            c_logger.log("%s", string_format(
+                                "ffi %s | adj act %s w %.2f c %.2f | mov w %.2f r %.2f | anim eye %s goal %s d %s still %s | lby %s model %s | forced %s | pol %s n %d err %s | choke %d spd %d %s",
+                                fres_status(data), tostring(fx.adj_act or "-"), fx.adj_w or 0, fx.adj_cycle or 0, fx.mov_w or 0, fx.mov_rate or 0,
+                                fx.a_eye and string_format("%.0f", fx.a_eye) or "-", fx.a_goal and string_format("%.0f", fx.a_goal) or "-",
+                                data.fx_delta and string_format("%+.0f", data.fx_delta) or "-", fx.a_still and string_format("%.1f", fx.a_still) or "-",
+                                data.records[#data.records] and data.records[#data.records].lby and string_format("%.0f", data.records[#data.records].lby) or "-",
+                                data.model_ok and string_format("%+.0f", data.model_body) or "-",
+                                value ~= nil and tostring(value) or "-", tostring(fres.polarity or "?"), fres.pol_n,
+                                fres.apply_err and string_format("%.0f", fres.apply_err) or "-",
+                                data.choke or 0, math_floor(data.speed or 0), data.stance or "?"))
+                        end
                     end
                 end
 
@@ -1876,6 +2261,10 @@ LPH_NO_VIRTUALIZE(function ()
                 if (shot.bt or 0) >= stale_threshold() then
                     return "stale record", string_format("%d-tick old record (limit %d), forced %d (%s)", shot.bt, stale_threshold(), shot.value, an)
                 end
+                if shot.reason == "feet model" then
+                    return "feet model", string_format("forced %d (%s), animstate showed %s", shot.value, an,
+                        shot.fx_delta and string_format("%+d", math_floor(shot.fx_delta + 0.5)) or "n/a")
+                end
                 if shot.reason == "jitter" or shot.reason == "jitter low" then
                     return "jitter", string_format("forced %d (%s, side %d next %d, spread %d)", shot.value, an, shot.jside or 0, shot.jnext or 0, math_floor(shot.spread or 0))
                 end
@@ -1897,12 +2286,15 @@ LPH_NO_VIRTUALIZE(function ()
                     local s = shot or {}
                     client.color_log(180, 160, 255, "specter resolver  \0")
                     client.color_log(kind == "miss" and 255 or 150, kind == "miss" and 125 or 230, kind == "miss" and 125 or 165,
-                        string_format("%s %s | %s | forced %s (%s / %s) | %s %s spd %d maxd %d choke %d | jit %d%% side %d | bt %d%s | %s ping | %s",
+                        string_format("%s %s | %s | forced %s (%s / %s) | %s %s spd %d maxd %d choke %d | jit %d%% side %d | bt %d%s | %s ping | model %s anim %s adj %s | %s",
                             kind, e.name, tag, s.value ~= nil and tostring(s.value) or "-", s.reason or "native", resolver.arm_name(s.ctx, s.arm),
                             s.meta or "?", s.stance or "?", math_floor(s.speed or 0), s.maxd or 0, s.choke or 0,
                             math_floor((s.jratio or 0) * 100), s.jside or 0, s.bt or 0,
                             (s.shifting and (" def:" .. tostring(s.def_reason)) or ""),
                             s.profile or "?",
+                            s.model and string_format("%+d", math_floor(s.model + 0.5)) or "-",
+                            s.fx_delta and string_format("%+d", math_floor(s.fx_delta + 0.5)) or "-",
+                            tostring(s.adj_act or "-"),
                             detail ~= "" and detail or "ok"))
                 end
             end
@@ -1973,6 +2365,8 @@ LPH_NO_VIRTUALIZE(function ()
                     extrap = event.extrapolated == true, teleported = event.teleported == true,
                     lc = data.lc_break, jratio = data.jitter_ratio, spread = data.spread, meta = data.meta_type,
                     speed = data.speed, choke = data.choke, hitgroup = event.hitgroup, def_reason = data.def_reason,
+                    model = data.model_ok and data.model_body or nil, fx_delta = data.fx_delta,
+                    adj_act = data.fx and data.fx.adj_act or nil,
                 }
                 if e then
                     shot.value, shot.reason = e.value, e.reason or "native"
@@ -2112,6 +2506,7 @@ LPH_NO_VIRTUALIZE(function ()
                     d.consecutive_misses, d.def_until, d.lc_until, d.last_origin = 0, 0, 0, nil
                     d.last_good_value, d.last_good_tick = nil, nil
                     d.hist = {}
+                    d.act_cache, d.feet, d.feet_st = {}, nil, nil
                 end
             end
 
@@ -2176,6 +2571,9 @@ LPH_NO_VIRTUALIZE(function ()
                         rows[#rows + 1] = { "defensive", data.is_shifting and (data.def_reason or "yes") or "-", "rate", string_format("%d%%", math_floor((data.def_rate or 0) * 100)) }
                         local lby = not data.layers_ok and "n/a" or (data.balance_tick and string_format("%.1fs ago", (globals_tickcount() - data.balance_tick) * globals_tickinterval()) or "never")
                         rows[#rows + 1] = { "lby break", lby, "desync", data.low_desync and "low" or (data.bal_recent and "full" or "?") }
+                        rows[#rows + 1] = { "ffi", fres_status(data), "model", data.model_ok and string_format("%+d\194\176", math_floor(data.model_body + 0.5)) or "n/a" }
+                        rows[#rows + 1] = { "animstate", data.fx_delta and string_format("%+d\194\176", math_floor(data.fx_delta + 0.5)) or "n/a", "polarity",
+                            fres.polarity and (fres.polarity > 0 and "+" or "-") or "?" }
                         if m and data.used_ctx then
                             rows[#rows + 1] = { "arm", resolver.arm_name(data.used_ctx, data.used_arm), "score",
                                 string_format("%.2f", resolver.arm_score(m, data.used_ctx, data.used_arm, data.used_n)) }
@@ -4176,7 +4574,7 @@ LPH_NO_VIRTUALIZE(function ()
             if reason == nil or reason == "native" or reason == "jitter native" or reason == "native warmup" or reason == "defensive native" then return "native" end
             if reason == "jitter" or reason == "jitter low" then return "jitter" end
             if reason == "defensive hold" then return "defensive" end
-            if reason == "freestand" or reason == "pose" then return "desync" end
+            if reason == "freestand" or reason == "pose" or reason == "feet model" then return "desync" end
             if reason:sub(1, 3) == "db " then return "desync" end
             if reason:sub(1, 6) == "brute " then return "brute" end
             return reason
@@ -5068,6 +5466,10 @@ LPH_NO_VIRTUALIZE(function ()
                 config.resolver.ping_threshold = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  High ping from", 15, 120, 35, true, "ms")
                     :record("resolver", "ping_threshold"):save()
                 config.uix.res_hint_ping = mui.hint(mui.CONTENT, "auto: switches to the high ping profile above this ping")
+                config.resolver.ffi = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "•  FFI resolver\nresolver",
+                    SPECTER_SHARED.resolver_ffi_opts):record("resolver", "ffi"):save()
+                pcall(function() config.resolver.ffi:set({ "Animation layers", "Feet model" }) end)
+                config.uix.res_hint_ffi = mui.hint(mui.CONTENT, "layers + animstate through ffi; apply writes the animstate (experimental)")
                 config.resolver.safe_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Safe point after misses", 1, 5, 2)
                     :record("resolver", "safe_after"):save()
                 config.resolver.baim_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Body aim after misses", 1, 6, 3)
@@ -12616,6 +13018,8 @@ LPH_NO_VIRTUALIZE(function ()
                     if RS.enabled:get() then
                         RS.options:display()
                         config.uix.res_hint:display()
+                        RS.ffi:display()
+                        config.uix.res_hint_ffi:display()
                         RS.ping_mode:display()
                         if RS.ping_mode:get() == "Auto" then
                             RS.ping_threshold:display()

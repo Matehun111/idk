@@ -21,6 +21,9 @@ When editing `specter_cloud.lua`, ALWAYS also update:
 - `client.latency()` returns one-way latency in seconds
 - Use `pui` library for UI elements
 - LPH directives: `LPH_NO_VIRTUALIZE`, `LPH_CRASH`, `LPH_ENCSTR` (Luraph obfuscator)
+- There is NO `os`, `io` or `debug` library in gamesense. Time: `client.unix_time()` (the auth gate in `specter_cloud.lua` and the prefix
+  in `server.js` read the clock with the exact same expression), files: `readfile` / `writefile`, compile with `loadstring`.
+- Scripts share one global table; chunks compiled with `loadstring` see the loader's globals.
 
 ## Tier System
 4-tier feature gating: `debug` (full) > `specter` (no AA stealer) > `nightly` (no resolver) > `beta` (minimal)
@@ -40,5 +43,17 @@ When editing `specter_cloud.lua`, ALWAYS also update:
   safe point / body aim one miss earlier, wider shift tolerance.
 - Defensive: while shifting the angle is not recomputed from the shifted updates (hold the last good value), learned in its own context,
   safe point + body aim after a defensive miss or when the defensive arms keep failing.
-- Tests: `pip install lupa && python3 tests/resolver_regress.py` runs the real block on a mocked gamesense API (LuaJIT 2.1) with a simulated enemy.
+- FFI resolver (`fres` in the resolver block, menu: Resolver > FFI resolver, options in `SPECTER_SHARED.resolver_ffi_opts`):
+  * reads the server animation layers (adjust layer 3 / activity 979 = realign, move layer 6) and the client animstate
+    (`fres_animstate_t`, eye yaw 0x78, goal feet yaw 0x80, ... up to on_ground 0x108) through ffi; offsets are checked against the netvars
+    (`fres_validate`: yaw AND pitch must match, only samples where the netvar is not ~0 count) before anything is trusted
+  * every read goes through `ptr_ok`, a NULL entity never reaches the offset helpers, 25 errors switch the whole FFI part off
+  * feet yaw model (`feet_update`): copy of the server's goal feet yaw logic on netvars (standing: feet turn to `m_flLowerBodyYawTarget`
+    at 100 deg/s, moving: follow the eye yaw, clamp to max body yaw); its body yaw feeds the `feet` / `feet inv` arms (static + jitter)
+  * polarity of the forced value (does +v turn into +body yaw?) is learned from the animstate (`fres.polarity`) and only biases the arms
+  * "Animstate apply (experimental)" writes goal/current feet yaw; default OFF, only runs when the layout was verified (>= 40 informative
+    samples) and re-checks the struct right before every write. "Telemetry" prints one line per second for the current threat.
+  * backup of the code before the FFI work: `backup/specter_cloud.pre-ffi.lua`
+- Tests: `pip install lupa && python3 tests/resolver_regress.py` runs the real block on a mocked gamesense API (LuaJIT 2.1, real ffi memory
+  for layers / animstate) with a simulated enemy, including a server-style feet physics enemy and adversarial memory (garbage, zeros, wrong offsets).
   Run it after every resolver change; it checks learning logic, not in-game behaviour.
