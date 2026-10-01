@@ -19,6 +19,24 @@ end
 _USER_NAME = rawget(_G, "_auth_user") or "user"
 -- ── END AUTH GATE ─────────────────────────────────────────────────────
 
+-- ── TIER GATE ─────────────────────────────────────────────────────────
+-- BUILD_VERSION is set by the loader/server: "debug", "specter", "nightly", "beta"
+-- debug   = full features (everything)
+-- specter = premium (no AA stealer)
+-- nightly = mid-tier (no resolver, no AA stealer)
+-- beta    = basic (no resolver, no ragebot enhancements, no tuning, no builder, no AA stealer)
+local _PLAN = rawget(_G, "BUILD_VERSION") or "beta"
+local TIER = {
+    HAS_RESOLVER      = (_PLAN == "debug" or _PLAN == "specter"),
+    HAS_RAGEBOT_EXTRA = (_PLAN == "debug" or _PLAN == "specter" or _PLAN == "nightly"),
+    HAS_TUNING        = (_PLAN == "debug" or _PLAN == "specter" or _PLAN == "nightly"),
+    HAS_BUILDER       = (_PLAN == "debug" or _PLAN == "specter" or _PLAN == "nightly"),
+    HAS_AA_STEALER    = (_PLAN == "debug"),
+    HAS_DEFENSIVE     = (_PLAN == "debug" or _PLAN == "specter" or _PLAN == "nightly"),
+    plan = _PLAN,
+}
+-- ── END TIER GATE ─────────────────────────────────────────────────────
+
 local _ui_get = ui.get
 local function safe_ui_get(ref)
     if type(ref) == "table" then
@@ -31,7 +49,7 @@ ui.get = safe_ui_get
 local user do
     user = {} do
         user.name = _USER_NAME or "admin"
-        user.role = "beta"
+        user.role = _PLAN
         user.last_update = "no_info"
         user.debug = false
         user.version = "3.0"
@@ -683,6 +701,25 @@ LPH_NO_VIRTUALIZE(function ()
     ---
     local resolver, enhanced_aa, enhanced_fakelag do
         resolver = {} do
+        if not TIER.HAS_RESOLVER then
+            resolver.database = {}
+            resolver.memory = {}
+            resolver.miss_count = {}
+            resolver.hit_count = {}
+            resolver.forced = {}
+            resolver.forced_sp, resolver.forced_ba, resolver.forced_pitch = {}, {}, {}
+            resolver.shots = {}
+            resolver.debug_log = {}
+            resolver.global = {}
+            resolver.scan_data = {}
+            resolver.correction_saved = {}
+            resolver.animation_data = {}
+            resolver.run = function() end
+            resolver.release = function() end
+            resolver.new_round = function() end
+            resolver.debug_opt = function() return false end
+            resolver.draw_debugger = function() end
+        else
             resolver.database = {}
             resolver.memory = {}
             resolver.miss_count = {}
@@ -1630,6 +1667,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end)
             end
         end
+        end -- TIER.HAS_RESOLVER else
 
         enhanced_aa = {} do
             enhanced_aa.hit_data = {
@@ -3155,23 +3193,36 @@ LPH_NO_VIRTUALIZE(function ()
         local C, N, S = mui.CONTENT, mui.NAV, mui.SIDE
 
         -- the page tree (Amnesia style); a group heading opens the first page below it
-        NAV.tree = {
-            { text = "☺   Info" },
-            { text = "        •  Profile", page = "Home" },
-            { text = "⚔   Combat" },
-            { text = "        •  Ragebot", page = "Ragebot", sub = "General" },
-            { text = "                •  Resolver", page = "Ragebot", sub = "Resolver" },
-            { text = "                •  Tuning", page = "Ragebot", sub = "Tuning" },
-            { text = "        •  Anti Aimbot", page = "Anti Aimbot", sub = "General" },
-            { text = "                •  Builder", page = "Anti Aimbot", sub = "Builder" },
-            { text = "                •  Defensive", page = "Anti Aimbot", sub = "Defensive" },
-            { text = "☀   World" },
-            { text = "        •  Visualization", page = "Visuals", sub = "Screen" },
-            { text = "                •  Widgets", page = "Visuals", sub = "Widgets" },
-            { text = "⚙   System" },
-            { text = "        •  Miscellaneous", page = "Misc" },
-            { text = "        •  Configs", page = "Loadouts" },
-        }
+        NAV.tree = (function()
+            local t = {
+                { text = "☺   Info" },
+                { text = "        •  Profile", page = "Home" },
+                { text = "⚔   Combat" },
+            }
+            if TIER.HAS_RAGEBOT_EXTRA then
+                t[#t+1] = { text = "        •  Ragebot", page = "Ragebot", sub = "General" }
+            end
+            if TIER.HAS_RESOLVER then
+                t[#t+1] = { text = "                •  Resolver", page = "Ragebot", sub = "Resolver" }
+            end
+            if TIER.HAS_TUNING then
+                t[#t+1] = { text = "                •  Tuning", page = "Ragebot", sub = "Tuning" }
+            end
+            t[#t+1] = { text = "        •  Anti Aimbot", page = "Anti Aimbot", sub = "General" }
+            if TIER.HAS_BUILDER then
+                t[#t+1] = { text = "                •  Builder", page = "Anti Aimbot", sub = "Builder" }
+            end
+            if TIER.HAS_DEFENSIVE then
+                t[#t+1] = { text = "                •  Defensive", page = "Anti Aimbot", sub = "Defensive" }
+            end
+            t[#t+1] = { text = "☀   World" }
+            t[#t+1] = { text = "        •  Visualization", page = "Visuals", sub = "Screen" }
+            t[#t+1] = { text = "                •  Widgets", page = "Visuals", sub = "Widgets" }
+            t[#t+1] = { text = "⚙   System" }
+            t[#t+1] = { text = "        •  Miscellaneous", page = "Misc" }
+            t[#t+1] = { text = "        •  Configs", page = "Loadouts" }
+            return t
+        end)()
 
         -- right: brand, who / what / where, then the navigation tree
         NAV.brand = mui.label(N, function(A) return string_format("  %s⚡ %sspecter%s.lua", mui.K, mui.W, A) end)
@@ -4371,17 +4422,26 @@ LPH_NO_VIRTUALIZE(function ()
                 "Dormant preset"
             }):record("antiaimbot", "options"):save()
 
-            config.antiaimbot.preset = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Preset\naa", {
-                "Specter Godmode",
-                "Specter Phantom",
-                "Specter Elite",
-                "Specter Nova",
-                "Specter Distort",
-                "Constructor"
-            }):record("antiaimbot", "preset"):save()
+            config.antiaimbot.preset = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Preset\naa",
+                TIER.HAS_BUILDER and {
+                    "Specter Godmode",
+                    "Specter Phantom",
+                    "Specter Elite",
+                    "Specter Nova",
+                    "Specter Distort",
+                    "Constructor"
+                } or {
+                    "Specter Godmode",
+                    "Specter Phantom",
+                    "Specter Elite",
+                    "Specter Nova",
+                    "Specter Distort",
+                }
+            ):record("antiaimbot", "preset"):save()
             config.uix.builder_hint = mui.hint(mui.CONTENT, "presets are fixed  ·  pick Constructor to edit states")
 
             config.resolver = {} do
+            if TIER.HAS_RESOLVER then
                 config.resolver.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Enable Resolver")
                     :record("resolver", "enabled"):save()
                 config.resolver.options = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "•  Options\nresolver", {
@@ -4406,9 +4466,9 @@ LPH_NO_VIRTUALIZE(function ()
                     resolver.reset_all()
                     c_logger.log("Resolver memory cleared.")
                 end)
-                -- hold / toggle: invert the resolved side on the aimbot's current target (not learned from)
                 config.resolver.flip = menu.new_item(ui.new_hotkey, "AA", "Other", "Flip side on target\nresolver")
                     :record("resolver", "flip_key"):save()
+            end
             end
 
             config.enhanced_aa = {} do
@@ -11750,7 +11810,7 @@ LPH_NO_VIRTUALIZE(function ()
                 config.global.name_hint:display()
 
             elseif page == "Ragebot" then
-                if sub == "Resolver" then
+                if sub == "Resolver" and TIER.HAS_RESOLVER then
                     local RS = config.resolver
                     H.resolver:display()
                     H.gap:display()
@@ -11772,7 +11832,7 @@ LPH_NO_VIRTUALIZE(function ()
                     V.scan_antiaim:display()
                     V.scan_antiaim_color:display()
 
-                elseif sub == "Tuning" then
+                elseif sub == "Tuning" and TIER.HAS_TUNING then
                     local T = config.tuning
                     H.tuning:display()
                     H.gap:display()
@@ -11813,7 +11873,7 @@ LPH_NO_VIRTUALIZE(function ()
                         T.peek_baim:display()
                     end
 
-                else
+                elseif TIER.HAS_RAGEBOT_EXTRA then
                     H.rage:display()
                     H.gap:display()
                     R.backtrack_optimization:display()
@@ -11855,7 +11915,7 @@ LPH_NO_VIRTUALIZE(function ()
             elseif page == "Anti Aimbot" then
                 NAV.aa_enable:display()
 
-                if sub == "Builder" then
+                if sub == "Builder" and TIER.HAS_BUILDER then
                     H.builder:display()
                     H.gap:display()
                     AA.preset:display()
@@ -11930,7 +11990,7 @@ LPH_NO_VIRTUALIZE(function ()
                     AA.ideal_tick:display()
                     AA.ideal_tick_hotkey:display()
 
-                elseif sub == "Defensive" then
+                elseif sub == "Defensive" and TIER.HAS_DEFENSIVE then
                     H.defensive:display()
                     H.gap:display()
                     AA.defensive_aa:display()
@@ -12293,6 +12353,7 @@ LPH_NO_VIRTUALIZE(function ()
         ---
         --- Anti-aim stealer
         ---
+        if TIER.HAS_AA_STEALER then
         aa_stealer = {
             scanning = {},
             samples = {},
@@ -12644,6 +12705,7 @@ LPH_NO_VIRTUALIZE(function ()
             aa_stealer._plist_ref = plist_ref
             aa_stealer._progress_label = progress_label
         end
+        end -- TIER.HAS_AA_STEALER
 
         --- Events
         function events.aim_fire(event)

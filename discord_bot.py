@@ -32,22 +32,24 @@ LOG_CHANNEL_ID    = int(os.getenv("LOG_CHANNEL_ID", "0"))
 GITHUB_TOKEN      = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO       = os.getenv("GITHUB_REPO", "Matehun111/idk")
 
-VALID_PLANS     = ["beta", "nightly", "specter"]
+VALID_PLANS     = ["beta", "nightly", "specter", "debug"]
 VALID_DURATIONS = ["lifetime", "1d", "7d", "14d", "30d", "90d"]
 
 ROLE_CONFIG = {
     "Member":   {"color": 0x808080, "hoist": False, "position": "bottom"},
+    "Debug":    {"color": 0xFF5050, "hoist": True,  "position": "top"},
     "Specter":  {"color": 0x82C3FF, "hoist": True,  "position": "mid"},
-    "Beta":     {"color": 0xC882FF, "hoist": True,  "position": "mid"},
     "Nightly":  {"color": 0xFF82A0, "hoist": True,  "position": "mid"},
+    "Beta":     {"color": 0xC882FF, "hoist": True,  "position": "mid"},
     "Customer": {"color": 0x60FF90, "hoist": True,  "position": "mid"},
     "Staff":    {"color": 0xFFC850, "hoist": True,  "position": "top"},
 }
 
 PLAN_TO_ROLE = {
+    "debug":    "Debug",
     "specter":  "Specter",
-    "beta":     "Beta",
     "nightly":  "Nightly",
+    "beta":     "Beta",
 }
 
 # ── Bot setup ─────────────────────────────────────────────────────────

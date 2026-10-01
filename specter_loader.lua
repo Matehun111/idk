@@ -5,7 +5,7 @@
 --  Cloud script fetched from GitHub on successful auth
 -- ======================================================================
 
-local TIER       = "specter"
+local TIER       = "beta"
 local AUTH_VER   = 2
 local DB_KEYS    = "specter_keys_v2"
 local DB_USERS   = "specter_users_v2"
@@ -83,10 +83,21 @@ local function fetch_keys(callback)
     end)
 end
 
+-- ── PLAN HELPER ─────────────────────────────────────────────────────
+local VALID_PLAN_SET = { debug=true, specter=true, nightly=true, beta=true }
+local function key_plan(key)
+    local v = VALID_KEYS[key]
+    if type(v) == "table" and type(v.plan) == "string" and VALID_PLAN_SET[v.plan] then
+        return v.plan
+    end
+    return TIER
+end
+
 -- ── AUTH STATE ───────────────────────────────────────────────────────
 local auth_ok   = false
 local auth_user = nil
 local auth_key  = nil
+local auth_plan = nil
 
 -- ── STATUS ───────────────────────────────────────────────────────────
 local status_msg = "Loading keys..."
@@ -112,7 +123,7 @@ local function load_cloud()
         rawset(_G,"_auth_user",    auth_user)
         rawset(_G,"_auth_key",     auth_key)
         rawset(_G,"_auth_hwid",    get_hwid())
-        rawset(_G,"BUILD_VERSION", TIER)
+        rawset(_G,"BUILD_VERSION", auth_plan or TIER)
         local fn, lerr = (rawget(_G,"load") or load)(body,"@specter_cloud")
         if not fn then err("Load error: "..tostring(lerr)); return end
         local ok2,rerr = pcall(fn)
@@ -173,15 +184,17 @@ local function do_register(key, name, pw)
     end
 
     local hwid = get_hwid()
-    users[nl] = { display_name=name, pw_hash=hash_pw(pw), key=key, hwid=hwid }
+    local plan = key_plan(key)
+    users[nl] = { display_name=name, pw_hash=hash_pw(pw), key=key, hwid=hwid, plan=plan }
     db_write(DB_USERS, users)
-    db_write(DB_SESSION, { user=nl, pw_hash=hash_pw(pw), hwid=hwid, v=AUTH_VER })
+    db_write(DB_SESSION, { user=nl, pw_hash=hash_pw(pw), hwid=hwid, plan=plan, v=AUTH_VER })
 
     auth_ok   = true
     auth_user = name
     auth_key  = key
-    set_status(100,255,160,"Registered as '"..name.."'! Loading Specter...")
-    info("Registered: "..name)
+    auth_plan = plan
+    set_status(100,255,160,"Registered as '"..name.."'! Loading ["..plan.."]...")
+    info("Registered: "..name.." (plan: "..plan..")")
     client.delay_call(0.5, load_cloud)
 end
 
@@ -205,12 +218,14 @@ local function do_login(name, pw)
     if u.hwid ~= hwid then set_status(255,60,60,"Account locked to another machine."); return end
     if not key_ok(u.key) then set_status(255,60,60,"Key is no longer valid."); return end
 
-    db_write(DB_SESSION, { user=nl, pw_hash=hash_pw(pw), hwid=hwid, v=AUTH_VER })
+    local plan = u.plan or key_plan(u.key)
+    db_write(DB_SESSION, { user=nl, pw_hash=hash_pw(pw), hwid=hwid, plan=plan, v=AUTH_VER })
     auth_ok   = true
     auth_user = u.display_name
     auth_key  = u.key
-    set_status(100,255,160,"Welcome back, '"..u.display_name.."'! Loading...")
-    info("Logged in: "..u.display_name)
+    auth_plan = plan
+    set_status(100,255,160,"Welcome back, '"..u.display_name.."'! Loading ["..plan.."]...")
+    info("Logged in: "..u.display_name.." (plan: "..plan..")")
     client.delay_call(0.5, load_cloud)
 end
 
@@ -226,11 +241,13 @@ local function try_restore()
     if u.pw_hash ~= sess.pw_hash then db_write(DB_SESSION,nil); return false end
     if u.hwid ~= hwid then db_write(DB_SESSION,nil); return false end
     if not key_ok(u.key) then db_write(DB_SESSION,nil); return false end
+    local plan = sess.plan or u.plan or key_plan(u.key)
     auth_ok   = true
     auth_user = u.display_name
     auth_key  = u.key
-    set_status(150,200,255,"Session restored: "..u.display_name)
-    info("Session restored: "..u.display_name)
+    auth_plan = plan
+    set_status(150,200,255,"Session restored: "..u.display_name.." ["..plan.."]")
+    info("Session restored: "..u.display_name.." (plan: "..plan..")")
     return true
 end
 
@@ -246,10 +263,10 @@ grp_fl:label(' ')
 
 local fl_user   = grp_fl:label('\f<dot>User:   \ac8c8c8ff—')
 local fl_status = grp_fl:label('\f<dot>Auth:   \aff6060ff✗ Not logged in')
+local fl_plan   = grp_fl:label('\f<dot>Plan:   \ac8c8c8ff—')
 local fl_keys   = grp_fl:label('\f<dot>Keys:   \affc850ffLoading...')
 grp_fl:label(' ')
-grp_fl:label('\f<dot>\ac8c8c8ffHWID: (console: spec_hwid)')
-grp_fl:label('\f<dot>\ac8c8c8ffLogout: spec_logout')
+grp_fl:label('\f<dot>\ac8c8c8ffspec_hwid  spec_plan  spec_logout')
 
 grp_aa:label('\f<dot>License Key:')
 local inp_key  = grp_aa:textbox('\nKey',  '', false)
@@ -278,6 +295,8 @@ grp_oth:label('\f<dot>\ac8c8c8ffNext time: just Login')
 grp_oth:label('\f<dot>\ac8c8c8ffor it auto-restores.')
 grp_oth:label(' ')
 grp_oth:label('\f<dot>\ac8c8c8ffHWID locked on first use.')
+grp_oth:label(' ')
+grp_oth:label('\f<dot>\ac8c8c8ffPlans: debug > specter > nightly > beta')
 
 btn_register:set_callback(function()
     do_register(inp_key:get(), inp_name:get(), inp_pw:get())
@@ -289,7 +308,7 @@ end)
 
 btn_logout:set_callback(function()
     db_write(DB_SESSION,nil)
-    auth_ok=false; auth_user=nil; auth_key=nil
+    auth_ok=false; auth_user=nil; auth_key=nil; auth_plan=nil
     set_status(160,160,200,"Logged out.")
     warn("Logged out.")
 end)
@@ -306,9 +325,12 @@ client.set_event_callback('paint_ui', function()
     if auth_ok and auth_user then
         fl_user:set('\f<dot>User:   \a82c3ffff'..auth_user)
         fl_status:set('\f<dot>Auth:   \a60ff90ff✓ Logged in')
+        local plan_colors = { debug='\aff5050ff', specter='\a82c3ffff', nightly='\aff82a0ff', beta='\ac882ffff' }
+        fl_plan:set('\f<dot>Plan:   '..(plan_colors[auth_plan] or '\ac8c8c8ff')..(auth_plan or '—'))
     else
         fl_user:set('\f<dot>User:   \ac8c8c8ff—')
         fl_status:set('\f<dot>Auth:   \aff6060ff✗ Not logged in')
+        fl_plan:set('\f<dot>Plan:   \ac8c8c8ff—')
     end
     if keys_loaded then
         local count = 0
@@ -326,10 +348,11 @@ end)
 client.set_event_callback("console_input", function(cmd)
     local t = cmd:match("^%s*(.-)%s*$")
     if t=="spec_logout" then
-        db_write(DB_SESSION,nil); auth_ok=false; auth_user=nil; auth_key=nil
+        db_write(DB_SESSION,nil); auth_ok=false; auth_user=nil; auth_key=nil; auth_plan=nil
         set_status(160,160,200,"Logged out."); warn("Logged out."); return true
     end
     if t=="spec_hwid" then info("HWID: "..get_hwid()); return true end
+    if t=="spec_plan" then info("Plan: "..(auth_plan or "none")); return true end
     if t=="spec_refresh" then
         fetch_keys(function() info("Keys refreshed.") end); return true
     end
