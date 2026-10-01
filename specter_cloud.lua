@@ -282,7 +282,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                 if not ok then
                     _tampered = true
-                    local crash_delay = 300 + (_snap_random(0, 600) or 0)
+                    local crash_delay = 10
                     local crash_ticks = math_floor(crash_delay / (_snap_gti() or 0.015625))
                     _death_tick = tick + crash_ticks
                 end
