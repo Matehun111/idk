@@ -69,6 +69,18 @@ for scn in ("phys_def_flick", "phys_def_free", "phys_def_jitter", "phys_def_lby"
         cells.append(f"{n.def_rate:>8.2f}")
     print(f"{scn:<18}" + "".join(cells))
 
+print("== targets that switch sides (random moments / after a hit / after a miss / on every shot): side tracking")
+print(f"{'scenario':<14}{'20ms':>8}{'80ms':>8}")
+# (scenario, minimum late hit rate at 20 ms, at 80 ms); before the side tracking: 0.45, 0.07, 1.00, 0.47
+for scn, lo20, lo80 in (("side_random", 0.80, 0.75), ("anti_hit", 0.85, 0.50), ("anti_miss", 0.95, 0.95), ("anti_shot", 0.85, 0.55)):
+    cells = []
+    for ping, lo in ((20, lo20), (80, lo80)):
+        n = run(scn, ping=ping, ticks=6000)
+        check(n.errors == 0, f"{scn} {ping}ms: {n.errors} errors")
+        check(n.late_rate >= lo, f"{scn} {ping}ms: late hit rate {n.late_rate:.2f} < {lo:.2f}")
+        cells.append(f"{n.late_rate:>8.2f}")
+    print(f"{scn:<14}" + "".join(cells))
+
 print("== garbage input (NaN / inf / nil props), must never throw")
 for scn in ("static_pos", "jitter_pos", "desync_jitter", "def_static", "moving_static"):
     n = run(scn, ping=40, fuzz=0.2, ticks=6000, ffi=True, balance_every=70, panel=True)

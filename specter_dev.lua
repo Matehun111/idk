@@ -734,7 +734,9 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.shots = {}
             resolver.debug_log = {}
             resolver.global = {}      -- session-wide arm results per context, used as prior for new players
-            resolver.gtables = {}     -- session-wide angle tables (defensive), the start of a new player's
+            resolver.gtables = {}     -- session-wide angle tables, the start of a new player's
+            resolver.dyn_global = { hit = { n = 0, f = 0 }, miss = { n = 0, f = 0 } }   -- side switches after a hit / a miss, everybody
+            resolver.zone_global = { s = 0, f = 0 }           -- how often zero hit where the feet model said zero, everybody
 
             local RECORDS       = 32      -- stored eye-angle records per player
             local DEF_CAP       = 14      -- max ticks a single tickbase shift keeps "shifting" on
@@ -876,6 +878,8 @@ LPH_NO_VIRTUALIZE(function ()
                 { pol = -1, frac = 0.25, name = "opp low" },
                 { src = "feet", pol =  1,     name = "feet"     },
                 { src = "feet", pol = -1,     name = "feet inv" },
+                -- which side the target is on after the last shot, as far as it showed how it reacts to shots (side tracking)
+                { src = "dyn",                name = "flip pattern" },
             }
             -- jitter AA: which record side to follow (current / predicted next) and with what polarity
             local JITTER_ARMS = {
@@ -909,7 +913,7 @@ LPH_NO_VIRTUALIZE(function ()
 
             -- score offsets: arm order of the first guess, plus what the animation layers tell us
             -- without any evidence the "low" arms are the last resort
-            local STATIC_BIAS = { 0, -0.02, -0.04, -0.06, -0.12, 0.05, 0, 0, -0.14, -0.15, 0, 0 }
+            local STATIC_BIAS = { 0, -0.02, -0.04, -0.06, -0.12, 0.05, 0, 0, -0.14, -0.15, 0, 0, 0 }
             -- no LBY realign for a while while standing: the desync is probably <= ~35, small angles go first
             local LOW_BIAS    = { -0.15, -0.15, 0.20, 0.20, 0.05, 0, 0, 0, 0.26, 0.26 }
             -- balance adjust just played: the desync is > 35
@@ -1064,6 +1068,8 @@ LPH_NO_VIRTUALIZE(function ()
                         name = name, hit_value = {}, arms = {}, learn_time = {},
                         hits = 0, resolver_misses = 0, streak = 0,
                         def_misses_round = 0, lc_misses_round = 0,
+                        dyn = {}, shot_seq = 0,         -- side tracking per stance, shots fired at this player
+                        zone = { s = 0, f = 0 },        -- how often zero hit where the feet model said zero
                     }
                     resolver.memory[idx] = m
                 end
@@ -1826,19 +1832,107 @@ LPH_NO_VIRTUALIZE(function ()
                 return data.freestand ~= 0 and -data.freestand or 1
             end
 
+            ---
+            --- side tracking: a static target sits on one of two sides (+W / -W). Whether it STAYS there after a shot is
+            --- learned per player and stance from the shot results: how often it switches sides after a hit, and after a
+            --- miss. That is all that win-stay / lose-shift, anti bruteforce (switches after every shot / hit / miss) and
+            --- shot noise need: a miss that is just noise switches back, a real change does not.
+            ---
+            local DYN_PRIOR_HIT, DYN_PRIOR_MISS = 0.08, 0.18      -- chance of a switch before anything is known
+            local GUESS_ARMS = { 1, 2, 3, 4, 6, 9, 10 }           -- the arms that only guess a side: the prediction steers these
+
+            local function dyn_state(m, stance)
+                m.dyn = m.dyn or {}
+                local d = m.dyn[stance]
+                if not d then
+                    d = { hit = { n = 0, f = 0 }, miss = { n = 0, f = 0 } }
+                    m.dyn[stance] = d
+                end
+                return d
+            end
+
+            -- the side a shot result tells about: a hit at a big enough angle is on that side, a miss at a full size
+            -- angle is on the other one (smaller angles say nothing about the side)
+            local function dyn_side(shot, hit)
+                local v = shot.value
+                if v == nil then return nil end
+                local av = math_abs(v)
+                if hit then
+                    if av >= 20 then return v > 0 and 1 or -1 end
+                elseif av >= 30 and av >= (shot.maxd or MAX_YAW) * 0.75 then
+                    return v > 0 and -1 or 1
+                end
+                return nil
+            end
+
+            local function dyn_observe(m, shot, hit)
+                if not shot.ctx or shot.ctx:sub(1, 1) ~= "s" or shot.shifting then
+                    for _, d in pairs(m.dyn or {}) do d.prev = nil end        -- a shot that is not read breaks the chain
+                    return
+                end
+                local d = dyn_state(m, shot.stance or "stand")
+                local sd = dyn_side(shot, hit)
+                if sd == nil then d.prev = nil; return end
+                local now = globals_curtime()
+                local prev = d.prev
+                if prev and shot.seq and prev.seq and shot.seq == prev.seq + 1 and now - prev.t < 8 then
+                    local flip = (sd ~= prev.s) and 1 or 0
+                    local c = prev.hit and d.hit or d.miss
+                    local g = prev.hit and resolver.dyn_global.hit or resolver.dyn_global.miss
+                    c.n, c.f = c.n * 0.93 + 1, c.f * 0.93 + flip
+                    g.n, g.f = g.n * 0.98 + 1, g.f * 0.98 + flip
+                end
+                if hit then d.w = math_abs(shot.value) end
+                d.prev = { s = sd, hit = hit, t = globals_curtime(), seq = shot.seq }
+            end
+
+            -- the side (as an angle) the target is expected on for the next shot, and how sure that is
+            local function dyn_predict(m, stance, maxd)
+                local d = m.dyn and m.dyn[stance]
+                local prev = d and d.prev
+                if not prev or globals_curtime() - prev.t > 8 then return nil end
+                local c = prev.hit and d.hit or d.miss
+                local g = prev.hit and resolver.dyn_global.hit or resolver.dyn_global.miss
+                local prior = prev.hit and DYN_PRIOR_HIT or DYN_PRIOR_MISS
+                local pr = (c.f + 0.3 * g.f + prior * 2) / (c.n + 0.3 * g.n + 2)        -- chance of a switch
+                local side = pr > 0.5 and -prev.s or prev.s
+                return side * math_max(20, math_min(MAX_YAW, d.w or maxd)), math_max(pr, 1 - pr)
+            end
+
+            -- how far "the feet model says zero" is believed for this target (0 .. 1): where it keeps hitting it is the model's
+            -- call, where it keeps missing (a target that desyncs through updates the model never sees) it is not
+            local function zone_trust(m)
+                local o, g = m.zone or { s = 0, f = 0 }, resolver.zone_global
+                local rate = (o.s + 0.3 * g.s + 1) / (o.s + o.f + 0.3 * (g.s + g.f) + 2)
+                -- (it starts at nothing: standing targets that desync through updates the model never sees look like "zero" to it)
+                return c_math.clamp((rate - 0.5) / 0.4, 0, 1)
+            end
+
+            local function zone_learn(m, hit)
+                local o, g = m.zone, resolver.zone_global
+                if not o then return end
+                o.s, o.f, g.s, g.f = o.s * 0.95, o.f * 0.95, g.s * 0.97, g.f * 0.97
+                if hit then o.s, g.s = o.s + 1, g.s + 1 else o.f, g.f = o.f + 1, g.f + 1 end
+            end
+
             local function resolve_static(idx, data, m)
                 local stance = data.stance
-                local ctx = "s|" .. stance
+                -- the feet model puts the feet on the eye yaw (just realigned / never turned away): no desync right now. A
+                -- situation of its own, learned apart, where zero is the model's call; the layer hints do not apply there (the
+                -- balance adjust that just played is the feet TURNING to the eye yaw)
+                local zone = data.model_ok and fres_opt(OPT_MODEL) and not data.is_shifting and math_abs(data.model_body) < 4
+                local ctx = zone and ("s|" .. stance .. "|z") or ("s|" .. stance)
                 local n = #STATIC_ARMS
                 local avail, bias = {}, {}
                 for i = 1, n do avail[i], bias[i] = true, STATIC_BIAS[i] or 0 end
 
                 -- animation layers: realigned recently = big desync, standing a while without = small desync
-                local ev = data.low_desync and LOW_BIAS or (data.bal_recent and FULL_BIAS or nil)
+                local ev = (not zone) and (data.low_desync and LOW_BIAS or (data.bal_recent and FULL_BIAS or nil)) or nil
                 if ev then
                     for i = 1, #ev do bias[i] = bias[i] + ev[i] end
                 end
                 bias[3], bias[4] = bias[3] + profile.half_bias, bias[4] + profile.half_bias
+                if zone then bias[5] = bias[5] + 0.42 * zone_trust(m) end
 
                 -- the angle that last hit this player in this stance, and the networked body yaw (when it is not an echo)
                 local hv = m.hit_value[stance]
@@ -1853,13 +1947,41 @@ LPH_NO_VIRTUALIZE(function ()
                     bias[11], bias[12] = feet_bias(data)
                 end
 
+                local side = hint_side(data)
+                local maxd = data.max_desync
+
+                -- which side it is on after the last shot (win-stay / lose-shift / anti bruteforce, as far as this target
+                -- showed): the arms that guess a side follow it, the arms that read the animation do not
+                local pv, pconf = dyn_predict(m, stance, maxd)
+                avail[13] = pv ~= nil
+                if pv then
+                    local k = 0.45 * c_math.clamp((pconf - 0.55) / 0.4, 0, 1)
+                    -- where the feet model has been hitting, the side is not the question (its angle is exact): the prediction
+                    -- only gets a say next to it
+                    if feet_arm and math_max(arm_score(m, ctx, 11, n), arm_score(m, ctx, 12, n)) > 0.65 then k = k * 0.3 end
+                    for _, i in ipairs(GUESS_ARMS) do
+                        if avail[i] then
+                            local g = STATIC_ARMS[i]
+                            local vi = g.src == "db" and hv or g.pol * side * math_floor(maxd * g.frac + 0.5)
+                            if vi and math_abs(vi) >= 20 then
+                                if (vi > 0) == (pv > 0) then
+                                    bias[i] = bias[i] + k * (math_abs(vi - pv) <= 18 and 1 or 0.5)
+                                else
+                                    bias[i] = bias[i] - k
+                                end
+                            end
+                        end
+                    end
+                    bias[13] = k + 0.02
+                end
+
                 local arm, conf = arm_pick(m, ctx, n, bias, avail)
                 data.arm_conf = conf
                 local a = STATIC_ARMS[arm]
-                local side = hint_side(data)
-                local maxd = data.max_desync
                 local value, reason
-                if a.src == "db" then
+                if a.src == "dyn" then
+                    value, reason = pv, "flip pattern"
+                elseif a.src == "db" then
                     value, reason = hv, "db hit"
                 elseif a.src == "pose" then
                     value, reason = a.pol * data.pose, "pose"
@@ -1873,6 +1995,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                 data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
                 data.used_pol, data.used_side, data.used_step = a.pol or 1, side, arm
+                data.used_zone = zone and arm == 5 or nil       -- the model's own call: counts for how far it is believed
                 return value, reason
             end
 
@@ -1999,7 +2122,7 @@ LPH_NO_VIRTUALIZE(function ()
                 data.used_stance = data.stance
                 data.used_ctx, data.used_arm, data.used_n = nil, nil, nil
                 data.used_pol, data.used_side, data.used_step = nil, nil, nil
-                data.used_tkey = nil
+                data.used_tkey, data.used_zone = nil, nil
                 data.arm_conf, data.def_conf = nil, nil
 
                 if data.is_shifting and opt("Defensive fix") then
@@ -2193,7 +2316,7 @@ LPH_NO_VIRTUALIZE(function ()
                             local hist = data.hist
                             hist[#hist + 1] = {
                                 st = data.last_sim, tick = globals_tickcount(), value = value, reason = reason,
-                                ctx = data.used_ctx, arm = data.used_arm, n = data.used_n, tkey = data.used_tkey,
+                                ctx = data.used_ctx, arm = data.used_arm, n = data.used_n, tkey = data.used_tkey, zone = data.used_zone,
                                 pol = data.used_pol, side = data.used_side, step = data.used_step,
                                 shifted = data.is_shifting, stance = data.used_stance,
                                 jside = data.jitter_side, jnext = data.jitter_next, maxd = data.max_desync,
@@ -2340,7 +2463,7 @@ LPH_NO_VIRTUALIZE(function ()
                 event = type(event) == "table" and event or {}
                 local idx = event.target
                 if not idx then return end
-                local data = resolver.init_player(idx)
+                local data, m = resolver.init_player(idx)
                 local now = globals_curtime()
                 for id, s in pairs(resolver.shots) do
                     if now - s.time > 3 then resolver.shots[id] = nil end
@@ -2362,16 +2485,18 @@ LPH_NO_VIRTUALIZE(function ()
                     adj_act = data.fx and data.fx.adj_act or nil,
                     ba = resolver.forced_ba[idx] and true or false, sp = resolver.forced_sp[idx] and true or false,
                 }
+                m.shot_seq = (m.shot_seq or 0) + 1
+                shot.seq = m.shot_seq
                 if e then
                     shot.value, shot.reason = e.value, e.reason or "native"
                     shot.stance, shot.shifting = e.stance or data.stance, e.shifted
-                    shot.ctx, shot.arm, shot.n, shot.tkey = e.ctx, e.arm, e.n, e.tkey
+                    shot.ctx, shot.arm, shot.n, shot.tkey, shot.zone = e.ctx, e.arm, e.n, e.tkey, e.zone
                     shot.pol, shot.side, shot.step = e.pol, e.side, e.step
                     shot.jside, shot.jnext, shot.maxd = e.jside, e.jnext, e.maxd
                 else
                     shot.value, shot.reason = resolver.forced[idx], data.last_reason or "native"
                     shot.stance, shot.shifting = data.used_stance or data.stance, data.is_shifting
-                    shot.ctx, shot.arm, shot.n, shot.tkey = data.used_ctx, data.used_arm, data.used_n, data.used_tkey
+                    shot.ctx, shot.arm, shot.n, shot.tkey, shot.zone = data.used_ctx, data.used_arm, data.used_n, data.used_tkey, data.used_zone
                     shot.pol, shot.side, shot.step = data.used_pol, data.used_side, data.used_step
                     shot.jside, shot.jnext, shot.maxd = data.jitter_side, data.jitter_next, data.max_desync
                 end
@@ -2437,6 +2562,8 @@ LPH_NO_VIRTUALIZE(function ()
                 m.learn_time[shot.ctx] = globals_curtime()
 
                 arm_learn(m, shot.ctx, shot.arm, shot.n, false, weight)
+                dyn_observe(m, shot, false)
+                if shot.zone then zone_learn(m, false) end
                 if shot.ctx:sub(1, 1) == "d" then table_learn(m, shot.tkey, shot.value, false) end
                 local next_arm = arm_pick(m, shot.ctx, shot.n)
                 log("%s: %d missed (%s, %s%s) -> next: %s", name, shot.value, shot.reason or "?", arm_name(shot.ctx, shot.arm),
@@ -2474,6 +2601,8 @@ LPH_NO_VIRTUALIZE(function ()
                 m.learn_time = m.learn_time or {}
                 m.learn_time[shot.ctx] = globals_curtime()
                 arm_learn(m, shot.ctx, shot.arm, shot.n, true, weight)
+                dyn_observe(m, shot, true)
+                if shot.zone then zone_learn(m, true) end
                 if shot.ctx:sub(1, 1) == "d" and event.hitgroup == 1 then table_learn(m, shot.tkey, shot.value, true) end
                 local hg = event.hitgroup
                 local where = hg == 1 and "head" or (hg == 8 and "neck" or ((hg == 4 or hg == 5 or hg == 6 or hg == 7) and "limb" or "body"))
@@ -2494,6 +2623,8 @@ LPH_NO_VIRTUALIZE(function ()
                 resolver.database, resolver.memory, resolver.shots = {}, {}, {}
                 resolver.miss_count, resolver.hit_count = {}, {}
                 resolver.global, resolver.gtables = {}, {}
+                resolver.dyn_global = { hit = { n = 0, f = 0 }, miss = { n = 0, f = 0 } }
+                resolver.zone_global = { s = 0, f = 0 }
             end
 
             -- keep what was learned, forget per-round punishments

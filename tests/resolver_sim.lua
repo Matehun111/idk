@@ -67,6 +67,31 @@ M.scenarios = {
     phys_def_free = function() return function(k) local ph = k % 48; if ph >= 40 and ph < 46 then return { rel = 90, shifted = true, phys = true } end return { rel = 0, phys = true } end end,
     phys_def_jitter = function() return function(k) local s = (k % 2 == 0) and 35 or -35; return { rel = s, shifted = (k % 48) >= 40 and (k % 48) < 46, phys = true } end end,
     phys_def_lby = function() return function(k) local ph = k % 48; local w = ph >= 40 and ph < 46; return { rel = (k % 80 < 60) and 0 or 50, shifted = w, phys = true } end end,
+    -- static desync that switches sides: at random moments / when a shot hit / when a shot missed / on every shot.
+    -- a builder may return a second value: hooks { on_hit, on_miss, on_shot } the sim calls when the AA would notice
+    side_random = function()
+        local rng, side, nxt = 777, 1, 100
+        return function(k)
+            if k >= nxt then
+                side = -side
+                rng = (rng * 1103515245 + 12345) % 2147483648
+                nxt = k + 30 + math.floor(rng / 2147483648 * 160)
+            end
+            return { rel = 0, T = 58 * side }
+        end
+    end,
+    anti_hit = function()
+        local side = 1
+        return function(k) return { rel = 0, T = 58 * side } end, { on_hit = function() side = -side end }
+    end,
+    anti_miss = function()
+        local side = 1
+        return function(k) return { rel = 0, T = 58 * side } end, { on_miss = function() side = -side end }
+    end,
+    anti_shot = function()
+        local side = 1
+        return function(k) return { rel = 0, T = 58 * side } end, { on_shot = function() side = -side end }
+    end,
     -- desync that depends on the freestand-ish side, then flips mid-run (player changes AA)
     static_flip = function()
         return function(k) return { rel = 0, T = (k < 900) and 58 or -58 } end
@@ -290,7 +315,8 @@ local resolver = {}
     setfenv(chunk, env)
     local resolver = chunk(W, config, c_math, c_table, c_logger, { HAS_RESOLVER = true }, ffi_helpers)
 
-    local scn = M.scenarios[scenario_name](opts)
+    local scn, hooks = M.scenarios[scenario_name](opts)
+    hooks = hooks or {}
     local rec = {}        -- arrival tick -> { T, applied, shifted, st }
     local pending = {}
     state.last_goal = 0
@@ -403,7 +429,10 @@ local resolver = {}
             local p = pending[i]
             if p.at <= k then
                 local okc, e3
-                if p.kind == "hit" then okc, e3 = pcall(resolver.on_hit, p.ev)
+                if p.kind == "hit" and hooks.on_hit then hooks.on_hit(k) end
+                if p.kind == "miss" and hooks.on_miss then hooks.on_miss(k) end
+                if p.kind == "impact" then okc = true; hooks.on_shot(k)
+                elseif p.kind == "hit" then okc, e3 = pcall(resolver.on_hit, p.ev)
                 else okc, e3 = pcall(resolver.on_miss, p.ev) end
                 if not okc then stats.errors = stats.errors + 1; if verbose then print("result error:", e3) end end
                 table.remove(pending, i)
@@ -430,6 +459,7 @@ local resolver = {}
                 end
             end
             stats.shots = stats.shots + 1
+            if hooks.on_shot then pending[#pending + 1] = { at = k + 1, kind = "impact" } end
             local late = k > ticks / 2
             if late then stats.shots_late = stats.shots_late + 1 end
             local hit

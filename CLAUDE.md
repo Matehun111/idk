@@ -45,6 +45,12 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   `s|<stance>` static desync, `j|ground/air` jitter, `d|s` / `d|j` defensive (only while the target shifts tickbase).
 - STATIC_ARMS: fs/opp full, fs/opp half, zero, `db hit` (last angle that hit), `pose`/`pose inv` (networked body yaw pose param, only a hint:
   the arms decide whether it is real), fs/opp low (~14 deg). JITTER_ARMS: cur/next +/-, low variants, zero. DEF_ARMS: hold, hold half, hold flip, zero, fresh.
+- Side tracking (static ctx, `dyn_*`, arm `flip pattern`): per player and stance it learns how often the target switches sides after a hit and after
+  a miss (win-stay / lose-shift, anti bruteforce on shot / hit / miss, noise); the arms that only guess a side follow the predicted side (the prediction
+  is turned down to 30% where the feet model has been hitting). Zone `s|<stance>|z`: the feet model says ~0, the `zero` arm is boosted by how often it
+  hit there (`zone_trust`, starts at NO trust: a standing target that desyncs through updates the model never sees looks like zero to it; the layer hints
+  do not apply there). A learned angle table in the STATIC ctx was tried and made the physics scenarios worse, it lives in the defensive ctx only.
+  Scenarios `side_random`, `anti_hit`, `anti_miss`, `anti_shot` in `tests/resolver_sim.lua` (before: 0.45 / 0.07 / 1.00 / 0.47, now 0.9+ at 20 ms).
 - Max desync is the true 58 deg x speed/duck factor. Animation layer 3 (balance adjust, 979) only biases arms (soft, no hard caps):
   recent = desync > 35, standing for a while without = small desync. Without readable layers there is no low-desync inference.
 - Shots are judged by the override that was applied to the *targeted record* (`data.hist`, `resolver.applied_for`, `event.backtrack`),
