@@ -916,12 +916,12 @@ LPH_NO_VIRTUALIZE(function ()
             -- jitter AA: which record side to follow and with what polarity
             -- { use predicted next side, polarity, desync fraction, name }
             local JITTER_ARMS = {
-                { false,  1, 1,   "cur +"     },
-                { false, -1, 1,   "cur -"     },
-                { true,   1, 1,   "next +"    },
-                { true,  -1, 1,   "next -"    },
-                { false,  1, 0.6, "cur + low" },
-                { false, -1, 0.6, "cur - low" },
+                { false,  1, 0.8, "cur +"     },
+                { false, -1, 0.8, "cur -"     },
+                { true,   1, 0.8, "next +"    },
+                { true,  -1, 0.8, "next -"    },
+                { false,  1, 0.45, "cur + low" },
+                { false, -1, 0.45, "cur - low" },
             }
             resolver.STATIC_ARMS, resolver.JITTER_ARMS = STATIC_ARMS, JITTER_ARMS
             local LOW_BIAS = { -0.15, -0.15, 0.20, 0.20, 0.05 }
@@ -1008,7 +1008,7 @@ LPH_NO_VIRTUALIZE(function ()
                     data = {
                         key = idx, records = {}, last_sim = nil, max_st = nil, last_origin = nil,
                         def_until = 0, def_reason = nil, def_rate = 0, lc_until = 0,
-                        stance = "stand", used_stance = "stand", speed = 0, max_desync = 58, choke = 0,
+                        stance = "stand", used_stance = "stand", speed = 0, max_desync = 44, choke = 0,
                         is_jitter = false, jitter_ratio = 0, jitter_side = 0, jitter_next = 0,
                         jitter_amp = 0, jitter_run = 1, jitter_flips = 0, spread = 0,
                         clean_count = 0, freestand = 0,
@@ -1236,9 +1236,13 @@ LPH_NO_VIRTUALIZE(function ()
                         end
                     end
                     local window = math_floor(1.2 / globals_tickinterval())
-                    data.low_desync = data.layers_ok == true and data.stance == "stand"
+                    local standing_long = data.stance == "stand"
                         and data.stance_since ~= nil and tick - data.stance_since > window
-                        and (data.balance_tick == nil or tick - data.balance_tick > window)
+                    data.low_desync = (data.layers_ok == true and standing_long
+                        and (data.balance_tick == nil or tick - data.balance_tick > window))
+                        or (not data.layers_ok and standing_long
+                            and tick - data.stance_since > window * 2
+                            and (data.choke or 0) <= 2)
 
                     analyze(data)
                 end
@@ -1256,9 +1260,9 @@ LPH_NO_VIRTUALIZE(function ()
                 local run = c_math.clamp(speed / 135, 0, 1)
                 local avg = 1 - (0.2 + 0.3 * c_math.clamp((speed - 70) / 65, 0, 1)) * run
                 if duck > 0 then avg = avg + duck * run * (0.5 - avg) end
-                data.max_desync = c_math.clamp(math_floor(58 * avg + 0.5), 20, 60)
+                data.max_desync = c_math.clamp(math_floor(44 * avg + 0.5), 16, 48)
                 if data.low_desync then
-                    data.max_desync = math_min(data.max_desync, 28)
+                    data.max_desync = math_min(data.max_desync, 22)
                 end
 
                 local base_type = data.is_jitter and "jitter" or (data.stance == "stand" and "static" or "normal")
@@ -1628,11 +1632,14 @@ LPH_NO_VIRTUALIZE(function ()
                 -- stale threshold scales with ping so high-latency players don't get
                 -- permanently half-penalised on every shot
                 local weight = 1
+                local bt = shot.bt or 0
                 if shot.shifting then
-                    weight = 0.5
+                    weight = 0.4
                     m.def_misses_round = (m.def_misses_round or 0) + 1
-                elseif (shot.bt or 0) >= stale_threshold() then
-                    weight = 0.5
+                elseif bt >= 20 then
+                    weight = 0.15
+                elseif bt >= stale_threshold() then
+                    weight = 0.4
                 end
 
                 arm_learn(m, shot.ctx, shot.arm, shot.n, false, weight)
@@ -1745,7 +1752,7 @@ LPH_NO_VIRTUALIZE(function ()
                     if data then
                         local val = resolver.forced[threat]
                         rows[#rows + 1] = { "mode", string_format("%s %s", data.last_reason or "native", val ~= nil and (tostring(val) .. "\194\176") or ""), "type", data.meta_type or "-" }
-                        rows[#rows + 1] = { "stance", data.stance or "-", "speed", string_format("%d  max %d\194\176", math_floor(data.speed or 0), data.max_desync or 58) }
+                        rows[#rows + 1] = { "stance", data.stance or "-", "speed", string_format("%d  max %d\194\176", math_floor(data.speed or 0), data.max_desync or 44) }
                         rows[#rows + 1] = { "yaw", string_format("spread %d  flips %d", math_floor(data.spread or 0), data.jitter_flips or 0), "choke", tostring(data.choke or 0) }
                         rows[#rows + 1] = { "side", string_format("cur %d  next %d", data.jitter_side or 0, data.jitter_next or 0), "fs", tostring(data.freestand or 0) }
                         rows[#rows + 1] = { "defensive", data.is_shifting and (data.def_reason or "yes") or "-", "rate", string_format("%d%%", math_floor((data.def_rate or 0) * 100)) }
