@@ -59,6 +59,9 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   tickbase shift, a pitch snap or a yaw flick (55+ deg outside the centre / spread of the normal records); the kind (plain / snap / flick /
   free = flick to the side) is part of the context (`d|s|flick` ...). The feet model takes its time from the ARRIVAL ticks of the updates,
   not from the sim time (a shifted update's sim time says nothing about how long the server animated) and runs on every update.
+  Aim levers (`write_extras`): they follow the CURRENT confidence, not a round-long punishment. A defensive miss counts for 5 s (`m.def_recent_*`,
+  cleared by a defensive hit) and body aim in a defensive window needs doubted arms (`def_conf` < 0.40) as well, or 3 recent misses; an LC miss
+  keeps body aim for 8 s (`m.lc_miss_t`). The hit log says head / body and whether body aim / safe point were forced when the shot was fired.
   Server-style physics scenarios `phys_def_*` in `tests/resolver_sim.lua` (before: flick 0.30, sideways flick 0.00, jitter 0.44; now 0.96-1.00).
 - FFI resolver (`fres` in the resolver block, menu: Resolver > FFI resolver, options in `SPECTER_SHARED.resolver_ffi_opts`):
   * reads the server animation layers (adjust layer 3 / activity 979 = realign, move layer 6) and the client animstate

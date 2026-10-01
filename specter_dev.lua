@@ -2082,15 +2082,22 @@ LPH_NO_VIRTUALIZE(function ()
                     if use_ba and data.arm_conf < profile.conf_ba then want_ba = true end
                 end
 
-                -- shifting: the angle is a guess by definition. After a defensive miss (or when the defensive arms
-                -- are failing) play it safe until the target stops shifting.
+                -- shifting: the angle is a guess by definition. After a RECENT defensive miss (or when the defensive arms
+                -- are failing) play it safe until the target stops shifting. It used to be every miss of the round, so after
+                -- two defensive misses every later defensive window was shot at the body: the levers follow the current
+                -- confidence now, a miss counts for 5 seconds and a defensive hit clears it. Body aim needs the arms to be
+                -- doubted as well (or three misses in a row).
+                local now = globals_curtime()
                 if data.is_shifting and opt("Defensive fix") then
                     local bad = data.def_conf ~= nil and data.def_conf < 0.40
-                    if (m.def_misses_round or 0) > 0 or bad then want_sp = true end
-                    if (m.def_misses_round or 0) > 0 and (bad or (m.def_misses_round or 0) >= 2) then want_ba = true end
+                    local recent = (m.def_recent_t and now - m.def_recent_t < 5) and (m.def_recent_n or 0) or 0
+                    if recent > 0 or bad then want_sp = true end
+                    if (recent >= 1 and bad) or recent >= 3 then want_ba = true end
                 end
 
-                if opt("LC: body aim") and (data.lc_break or (m.lc_misses_round or 0) > 0) then want_ba = true end
+                -- a lag compensation break: body aim while it lasts and for a few seconds after a miss on it (not the whole round)
+                local lc_recent = m.lc_miss_t ~= nil and now - m.lc_miss_t < 8
+                if opt("LC: body aim") and (data.lc_break or lc_recent) then want_ba = true end
                 write_override(resolver.forced_sp, idx, "Override safe point", want_sp and true or false)
                 write_override(resolver.forced_ba, idx, "Override prefer body aim", want_ba and true or false)
             end
@@ -2359,6 +2366,7 @@ LPH_NO_VIRTUALIZE(function ()
                     speed = data.speed, choke = data.choke, hitgroup = event.hitgroup, def_reason = data.def_reason,
                     model = data.model_ok and data.model_body or nil, fx_delta = data.fx_delta,
                     adj_act = data.fx and data.fx.adj_act or nil,
+                    ba = resolver.forced_ba[idx] and true or false, sp = resolver.forced_sp[idx] and true or false,
                 }
                 if e then
                     shot.value, shot.reason = e.value, e.reason or "native"
@@ -2393,7 +2401,8 @@ LPH_NO_VIRTUALIZE(function ()
 
                 if shot and (shot.extrap or shot.teleported) and (RESOLVER_MISS[why] or why == "prediction error") then
                     m.lc_misses_round = (m.lc_misses_round or 0) + 1
-                    log("%s: lag compensation broken - body aim for the rest of the round", name)
+                    m.lc_miss_t = globals_curtime()
+                    log("%s: lag compensation broken - body aim for a few seconds", name)
                     return
                 end
 
@@ -2422,6 +2431,8 @@ LPH_NO_VIRTUALIZE(function ()
                 if shot.shifting then
                     if shot.ctx:sub(1, 1) ~= "d" then weight = weight * 0.5 end
                     m.def_misses_round = (m.def_misses_round or 0) + 1
+                    if m.def_recent_t and globals_curtime() - m.def_recent_t >= 5 then m.def_recent_n = 0 end
+                    m.def_recent_n, m.def_recent_t = (m.def_recent_n or 0) + 1, globals_curtime()
                 end
                 if bt >= 24 then
                     weight = weight * 0.4
@@ -2457,6 +2468,7 @@ LPH_NO_VIRTUALIZE(function ()
                 m.streak = 0
                 if shot and shot.shifting then
                     m.def_misses_round = math_max(0, (m.def_misses_round or 0) - 1)
+                    m.def_recent_n = 0
                 end
 
                 if not shot or shot.value == nil or not shot.ctx then return end
@@ -2472,8 +2484,11 @@ LPH_NO_VIRTUALIZE(function ()
                 m.learn_time[shot.ctx] = globals_curtime()
                 arm_learn(m, shot.ctx, shot.arm, shot.n, true, weight)
                 if shot.ctx:sub(1, 1) == "d" and event.hitgroup == 1 then table_learn(m, shot.tkey, shot.value, true) end
-                log("%s: hit with %d (%s, %s)", entity_get_player_name(idx) or tostring(idx), shot.value,
-                    arm_name(shot.ctx, shot.arm), shot.stance or "?")
+                local hg = event.hitgroup
+                local where = hg == 1 and "head" or (hg == 8 and "neck" or ((hg == 4 or hg == 5 or hg == 6 or hg == 7) and "limb" or "body"))
+                log("%s: hit %s with %d (%s, %s)%s", entity_get_player_name(idx) or tostring(idx), where, shot.value,
+                    arm_name(shot.ctx, shot.arm), shot.stance or "?",
+                    (shot.ba and " [body aim was forced]" or "") .. (shot.sp and " [safe point was forced]" or ""))
             end
 
             resolver.reset_player = function(idx)
