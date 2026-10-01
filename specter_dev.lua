@@ -1,11 +1,21 @@
 -- ======================================================================
---  SPECTER | Dev Loader (no auth, no cloud fetch)
+--  SPECTER | Dev Loader  v2.0
 --  For owners/developers only — runs specter_cloud.lua directly
 --  from the gamesense scripts folder with full debug-tier access.
 --
+--  Features loaded via specter_cloud.lua:
+--    • Resolver (multi-arm bandit + low-desync capping)
+--    • Cloud config sync (upload / download / delete)
+--    • Anti-tamper integrity monitor
+--    • Full AA, visuals, misc
+--
 --  Usage: load this file in gamesense instead of specter_loader.lua
 --         and place specter_cloud.lua next to it.
+--         Set SERVER_URL below to your Railway endpoint for cloud configs.
 -- ======================================================================
+
+-- ██ SET YOUR SERVER URL HERE (needed for cloud config sync) ██
+local SERVER_URL = "https://your-server.railway.app"
 
 if not LPH_OBFUSCATED then
     LPH_ENCSTR = function(...) return ... end
@@ -21,7 +31,7 @@ rawset(_G, "_auth_user",  "dev")
 rawset(_G, "_auth_key",   "DEV-LOCAL")
 rawset(_G, "_auth_hwid",  "DEV")
 rawset(_G, "BUILD_VERSION", "debug")
-rawset(_G, "_server_url",  "https://your-server.railway.app")
+rawset(_G, "_server_url",  SERVER_URL)
 
 -- locate specter_cloud.lua next to this file
 local me = debug.getinfo(1, "S").source:match("^@?(.*)")
@@ -50,3 +60,4 @@ end
 
 rawset(_G, "_specter_loader_loaded", true)
 client.color_log(180, 160, 255, "[Specter Dev] Loaded with full debug access.")
+client.color_log(130, 195, 255, "[Specter Dev] Cloud configs: " .. (SERVER_URL ~= "" and "enabled" or "no server URL set"))
