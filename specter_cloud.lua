@@ -932,7 +932,7 @@ LPH_NO_VIRTUALIZE(function ()
                     miss_w = 0.75,
                     stale_base = 14,
                     half_bias = 0.06,
-                    sp_off = -1, ba_off = -1,
+                    sp_off = 0, ba_off = 0,             -- (high ping used to switch the levers on one miss earlier: most shots ended on the body)
                     conf_sp = 0.36, conf_ba = 0.27,
                 },
             }
@@ -2234,7 +2234,8 @@ LPH_NO_VIRTUALIZE(function ()
                 -- every arm of this target keeps failing: stop gambling on the head
                 if data.arm_conf ~= nil and (m.resolver_misses or 0) >= 2 then
                     if use_sp and data.arm_conf < profile.conf_sp then want_sp = true end
-                    if use_ba and data.arm_conf < profile.conf_ba then want_ba = true end
+                    -- (no body aim from a low confidence: that is the resolver giving up on the head. Body aim comes only from
+                    -- the miss streak the user set, or from a lag compensation break)
                 end
 
                 -- a defensive record is resolved to the HEAD, not given up on: no safe point / body aim while the target is
@@ -5608,10 +5609,11 @@ LPH_NO_VIRTUALIZE(function ()
                     "Defensive fix", "Defensive snap fix", "LC: body aim",
                     "Safe point on misses", "Body aim on misses", "ESP flags", "Log"
                 }):record("resolver", "options3"):save()
+                -- body aim on misses is the user's choice, not a default: the resolver is meant to hit the head
                 pcall(function() config.resolver.options:set({
                     "Jitter fix",
                     "Defensive fix", "Defensive snap fix", "LC: body aim",
-                    "Safe point on misses", "Body aim on misses", "ESP flags", "Log"
+                    "Safe point on misses", "ESP flags", "Log"
                 }) end)
                 config.uix.res_hint = mui.hint(mui.CONTENT, "overrides gamesense's resolver on every enemy")
                 config.resolver.ping_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "•  Ping profile\nresolver", {
@@ -5626,7 +5628,7 @@ LPH_NO_VIRTUALIZE(function ()
                 config.uix.res_hint_ffi = mui.hint(mui.CONTENT, "layers + animstate through ffi; apply writes the animstate (experimental)")
                 config.resolver.safe_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Safe point after misses", 1, 5, 2)
                     :record("resolver", "safe_after"):save()
-                config.resolver.baim_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Body aim after misses", 1, 6, 3)
+                config.resolver.baim_after = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Body aim after misses", 1, 6, 5)
                     :record("resolver", "baim_after"):save()
                 config.uix.res_hint2 = mui.hint(mui.CONTENT, "miss streaks reset every round")
                 config.resolver.debugger = menu.new_item(ui.new_multiselect, "AA", "Other", "Debugger\nresolver", { "Panel", "Console" })

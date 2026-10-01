@@ -61,7 +61,7 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   not from the sim time (a shifted update's sim time says nothing about how long the server animated) and runs on every update.
   Aim levers (`write_extras`): NO safe point / body aim while the target is defensive (`Defensive fix` on): a defensive record is resolved to
   the head, the angle gets better by learning, not by aiming elsewhere. Defensive misses do not count in the miss streak either. The streak /
-  confidence levers stay for the normal records; an LC miss keeps body aim for 8 s (`m.lc_miss_t`). The hit log says head / body and whether
+  streak lever stays for the normal records (the high ping profile no longer switches safe point / body aim on one miss earlier, a low arm confidence no longer switches body aim on, "Body aim on misses" is off by default and its slider starts at 5); an LC miss keeps body aim for 8 s (`m.lc_miss_t`). The hit log says head / body and whether
   body aim / safe point were forced when the shot was fired.
   Server-style physics scenarios `phys_def_*` in `tests/resolver_sim.lua` (before: flick 0.30, sideways flick 0.00, jitter 0.44; now 0.96-1.00).
 - FFI resolver (`fres` in the resolver block, menu: Resolver > FFI resolver, options in `SPECTER_SHARED.resolver_ffi_opts`):
