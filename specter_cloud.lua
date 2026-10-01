@@ -387,30 +387,23 @@ LPH_NO_VIRTUALIZE(function ()
                 local sv_gravity = cvar.sv_gravity:get_float() * tickinterval
                 local sv_jump_impulse = cvar.sv_jump_impulse:get_float() * tickinterval
 
-                local p_origin, prev_origin = origin, origin
-
                 local velocity = vector(entity_get_prop(ent, 'm_vecVelocity'))
                 local gravity = velocity.z > 0 and -sv_gravity or sv_jump_impulse
 
-                for i=1, ticks do
-                    prev_origin = p_origin
-                    p_origin = vector(
-                        p_origin.x + (velocity.x * tickinterval),
-                        p_origin.y + (velocity.y * tickinterval),
-                        p_origin.z + (velocity.z+gravity) * tickinterval
-                    )
+                -- every step moves by the same amount, so the path is a straight line: ONE trace to its end (it used to be
+                -- one trace per tick, up to 16 per call, every tick). A hit stops at the last whole step before it, like before
+                local sx, sy, sz = velocity.x * tickinterval, velocity.y * tickinterval, (velocity.z + gravity) * tickinterval
+                local fraction = client_trace_line(-1,
+                    origin.x, origin.y, origin.z,
+                    origin.x + sx * ticks, origin.y + sy * ticks, origin.z + sz * ticks
+                )
 
-                    local fraction = client_trace_line(-1,
-                        prev_origin.x, prev_origin.y, prev_origin.z,
-                        p_origin.x, p_origin.y, p_origin.z
-                    )
-
-                    if fraction <= 0.99 then
-                        return prev_origin
-                    end
+                local steps = ticks
+                if fraction <= 0.99 then
+                    steps = math_floor(fraction * ticks)
                 end
 
-                return p_origin
+                return vector(origin.x + sx * steps, origin.y + sy * steps, origin.z + sz * steps)
             end)
         end
 
@@ -1146,20 +1139,23 @@ LPH_NO_VIRTUALIZE(function ()
                 return {
                     key = key, records = {}, hist = {}, jitter = false, kind = "static", side = 0, next = 0, offset = 0,
                     next_offset = 0, next_delta = 0, speed = 0, maxd = MAX_DESYNC, maxd_f = MAX_DESYNC, stance = "stand", choke = 0,
-                    open = 0, open_raw = 0, open_n = 0, open_set = false, fs_tick = -100, consecutive_misses = 0,
+                    open = 0, open_raw = 0, open_n = 0, open_set = false, fs_tick = -100, consecutive_misses = 0, key_tick = -1000,
                     obs = {}, reacts = {},
                 }
             end
 
-            local function player_of(idx)
-                local key = key_of(idx)
+            local function player_of(idx, tick)
                 local p = players[idx]
-                -- a player who took over the slot of one who left: a new player, not the old one's memory
+                -- the steam id is looked up for a new slot and then every 64 ticks: a player who took over the slot of one
+                -- who left is a new player, not the old one's memory
+                if p and tick >= p.key_tick and tick - p.key_tick < 64 then return p end
+                local key = key_of(idx)
                 if not p or p.key ~= key then
                     p = new_player(key)
                     players[idx] = p
                     memory_of(key)
                 end
+                p.key_tick = tick
                 return p
             end
 
@@ -1813,16 +1809,27 @@ LPH_NO_VIRTUALIZE(function ()
                 saved[idx], forced[idx] = nil, nil
             end
 
+            -- the switches are written when we take a player over and every 64 ticks after (in case something else turned
+            -- them off), the value only when it changes: the player list used to get 3 writes per record per enemy
             local function force(idx, value)
                 if value == nil then unforce(idx); return end
-                if not saved[idx] then
+                local s = saved[idx]
+                local tick = globals.tickcount()
+                if not s then
                     local ok, cur = pcall(plist.get, idx, "Correction active")
-                    saved[idx] = { ok = ok, correction = cur }
+                    s = { ok = ok, correction = cur }
+                    saved[idx] = s
                 end
-                pcall(plist.set, idx, "Correction active", true)
-                pcall(plist.set, idx, "Force body yaw", true)
-                pcall(plist.set, idx, "Force body yaw value", value)
-                forced[idx] = value
+                if not s.tick or tick < s.tick or tick - s.tick >= 64 then
+                    s.tick = tick
+                    pcall(plist.set, idx, "Correction active", true)
+                    pcall(plist.set, idx, "Force body yaw", true)
+                    forced[idx] = nil
+                end
+                if forced[idx] ~= value then
+                    pcall(plist.set, idx, "Force body yaw value", value)
+                    forced[idx] = value
+                end
             end
 
             local function release_all()
@@ -1841,11 +1848,14 @@ LPH_NO_VIRTUALIZE(function ()
 
                 local tick = globals.tickcount()
                 local seen = {}
+                local threat = client.current_threat()
                 for _, idx in ipairs(entity.get_players(true)) do
                     if entity.is_alive(idx) and not entity.is_dormant(idx) then
                         seen[idx] = true
-                        local p = player_of(idx)
-                        if tick - p.fs_tick >= FS_INTERVAL or tick < p.fs_tick then
+                        local p = player_of(idx, tick)
+                        -- the open side traces: every 4 ticks for the current threat, every 16 for the others
+                        local every = idx == threat and FS_INTERVAL or FS_INTERVAL * 4
+                        if tick - p.fs_tick >= every or tick < p.fs_tick then
                             p.fs_tick = tick
                             update_open(p, idx, me)
                         end
@@ -4099,7 +4109,7 @@ LPH_NO_VIRTUALIZE(function ()
                 ffi_helpers.animstate.get = function (self, ent)
                     local client_entity = ffi_helpers.get_client_entity(ent)
 
-                    if not client_entity then
+                    if client_entity == nil or client_entity == ffi.NULL then     -- a NULL cdata pointer is truthy
                         return
                     end
 
@@ -4134,7 +4144,7 @@ LPH_NO_VIRTUALIZE(function ()
                 ffi_helpers.animlayers.get = function (self, ent)
                     local client_entity = ffi_helpers.get_client_entity(ent)
 
-                    if not client_entity then
+                    if client_entity == nil or client_entity == ffi.NULL then     -- a NULL cdata pointer is truthy
                         return
                     end
 
@@ -4155,7 +4165,7 @@ LPH_NO_VIRTUALIZE(function ()
                 ffi_helpers.activity.get = function (self, sequence, ent)
                     local client_entity = ffi_helpers.get_client_entity(ent)
 
-                    if not client_entity then
+                    if client_entity == nil or client_entity == ffi.NULL then     -- a NULL cdata pointer is truthy
                         return
                     end
 
@@ -4419,8 +4429,9 @@ LPH_NO_VIRTUALIZE(function ()
 
                         if lp and entity.is_alive(lp) then
                             local Entity = native_GetClientEntity(lp)
+                            if Entity == nil or Entity == ffi.NULL then return false end     -- a NULL cdata pointer is truthy
                             local m_flOldSimulationTime = ffi.cast("float*", ffi.cast("uintptr_t", Entity) + 0x26C)[0]
-                            local m_flSimulationTime = entity_get_prop(lp, "m_flSimulationTime")
+                            local m_flSimulationTime = entity_get_prop(lp, "m_flSimulationTime") or 0
 
                             local delta = m_flOldSimulationTime - m_flSimulationTime
 
@@ -4433,37 +4444,61 @@ LPH_NO_VIRTUALIZE(function ()
                     end
                 end
 
+                -- Peek detection: which enemy could hit our stomach a few ticks ahead (autowall). Autowall + bone setup for EVERY
+                -- enemy on EVERY tick was the most expensive thing the script did on a full server. Now the current threat and
+                -- the last target are traced every tick, the others in turns (PEEK_BUDGET per tick); a result is kept PEEK_TTL ticks.
+                local PEEK_BUDGET, PEEK_TTL = 2, 8
+                local peek_cache, peek_turn = {}, 0
+
                 BaseLocal.set_peeking_state = (function (self, me)
                     local target, cross_target, last_dmg, best_yaw = nil, nil, 0, 362
                     local is_peeking = false
+                    local tick = globals_tickcount()
 
                     local enemy_list = entity.get_players(true)
                     local camera_angles = vector(client.camera_angles())
                     local stomach_origin = vector(entity.hitbox_position(me, 2))
                     local stomach_future = c_math.extrapolate(me, stomach_origin, 16)
 
-                    for idx=1, #enemy_list do
+                    local n = #enemy_list
+                    local fresh = {}
+                    local threat = client.current_threat()
+                    if threat then fresh[threat] = true end
+                    if self._peek_target then fresh[self._peek_target] = true end
+                    for _ = 1, math_min(PEEK_BUDGET, n) do
+                        peek_turn = peek_turn % n + 1
+                        fresh[enemy_list[peek_turn]] = true
+                    end
+
+                    for idx=1, n do
                         local ent = enemy_list[idx]
-                        local ent_wpn = entity.get_player_weapon(ent)
+                        local c = peek_cache[ent]
 
-                        if ent_wpn then
-                            local enemy_head = vector(entity.hitbox_position(ent, 2))
-                            local entindex, damage = client.trace_bullet(ent, enemy_head.x, enemy_head.y, enemy_head.z, stomach_future.x, stomach_future.y, stomach_future.z)
-
-                            if -1 == entindex then
-                                damage = 0
+                        if fresh[ent] or not c or tick - c.tick > PEEK_TTL or tick < c.tick then
+                            c = c or {}
+                            c.tick, c.head, c.dmg = tick, nil, 0
+                            if entity.get_player_weapon(ent) then
+                                local hx, hy, hz = entity.hitbox_position(ent, 2)
+                                if hx then
+                                    c.head = vector(hx, hy, hz)
+                                    local entindex, damage = client.trace_bullet(ent, hx, hy, hz, stomach_future.x, stomach_future.y, stomach_future.z)
+                                    c.dmg = (entindex == -1 or not damage) and 0 or damage
+                                end
                             end
+                            peek_cache[ent] = c
+                        end
 
-                            if damage > 0 then
+                        if c.head then
+                            if c.dmg > 0 then
                                 is_peeking = true
                             end
 
-                            if damage > last_dmg then
+                            if c.dmg > last_dmg then
                                 target = ent
-                                last_dmg = damage
+                                last_dmg = c.dmg
                             end
 
-                            local _, yaw = (stomach_origin-enemy_head):angles()
+                            local _, yaw = (stomach_origin-c.head):angles()
                             local base_diff = c_math.abs(camera_angles.y-yaw)
 
                             if base_diff < best_yaw then
@@ -4473,10 +4508,18 @@ LPH_NO_VIRTUALIZE(function ()
                         end
                     end
 
+                    -- players that left / died: their cached results go
+                    if tick % 64 == 0 then
+                        for ent, c in pairs(peek_cache) do
+                            if tick - c.tick > 64 or tick < c.tick then peek_cache[ent] = nil end
+                        end
+                    end
+
                     if not target then
                         target = cross_target
                     end
 
+                    self._peek_target = target
                     self.peeking = is_peeking
                     self.fs_side = target and self:get_side(target) or 'none'
                 end)
@@ -5399,7 +5442,9 @@ LPH_NO_VIRTUALIZE(function ()
                             warmup_period = is_active and is_warmup
                         end
 
-                        if not warmup_period then
+                        -- the round end check: only after the round is decided (restart time in the future) the 64 player slots
+                        -- are scanned; it used to scan them on every tick of the round
+                        if not warmup_period and globals_curtime() < (entity_get_prop(game_rules, 'm_flRestartRoundTime') or 0) then
                             local player_resource = entity.get_player_resource()
 
                             if player_resource then
@@ -5605,14 +5650,18 @@ LPH_NO_VIRTUALIZE(function ()
                         for i=1, player_cnt do
                             local ent = player_list[i]
                             local weapon = entity.is_alive(ent) and not entity.is_dormant(ent) and entity.get_player_weapon(ent) or nil
-                            local hx, hy, hz = entity.hitbox_position(ent, 2)
+                            local weapon_info = weapon and csgo_weapons(weapon)
+                            -- only enemies with a knife, and only near ones get their bones set up (hitbox_position)
+                            local ox, oy = nil, nil
+                            if weapon_info and weapon_info.is_melee_weapon then ox, oy = entity.get_origin(ent) end
+                            local near = ox ~= nil and (ox - my_origin.x) ^ 2 + (oy - my_origin.y) ^ 2 < 400 * 400
+                            local hx, hy, hz
+                            if near then hx, hy, hz = entity.hitbox_position(ent, 2) end
                             local player_origin = vector(hx or 0, hy or 0, hz or 0)
                             local distance = my_origin:dist(player_origin)
                             local same_floor = hz ~= nil and math_abs(hz - my_origin.z - 40) < 90
 
                             if hx and same_floor and distance < 350 and weapon then
-                                local weapon_info = csgo_weapons(weapon)
-
                                 if weapon_info.is_melee_weapon then
                                     if distance < closest_dist then
                                         local _, yaw_to_target = (player_origin - my_origin):angles()
@@ -9466,7 +9515,7 @@ LPH_NO_VIRTUALIZE(function ()
 
                     local wpn_info = csgo_weapons(wpn)
 
-                    local main_alpha = r8_main(0.15, config.visuals.r8_indicator:get() and wpn_info and wpn_info.is_revolver)
+                    local main_alpha = r8_main(0.15, (config.visuals.r8_indicator:get() and wpn_info and wpn_info.is_revolver) == true)
 
                     if main_alpha < 0.01 then
                         return
@@ -13370,14 +13419,17 @@ LPH_NO_VIRTUALIZE(function ()
 
         local function guard(name, fn)
             local last = -10
-            return function(...)
-                local res = { pcall(fn, ...) }
-                if res[1] then return unpack(res, 2) end
+            -- no table per call (paint / setup_command run this every frame / tick)
+            local function finish(ok, ...)
+                if ok then return ... end
                 local now = globals.realtime()
                 if now - last > 5 then
                     last = now
-                    client.error_log(string_format("[specter] %s: %s", name, tostring(res[2])))
+                    client.error_log(string_format("[specter] %s: %s", name, tostring((...))))
                 end
+            end
+            return function(...)
+                return finish(pcall(fn, ...))
             end
         end
 

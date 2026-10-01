@@ -112,6 +112,18 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   script must never write), player list, menu, ping profile switching, several enemies, remembered priors, options, panel, events.
 - It has nothing to do with the resolver of `specter_cloud.lua` any more: a change to one is never ported to the other unless the owners ask.
 
+## Performance
+- `python3 tests/perf_profile.py [--hot N]` runs the WHOLE dev build in `tests/perf/mock.lua` (a mock game: local player, N enemies that
+  move / jitter / choke, numeric ui handles like gamesense, real ffi memory for the animstate / usercmd helpers) and prints the script time
+  per callback plus the game API calls per tick (the expensive ones in game: traces, `hitbox_position` = bone setup, player list writes,
+  draw calls). `--hot` adds a sampled per-line profile. Compare runs with each other, not with the game.
+- Per-enemy work is budgeted: peek detection (`set_peeking_state`) autowalls the current threat + the last target every tick and the
+  others in turns (`PEEK_BUDGET` per tick, results kept `PEEK_TTL` ticks); `c_math.extrapolate` is one trace; anti backstab sets up bones
+  only for near enemies with a knife; the warmup AA scans the 64 player slots only after the round is decided; the resolver looks up the
+  steam id every 64 ticks, writes the plist switches every 64 ticks and the value on change, traces the open side every 4 ticks for the
+  threat and every 16 for the others. (20 enemies: hitbox_position 50 -> 12, trace_bullet 21 -> 7, trace_line 44 -> 11 per tick.)
+- `vtable_bind` returns a NULL cdata for an invalid entity and a NULL cdata is truthy in Lua: check `p == nil or p == ffi.NULL`.
+
 ## Anti-aim: body yaw side
 - `body_side()` (in `antiaimbot.main`, next to `custom_jitter`) is the side of the body yaw: its own random process (held 1-4 sent packets,
   flips 70%), NOT a function of the yaw offset. When the side followed the offset (opposite of it, or in lockstep with a native jitter)
