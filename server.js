@@ -54,7 +54,7 @@ async function get_script(plan) {
     }
 }
 
-const VALID_PLANS = ['beta', 'nightly']
+const VALID_PLANS = ['beta', 'nightly', 'specter']
 
 function parse_duration(dur) {
     if (!dur || dur === 'lifetime') return null
