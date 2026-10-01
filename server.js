@@ -24,7 +24,7 @@ const redis = new Redis({
     token: process.env.UPSTASH_REDIS_REST_TOKEN,
 })
 
-const DB_KEY = 'zenith:licenses'
+const DB_KEY = 'specter:licenses'
 
 async function db_read() {
     try {
@@ -47,8 +47,9 @@ async function db_write(data) {
 // ── Script storage — also in Redis ───────────────────────────────────────
 async function get_script(plan) {
     try {
-        const key = `zenith:script:${plan}`
-        return await redis.get(key)
+        const val = await redis.get(`specter:script:${plan}`)
+        if (val) return val
+        return await redis.get('specter:script:default')
     } catch(e) {
         return null
     }
@@ -176,7 +177,7 @@ app.post('/admin/upload_script', async (req, res) => {
         return res.status(400).json({ error: 'invalid plan' })
     if (!script || script.length < 100)
         return res.status(400).json({ error: 'script too short' })
-    await redis.set(`zenith:script:${plan}`, script)
+    await redis.set(`specter:script:${plan}`, script)
     res.json({ ok: true, plan, bytes: script.length })
     console.log(`[SCRIPT UPLOAD] plan=${plan} bytes=${script.length}`)
 })
@@ -230,6 +231,7 @@ app.get('/script', async (req, res) => {
     const prefix = [
         `rawset(_G, "_auth_ok",        true)`,
         `rawset(_G, "_auth_alive",      true)`,
+        `rawset(_G, "_auth_ts",         os.time())`,
         `rawset(_G, "_auth_ticket",     ${JSON.stringify(ticket)})`,
         `rawset(_G, "_auth_ticket_exp", ${license.last_ticket_exp})`,
         `rawset(_G, "_auth_nonce",      ${JSON.stringify(nonce)})`,
@@ -252,7 +254,7 @@ app.get('/script', async (req, res) => {
 // Returns all public cloud configs
 app.get('/configs', async (req, res) => {
     try {
-        const data = await redis.get('zenith:configs') || []
+        const data = await redis.get('specter:configs') || []
         res.json(data)
     } catch(e) {
         res.json([])
@@ -279,11 +281,11 @@ app.get('/configs/upload', async (req, res) => {
     if (license.hwid !== hwid) return res.status(403).json({ ok: false, reason: 'hwid_mismatch' })
     const author = license.note || key.slice(-6)
     try {
-        let configs = await redis.get('zenith:configs') || []
+        let configs = await redis.get('specter:configs') || []
         configs = configs.filter(c => !(c.name === name && c.author === author))
         if (configs.length >= 200) configs = configs.slice(-199)
         configs.push({ name, author, data, plan: license.plan, ts: Date.now() })
-        await redis.set('zenith:configs', configs)
+        await redis.set('specter:configs', configs)
         console.log(`[CONFIG UPLOAD] ${name} by ${author}`)
         res.json({ ok: true, name, author })
     } catch(e) {
@@ -314,7 +316,7 @@ app.post('/configs', async (req, res) => {
     const cfg_name = name.trim()
 
     try {
-        let configs = await redis.get('zenith:configs') || []
+        let configs = await redis.get('specter:configs') || []
         // prevent duplicates by same author+name
         configs = configs.filter(c => !(c.name === cfg_name && c.author === author))
         // max 200 total configs
@@ -327,7 +329,7 @@ app.post('/configs', async (req, res) => {
             plan:   license.plan,
             ts:     Date.now(),
         })
-        await redis.set('zenith:configs', configs)
+        await redis.set('specter:configs', configs)
         console.log(`[CONFIG UPLOAD] ${cfg_name} by ${author}`)
         res.json({ ok: true, name: cfg_name, author })
     } catch(e) {
@@ -342,13 +344,13 @@ app.delete('/configs', async (req, res) => {
         return res.status(403).json({ error: 'forbidden' })
     const { name, author } = req.body
     try {
-        let configs = await redis.get('zenith:configs') || []
+        let configs = await redis.get('specter:configs') || []
         configs = configs.filter(c => !(c.name === name && c.author === author))
-        await redis.set('zenith:configs', configs)
+        await redis.set('specter:configs', configs)
         res.json({ ok: true })
     } catch(e) {
         res.status(500).json({ ok: false })
     }
 })
 
-app.listen(PORT, () => console.log(`Zenith License Server on :${PORT}`))
+app.listen(PORT, () => console.log(`Specter License Server on :${PORT}`))
