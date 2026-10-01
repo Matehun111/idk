@@ -744,6 +744,24 @@ LPH_NO_VIRTUALIZE(function ()
             local DECAY_GLOBAL  = 0.97
             local RESOLVER_MISS = { ["?"] = true, ["resolver"] = true }
 
+            -- ping-aware thresholds: scale with local player latency so the
+            -- resolver stops misclassifying records / states at higher ping
+            local STALE_BASE     = 10      -- min bt ticks before half-penalty on miss learning
+            local LC_SQ_BASE     = 4096    -- base squared origin-jump for LC break (64 units)
+            local LC_TICKS_BASE  = 10      -- ticks to keep LC flag on after a detected break
+
+            local cached_ping_ticks = 0
+
+            local function refresh_ping()
+                local ok, lat = pcall(client.latency)
+                if not ok or type(lat) ~= "number" or lat ~= lat then cached_ping_ticks = 0; return end
+                cached_ping_ticks = math_ceil(math_max(lat, 0) / globals_tickinterval())
+            end
+
+            local function stale_threshold()
+                return math_max(STALE_BASE, STALE_BASE + cached_ping_ticks - 2)
+            end
+
             -- static / slow AA: body yaw relative to the freestand side
             -- { side multiplier, desync fraction, name }
             local STATIC_ARMS = {
@@ -995,7 +1013,10 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 if data.last_sim == nil or st ~= data.last_sim then
-                    local shifted = data.max_st ~= nil and st <= data.max_st
+                    -- at higher ping (5+ ticks ≈ 78ms+), allow 1 tick of sim-time jitter
+                    -- before calling it a tickbase shift; real shifts are 2+ ticks back
+                    local shift_tol = cached_ping_ticks >= 5 and 1 or 0
+                    local shifted = data.max_st ~= nil and st + shift_tol <= data.max_st
                     if data.max_st and st > data.max_st then
                         data.choke = c_math.clamp(st - data.max_st - 1, 0, 64)
                     end
@@ -1005,9 +1026,13 @@ LPH_NO_VIRTUALIZE(function ()
                     local mx, my = entity_get_prop(me, "m_vecOrigin")
 
                     -- lag compensation breaker: big jump between two valid updates
+                    -- at higher ping, legitimate inter-update movement is larger, so
+                    -- scale the distance threshold up to avoid false positives
                     if not shifted and ox and data.last_origin then
                         local dx, dy, dz = ox - data.last_origin[1], oy - data.last_origin[2], oz - data.last_origin[3]
-                        if dx * dx + dy * dy + dz * dz > 4096 then data.lc_until = tick + 10 end
+                        local lc_sq = LC_SQ_BASE + cached_ping_ticks * cached_ping_ticks * 16
+                        local lc_window = math_max(LC_TICKS_BASE, 8 + cached_ping_ticks)
+                        if dx * dx + dy * dy + dz * dz > lc_sq then data.lc_until = tick + lc_window end
                     end
                     if not shifted and ox then data.last_origin = { ox, oy, oz } end
 
@@ -1261,6 +1286,7 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.net_update = function()
                 local me = entity_get_local_player()
                 local enabled = config.resolver and config.resolver.enabled and config.resolver.enabled:get()
+                refresh_ping()
                 if not me or not enabled then
                     if next(resolver.forced) or next(resolver.forced_sp) or next(resolver.forced_ba) or next(resolver.forced_pitch) then
                         resolver.release_all()
@@ -1329,8 +1355,8 @@ LPH_NO_VIRTUALIZE(function ()
                 if shot.shifting then
                     return "defensive", string_format("forced %d (%s) while target shifted (%s) - half penalty", shot.value, an, tostring(shot.def_reason))
                 end
-                if (shot.bt or 0) >= 10 then
-                    return "stale record", string_format("%d-tick old record, forced %d (%s) - half penalty", shot.bt, shot.value, an)
+                if (shot.bt or 0) >= stale_threshold() then
+                    return "stale record", string_format("%d-tick old record (threshold %d), forced %d (%s) - half penalty", shot.bt, stale_threshold(), shot.value, an)
                 end
                 if shot.reason == "jitter" then
                     return "jitter", string_format("forced %d (%s, side %d next %d, spread %d)", shot.value, an, shot.jside or 0, shot.jnext or 0, math_floor(shot.spread or 0))
@@ -1454,11 +1480,13 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 -- a miss on a defensive or very old record is weaker evidence against the angle
+                -- stale threshold scales with ping so high-latency players don't get
+                -- permanently half-penalised on every shot
                 local weight = 1
                 if shot.shifting then
                     weight = 0.5
                     m.def_misses_round = (m.def_misses_round or 0) + 1
-                elseif (shot.bt or 0) >= 10 then
+                elseif (shot.bt or 0) >= stale_threshold() then
                     weight = 0.5
                 end
 
