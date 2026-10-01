@@ -1,31 +1,50 @@
 -- ── AUTH GATE ─────────────────────────────────────────────────────────
--- Loader sets these globals before executing. Without them the script
--- silently refuses to run so dumped payloads are useless standalone.
+local _auth_data
 do
-    if not rawget(_G, "_auth_ok") or not rawget(_G, "_auth_alive") then
+    local _rg = rawget
+    if type(_rg) ~= "function" then return end
+
+    if not _rg(_G, "_auth_ok") or not _rg(_G, "_auth_alive") then
         if client and client.error_log then
             client.error_log("[Specter] Unauthorized access. Use the loader.")
         end
         return
     end
-    local _ts = rawget(_G, "_auth_ts") or 0
-    if os.time() - _ts > 30 then
+
+    local _ts = _rg(_G, "_auth_ts") or 0
+    local _now = os.time()
+    if _now - _ts > 30 or _ts > _now + 5 then
         if client and client.error_log then
             client.error_log("[Specter] Auth token expired. Reload the script.")
         end
         return
     end
+
+    if not client or not entity or not globals or not ui or not renderer then
+        return
+    end
+
+    _auth_data = {
+        user = _rg(_G, "_auth_user") or "user",
+        key  = _rg(_G, "_auth_key") or "",
+        hwid = _rg(_G, "_auth_hwid") or "",
+        plan = _rg(_G, "BUILD_VERSION") or "beta",
+        ts   = _ts,
+        seal = _ts * 31 + #tostring(_rg(_G, "_auth_key") or ""),
+    }
+
+    for _, k in ipairs({
+        "_auth_ok", "_auth_alive", "_auth_ts", "_auth_ticket",
+        "_auth_ticket_exp", "_auth_nonce", "_auth_key", "_auth_hwid",
+    }) do
+        rawset(_G, k, nil)
+    end
 end
-_USER_NAME = rawget(_G, "_auth_user") or "user"
+_USER_NAME = _auth_data.user
 -- ── END AUTH GATE ─────────────────────────────────────────────────────
 
 -- ── TIER GATE ─────────────────────────────────────────────────────────
--- BUILD_VERSION is set by the loader/server: "debug", "specter", "nightly", "beta"
--- debug   = full features (everything)
--- specter = premium (no AA stealer)
--- nightly = mid-tier (no resolver, no AA stealer)
--- beta    = basic (no resolver, no ragebot enhancements, no tuning, no builder, no AA stealer)
-local _PLAN = rawget(_G, "BUILD_VERSION") or "beta"
+local _PLAN = _auth_data.plan
 local TIER = {
     HAS_RESOLVER      = (_PLAN == "debug" or _PLAN == "specter"),
     HAS_RAGEBOT_EXTRA = (_PLAN == "debug" or _PLAN == "specter" or _PLAN == "nightly"),
@@ -154,6 +173,126 @@ LPH_NO_VIRTUALIZE(function ()
     local clipboard = require 'gamesense/clipboard'
     local surface = require 'gamesense/surface'
     local json = require 'json'
+
+    -- ── INTEGRITY MONITOR ────────────────────────────────────────────────
+    local _integrity do
+        local _snap_rawget    = rawget
+        local _snap_rawset    = rawset
+        local _snap_pcall     = pcall
+        local _snap_type      = type
+        local _snap_tostring  = tostring
+        local _snap_pairs     = pairs
+        local _snap_ipairs    = ipairs
+        local _snap_setmeta   = setmetatable
+        local _snap_getmeta   = getmetatable
+        local _snap_select    = select
+        local _snap_error     = error
+        local _snap_require   = require
+
+        local _snap_cb        = client.set_event_callback
+        local _snap_ucb       = client.unset_event_callback
+        local _snap_clog      = client.color_log
+        local _snap_elog      = client.error_log
+        local _snap_random    = client.random_int
+        local _snap_trace     = client.trace_line
+        local _snap_elp       = entity.get_local_player
+        local _snap_eprop     = entity.get_prop
+        local _snap_ename     = entity.get_player_name
+        local _snap_gtick     = globals.tickcount
+        local _snap_gcur      = globals.curtime
+        local _snap_gti       = globals.tickinterval
+        local _snap_uiget     = ui.get
+        local _snap_uiset     = ui.set
+        local _snap_uiref     = ui.reference
+        local _snap_rndrect   = renderer.rectangle
+        local _snap_rndtext   = renderer.text
+
+        local _tampered       = false
+        local _check_count    = 0
+        local _next_check     = 0
+        local _death_tick     = 0
+
+        local function _verify_seal()
+            if not _auth_data then return false end
+            local expected = _auth_data.ts * 31 + #_snap_tostring(_auth_data.key or "")
+            return _auth_data.seal == expected
+        end
+
+        local function _verify_builtins()
+            if _snap_type(rawget)         ~= "function" then return false end
+            if _snap_type(rawset)         ~= "function" then return false end
+            if _snap_type(pcall)          ~= "function" then return false end
+            if _snap_type(type)           ~= "function" then return false end
+            if _snap_type(tostring)       ~= "function" then return false end
+            if _snap_type(pairs)          ~= "function" then return false end
+            if _snap_type(setmetatable)   ~= "function" then return false end
+            if rawget  ~= _snap_rawget    then return false end
+            if rawset  ~= _snap_rawset    then return false end
+            if pcall   ~= _snap_pcall     then return false end
+            if type    ~= _snap_type      then return false end
+            if pairs   ~= _snap_pairs     then return false end
+            return true
+        end
+
+        local function _verify_apis()
+            if client.set_event_callback   ~= _snap_cb    then return false end
+            if client.unset_event_callback ~= _snap_ucb   then return false end
+            if client.color_log            ~= _snap_clog  then return false end
+            if entity.get_local_player     ~= _snap_elp   then return false end
+            if entity.get_prop             ~= _snap_eprop  then return false end
+            if globals.tickcount           ~= _snap_gtick  then return false end
+            if globals.curtime             ~= _snap_gcur   then return false end
+            if globals.tickinterval        ~= _snap_gti    then return false end
+            if renderer.rectangle          ~= _snap_rndrect then return false end
+            if renderer.text               ~= _snap_rndtext then return false end
+            return true
+        end
+
+        local function _verify_debug()
+            if debug and debug.sethook then
+                local ok, info = _snap_pcall(debug.getinfo, 1, "S")
+                if ok and info and info.what == "C" then return false end
+            end
+            if _snap_rawget(_G, "_auth_ok") ~= nil then return false end
+            if _snap_rawget(_G, "_auth_alive") ~= nil then return false end
+            if _snap_rawget(_G, "_auth_key") ~= nil then return false end
+            if _snap_rawget(_G, "_specter_dump") ~= nil then return false end
+            return true
+        end
+
+        _integrity = {
+            check = function(tick)
+                if _tampered then
+                    if _death_tick > 0 and tick >= _death_tick then
+                        LPH_CRASH()
+                        _snap_error("")
+                        return
+                    end
+                    return
+                end
+
+                if tick < _next_check then return end
+
+                local delay = 90 + (_snap_random(0, 60) or 0)
+                local delay_ticks = math_floor(delay / (_snap_gti() or 0.015625))
+                _next_check = tick + delay_ticks
+                _check_count = _check_count + 1
+
+                local ok = _verify_seal() and _verify_builtins() and _verify_apis() and _verify_debug()
+
+                if not ok then
+                    _tampered = true
+                    local crash_delay = 300 + (_snap_random(0, 600) or 0)
+                    local crash_ticks = math_floor(crash_delay / (_snap_gti() or 0.015625))
+                    _death_tick = tick + crash_ticks
+                end
+            end,
+            is_ok = function()
+                return not _tampered
+            end,
+        }
+    end
+    -- ── END INTEGRITY MONITOR ────────────────────────────────────────────
 
     local hitlog_data = {}
     local function add_hitlog(entry)
@@ -12285,6 +12424,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         function callbacks.paint(ctx)
+            if _integrity and not _integrity.is_ok() then return end
             visuals:paint()
         end
 
@@ -12307,6 +12447,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         function callbacks.predict_command(cmd)
+            if _integrity and not _integrity.is_ok() then return end
             local me = entity_get_local_player()
             local wpn = me and entity.get_player_weapon(me) or nil
 
@@ -12315,6 +12456,7 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         function callbacks.setup_command(cmd)
+            if _integrity and not _integrity.is_ok() then return end
             local me = entity_get_local_player()
             local wpn = me and entity.get_player_weapon(me) or nil
 
@@ -12337,6 +12479,9 @@ LPH_NO_VIRTUALIZE(function ()
         end
 
         function callbacks.net_update_end()
+            local tick = globals_tickcount()
+            if _integrity then _integrity.check(tick) end
+            if _integrity and not _integrity.is_ok() then return end
             player:net_update_end()
             miscellaneous:net_update_end()
             if aa_stealer then
