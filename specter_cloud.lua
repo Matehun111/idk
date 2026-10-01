@@ -889,6 +889,7 @@ LPH_NO_VIRTUALIZE(function ()
             resolver.shots = {}
             resolver.debug_log = {}
             resolver.global = {}      -- session-wide arm results per context, used as prior for new players
+            resolver.gtables = {}     -- session-wide angle tables (defensive), the start of a new player's
 
             local RECORDS       = 32      -- stored eye-angle records per player
             local DEF_CAP       = 14      -- max ticks a single tickbase shift keeps "shifting" on
@@ -1050,6 +1051,13 @@ LPH_NO_VIRTUALIZE(function ()
                 { src = "hold", pol = -1, frac = 1,   name = "hold flip" },
                 { src = "zero",                       name = "zero"      },
                 { src = "fresh",                      name = "fresh"     },
+                -- the server's feet logic run on THIS record (its angles are what the server animated), the open side /
+                -- the other one, and the angle the learned table says for this kind and phase of the window
+                { src = "feet", pol =  1,             name = "feet"      },
+                { src = "feet", pol = -1,             name = "feet inv"  },
+                { src = "side", pol =  1,             name = "open side" },
+                { src = "side", pol = -1,             name = "other side" },
+                { src = "learned",                    name = "learned"   },
             }
             local ARM_LISTS = { s = STATIC_ARMS, j = JITTER_ARMS, d = DEF_ARMS }
             resolver.STATIC_ARMS, resolver.JITTER_ARMS, resolver.DEF_ARMS = STATIC_ARMS, JITTER_ARMS, DEF_ARMS
@@ -1062,7 +1070,7 @@ LPH_NO_VIRTUALIZE(function ()
             -- balance adjust just played: the desync is > 35
             local FULL_BIAS   = {  0.10,  0.10, -0.12, -0.12, -0.25, 0, 0, 0, -0.10, -0.10 }
             local JITTER_BIAS = { 0, 0, 0, 0, -0.03, -0.03, -0.10, 0, 0 }
-            local DEF_BIAS    = { 0.10, 0.04, -0.02, -0.04, 0 }
+            local DEF_BIAS    = { 0.10, 0.04, -0.02, -0.04, 0, 0.03, 0.03, 0, -0.02, 0 }
 
             local function arm_name(ctx, arm)
                 if not ctx or not arm then return "-" end
@@ -1125,6 +1133,61 @@ LPH_NO_VIRTUALIZE(function ()
                 end
             end
 
+            ---
+            --- angle tables: how likely the body yaw sits at each angle (-60 .. 60, steps of 4). A hit at an angle makes the
+            --- angles within TOL of it likely and the rest unlikely, a miss makes the angles within TOL of it unlikely; some
+            --- of the old belief is always given back so a target that changes can be followed. Used by the defensive arms.
+            ---
+            local BINS, STEP, TOL = 31, 4, 12
+            local function angle_of(i) return -60 + (i - 1) * STEP end
+
+            local function table_of(store, key, from)
+                local t = store[key]
+                if not t then
+                    t = { n = 0 }
+                    for i = 1, BINS do t[i] = from and from[i] or 1 / BINS end
+                    store[key] = t
+                end
+                return t
+            end
+
+            local function table_update(t, angle, hit, forget)
+                local total = 0
+                for i = 1, BINS do
+                    local near = math_abs(angle_of(i) - angle) <= TOL
+                    if hit then t[i] = t[i] * (near and 1 or 0.08) else t[i] = t[i] * (near and 0.15 or 1) end
+                    total = total + t[i]
+                end
+                for i = 1, BINS do t[i] = (1 - forget) * t[i] / total + forget / BINS end
+                t.n = t.n + 1
+            end
+
+            -- the most likely angle (the middle of the likely ones; of equally likely ones the smallest) and how sure (0 .. 1)
+            local function table_best(t)
+                local peak = 0
+                for i = 1, BINS do
+                    if t[i] > peak then peak = t[i] end
+                end
+                local top
+                for i = 1, BINS do
+                    if t[i] >= peak * 0.97 and (top == nil or math_abs(angle_of(i)) < math_abs(angle_of(top))) then top = i end
+                end
+                local mass, wsum, w = 0, 0, 0
+                for i = 1, BINS do
+                    if math_abs(i - top) * STEP <= 8 then
+                        mass, wsum, w = mass + t[i], wsum + t[i] * angle_of(i), w + t[i]
+                    end
+                end
+                return wsum / w, mass
+            end
+
+            local function table_learn(m, key, angle, hit)
+                if not key or angle == nil then return end
+                m.tables = m.tables or {}
+                table_update(table_of(m.tables, key, resolver.gtables[key]), angle, hit, 0.06)
+                table_update(table_of(resolver.gtables, key), angle, hit, 0.15)
+            end
+
             resolver.init_player = function(idx)
                 local data = resolver.database[idx]
                 if not data then
@@ -1142,7 +1205,7 @@ LPH_NO_VIRTUALIZE(function ()
                         pose = nil, pose_ok = false, pose_jit_on = false,
                         low_desync = false, bal_recent = false,
                         arm_conf = nil, def_conf = nil, new_record = false,
-                        feet = nil, feet_st = nil, model_body = 0, model_ok = false,
+                        feet = nil, feet_tick = nil, model_body = 0, model_ok = false, def_ep = nil,
                         fx = nil, fx_delta = nil, act_cache = {}, adj_prev_active = false,
                         realign_tick = nil, realign_gap = nil, still_s = nil,
                     }
@@ -1639,16 +1702,18 @@ LPH_NO_VIRTUALIZE(function ()
                 return c_math.normalize_yaw(target)
             end
 
-            local function feet_update(data, eye, lby, st, speed, maxd)
+            -- the time that passes is the time between the arrivals of the updates: the sim time of a tickbase shifted update
+            -- says nothing about how long the server animated
+            local function feet_update(data, eye, lby, tick, speed, maxd)
                 if eye == nil then data.model_ok = false; return end
                 local moving = speed > 5 or data.stance == "air"
                 local target = moving and eye or lby
                 if target == nil then data.model_ok = false; return end
-                if data.feet == nil or data.feet_st == nil or st < data.feet_st then
-                    data.feet, data.feet_st = target, st
+                if data.feet == nil or data.feet_tick == nil or tick < data.feet_tick then
+                    data.feet, data.feet_tick = target, tick
                 end
-                local dt = c_math.clamp((st - data.feet_st) * globals_tickinterval(), 0, 0.25)
-                data.feet_st = st
+                local dt = c_math.clamp((tick - data.feet_tick) * globals_tickinterval(), 0, 0.25)
+                data.feet_tick = tick
                 local rate = moving and (30 + 20 * c_math.clamp((speed - 70) / 65, 0, 1)) or 100
                 data.feet = approach_angle(target, data.feet, rate * dt)
                 local d = c_math.normalize_yaw(eye - data.feet)
@@ -1700,7 +1765,7 @@ LPH_NO_VIRTUALIZE(function ()
                 -- a real tickbase shift is at most ~17 ticks; anything bigger is a map change / reconnect
                 if data.max_st and st < data.max_st - 32 then
                     data.max_st, data.records, data.hist, data.last_sim = nil, {}, {}, nil
-                    data.feet, data.feet_st, data.act_cache = nil, nil, {}
+                    data.feet, data.feet_tick, data.act_cache = nil, nil, {}
                 end
 
                 -- speed, and the usable desync: it shrinks with speed (and with ducking while moving)
@@ -1746,13 +1811,55 @@ LPH_NO_VIRTUALIZE(function ()
                     -- defensive is decided per update, not as a long blanket window:
                     -- only the updates whose simulation time went back (tickbase shift) or whose pitch
                     -- flicked are defensive. Everything else is their real AA and gets resolved normally.
+                    -- a yaw that is far outside of the centre of the target's normal yaw (a fake flick): the centre and spread
+                    -- of the last normal records say what "normal" is, so a jitter does not count as a flick
+                    local rel_now
+                    if eye_yaw and ox and oy and mx and my then
+                        rel_now = c_math.normalize_yaw(eye_yaw - math.deg(math.atan2(my - oy, mx - ox)) - 180)
+                    end
+                    local yaw_flick = false
+                    if rel_now == rel_now and rel_now ~= nil then
+                        local lo, hi, n_clean, newest = math.huge, -math.huge, 0, nil
+                        local rs = data.records
+                        for i = #rs, 1, -1 do
+                            local r = rs[i]
+                            if not r.def then
+                                newest = newest or r.rel
+                                local v = newest + c_math.normalize_yaw(r.rel - newest)
+                                if v < lo then lo = v end
+                                if v > hi then hi = v end
+                                n_clean = n_clean + 1
+                                if n_clean >= 12 then break end
+                            end
+                        end
+                        if n_clean >= 6 and math_abs(c_math.normalize_yaw(rel_now - (lo + hi) / 2)) > (hi - lo) / 2 + 55 then
+                            yaw_flick = true
+                        end
+                    end
+                    local snapped = pitch and data.clean_count >= 3 and data.real_pitch > 60 and pitch < data.real_pitch - 45
+
                     local def_reason
                     if shifted then
                         def_reason = "tickbase shift"
                         data.def_until = math_max(data.def_until, tick + c_math.clamp(data.max_st - st + profile.def_pad, 2, DEF_CAP))
-                    elseif pitch and data.clean_count >= 3 and data.real_pitch > 60 and pitch < data.real_pitch - 45 then
+                    elseif snapped then
                         def_reason = "pitch flick"
                         data.def_until = math_max(data.def_until, tick + 2)
+                    elseif yaw_flick then
+                        def_reason = "yaw flick"
+                        data.def_until = math_max(data.def_until, tick + 2)
+                    end
+                    if def_reason or yaw_flick then
+                        -- what kind of defensive this is (learned apart) and which update of the window this is
+                        local ep = data.def_ep
+                        if not ep then ep = { n = 0 }; data.def_ep = ep end
+                        ep.n = ep.n + 1
+                        if snapped then ep.snap = true end
+                        if yaw_flick then
+                            ep.flick = true
+                            if math_abs(math_abs(rel_now) - 90) <= 30 then ep.sideways = (ep.sideways or 0) + 1 end
+                        end
+                        if yaw_flick and not def_reason then def_reason = "yaw flick" end
                     end
                     if def_reason then
                         data.def_reason = def_reason
@@ -1807,9 +1914,9 @@ LPH_NO_VIRTUALIZE(function ()
                     -- ffi: server animation layers + client animstate of this enemy
                     fres_observe(idx, data, fres_sample(idx, data), tick)
 
-                    -- feet yaw model (not on shifted updates)
-                    if not def_reason and fres_opt(OPT_MODEL) then
-                        feet_update(data, eye_yaw, lby, st, speed, data.max_desync)
+                    -- feet yaw model (also on defensive updates: the server animates their angles too)
+                    if fres_opt(OPT_MODEL) then
+                        feet_update(data, eye_yaw, lby, tick, speed, data.max_desync)
                         if rec then rec.model = data.model_ok and data.model_body or nil end
                     end
 
@@ -1830,6 +1937,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end
                 data.last_sim = st
                 data.is_shifting = tick < data.def_until
+                if not data.is_shifting then data.def_ep = nil end
                 data.pitch_snap = data.is_shifting and data.def_reason == "pitch flick"
                 data.lc_break = tick < data.lc_until
 
@@ -1974,13 +2082,43 @@ LPH_NO_VIRTUALIZE(function ()
             ---
             local function resolve_defensive(idx, data, m)
                 local tick = globals_tickcount()
-                local ctx = data.is_jitter and "d|j" or "d|s"
+                local ep = data.def_ep
+                local kind = "plain"
+                if ep and ep.flick then kind = (ep.sideways or 0) > 0 and "free" or "flick" elseif ep and ep.snap then kind = "snap" end
+                local ctx = (data.is_jitter and "d|j|" or "d|s|") .. kind
+                local tkey = ctx .. "#" .. c_math.clamp(ep and ep.n or 1, 1, 4)
                 local n = #DEF_ARMS
                 local lg = data.last_good_value
                 local have = lg ~= nil and data.last_good_tick ~= nil and tick - data.last_good_tick <= 192
                 local avail, bias = {}, {}
                 for i = 1, n do avail[i], bias[i] = true, DEF_BIAS[i] or 0 end
                 avail[1], avail[2], avail[3] = have, have, have
+
+                -- the feet model on this record: right where the target flicks / spins / jitters (its angles are what the
+                -- server animated), a first guess elsewhere; the sign the game wants comes from the animstate when it is known
+                local mb = (data.model_ok and fres_opt(OPT_MODEL)) and data.model_body or nil
+                local feet_ok = mb ~= nil and math_abs(mb) >= 4
+                avail[6], avail[7] = feet_ok, feet_ok
+                if feet_ok then
+                    local b = (kind == "flick" or kind == "free") and 0.12 or (kind == "snap" and 0.03 or 0)
+                    if (data.choke or 0) >= 2 then b = b - 0.06 end         -- the feet move through updates we never see
+                    local pol = fres.polarity
+                    bias[6] = bias[6] + b + (pol == 1 and 0.10 or (pol == -1 and -0.05 or 0))
+                    bias[7] = bias[7] + b + (pol == -1 and 0.10 or (pol == 1 and -0.05 or 0))
+                end
+                if kind == "flick" or kind == "free" then bias[1], bias[2], bias[3] = bias[1] - 0.04, bias[2] - 0.04, bias[3] - 0.04 end
+
+                -- the angle the table of this kind / phase of the window says
+                local t = m.tables and m.tables[tkey]
+                local learned_ok = t ~= nil and t.n >= 1
+                local learned_angle
+                avail[10] = learned_ok
+                if learned_ok then
+                    local mass
+                    learned_angle, mass = table_best(t)
+                    bias[10] = bias[10] + 0.40 * c_math.clamp((mass - 0.30) / 0.60, 0, 1)      -- the more sure, the earlier it is tried
+                    if (data.consecutive_misses or 0) >= 3 then bias[10] = bias[10] + 0.25 end -- everything else keeps missing
+                end
 
                 local arm, conf = arm_pick(m, ctx, n, bias, avail)
                 data.def_conf = conf
@@ -1990,13 +2128,21 @@ LPH_NO_VIRTUALIZE(function ()
                     value = a.pol * math_floor(lg * a.frac + 0.5)
                 elseif a.src == "zero" then
                     value = 0
+                elseif a.src == "feet" then
+                    value = a.pol * mb
+                elseif a.src == "side" then
+                    value = a.pol * hint_side(data) * data.max_desync
+                elseif a.src == "learned" then
+                    value = learned_angle
                 else
                     -- what the normal resolver would pick right now
                     value = (data.is_jitter and resolve_jitter or resolve_static)(idx, data, m)
                 end
+                if value ~= nil then value = math_floor(c_math.clamp(value, -60, 60) + 0.5) end
 
                 data.used_ctx, data.used_arm, data.used_n = ctx, arm, n
                 data.used_pol, data.used_side, data.used_step = a.pol or 1, 1, arm
+                data.used_tkey = tkey
                 if value == nil then return nil, "native" end
                 return value, "defensive hold"
             end
@@ -2008,6 +2154,7 @@ LPH_NO_VIRTUALIZE(function ()
                 data.used_stance = data.stance
                 data.used_ctx, data.used_arm, data.used_n = nil, nil, nil
                 data.used_pol, data.used_side, data.used_step = nil, nil, nil
+                data.used_tkey = nil
                 data.arm_conf, data.def_conf = nil, nil
 
                 if data.is_shifting and opt("Defensive fix") then
@@ -2200,7 +2347,7 @@ LPH_NO_VIRTUALIZE(function ()
                             local hist = data.hist
                             hist[#hist + 1] = {
                                 st = data.last_sim, tick = globals_tickcount(), value = value, reason = reason,
-                                ctx = data.used_ctx, arm = data.used_arm, n = data.used_n,
+                                ctx = data.used_ctx, arm = data.used_arm, n = data.used_n, tkey = data.used_tkey,
                                 pol = data.used_pol, side = data.used_side, step = data.used_step,
                                 shifted = data.is_shifting, stance = data.used_stance,
                                 jside = data.jitter_side, jnext = data.jitter_next, maxd = data.max_desync,
@@ -2371,13 +2518,13 @@ LPH_NO_VIRTUALIZE(function ()
                 if e then
                     shot.value, shot.reason = e.value, e.reason or "native"
                     shot.stance, shot.shifting = e.stance or data.stance, e.shifted
-                    shot.ctx, shot.arm, shot.n = e.ctx, e.arm, e.n
+                    shot.ctx, shot.arm, shot.n, shot.tkey = e.ctx, e.arm, e.n, e.tkey
                     shot.pol, shot.side, shot.step = e.pol, e.side, e.step
                     shot.jside, shot.jnext, shot.maxd = e.jside, e.jnext, e.maxd
                 else
                     shot.value, shot.reason = resolver.forced[idx], data.last_reason or "native"
                     shot.stance, shot.shifting = data.used_stance or data.stance, data.is_shifting
-                    shot.ctx, shot.arm, shot.n = data.used_ctx, data.used_arm, data.used_n
+                    shot.ctx, shot.arm, shot.n, shot.tkey = data.used_ctx, data.used_arm, data.used_n, data.used_tkey
                     shot.pol, shot.side, shot.step = data.used_pol, data.used_side, data.used_step
                     shot.jside, shot.jnext, shot.maxd = data.jitter_side, data.jitter_next, data.max_desync
                 end
@@ -2442,6 +2589,7 @@ LPH_NO_VIRTUALIZE(function ()
                 m.learn_time[shot.ctx] = globals_curtime()
 
                 arm_learn(m, shot.ctx, shot.arm, shot.n, false, weight)
+                if shot.ctx:sub(1, 1) == "d" then table_learn(m, shot.tkey, shot.value, false) end
                 local next_arm = arm_pick(m, shot.ctx, shot.n)
                 log("%s: %d missed (%s, %s%s) -> next: %s", name, shot.value, shot.reason or "?", arm_name(shot.ctx, shot.arm),
                     shot.shifting and (", defensive: " .. tostring(shot.def_reason)) or "", arm_name(shot.ctx, next_arm))
@@ -2478,6 +2626,7 @@ LPH_NO_VIRTUALIZE(function ()
                 m.learn_time = m.learn_time or {}
                 m.learn_time[shot.ctx] = globals_curtime()
                 arm_learn(m, shot.ctx, shot.arm, shot.n, true, weight)
+                if shot.ctx:sub(1, 1) == "d" and event.hitgroup == 1 then table_learn(m, shot.tkey, shot.value, true) end
                 log("%s: hit with %d (%s, %s)", entity_get_player_name(idx) or tostring(idx), shot.value,
                     arm_name(shot.ctx, shot.arm), shot.stance or "?")
             end
@@ -2493,7 +2642,7 @@ LPH_NO_VIRTUALIZE(function ()
                 resolver.release_all()
                 resolver.database, resolver.memory, resolver.shots = {}, {}, {}
                 resolver.miss_count, resolver.hit_count = {}, {}
-                resolver.global = {}
+                resolver.global, resolver.gtables = {}, {}
             end
 
             -- keep what was learned, forget per-round punishments
@@ -2506,7 +2655,7 @@ LPH_NO_VIRTUALIZE(function ()
                     d.consecutive_misses, d.def_until, d.lc_until, d.last_origin = 0, 0, 0, nil
                     d.last_good_value, d.last_good_tick = nil, nil
                     d.hist = {}
-                    d.act_cache, d.feet, d.feet_st = {}, nil, nil
+                    d.act_cache, d.feet, d.feet_tick, d.def_ep = {}, nil, nil, nil
                 end
             end
 

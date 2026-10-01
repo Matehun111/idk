@@ -54,6 +54,12 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   safe point / body aim one miss earlier, wider shift tolerance.
 - Defensive: while shifting the angle is not recomputed from the shifted updates (hold the last good value), learned in its own context,
   safe point + body aim after a defensive miss or when the defensive arms keep failing.
+  Defensive arms (`DEF_ARMS`): hold / hold half / hold flip, zero, fresh, `feet` / `feet inv` (the feet model run on THIS record: the server
+  animates the defensive angles too), open / other side, `learned` (angle table per kind and window phase, `table_*`). A defensive update is a
+  tickbase shift, a pitch snap or a yaw flick (55+ deg outside the centre / spread of the normal records); the kind (plain / snap / flick /
+  free = flick to the side) is part of the context (`d|s|flick` ...). The feet model takes its time from the ARRIVAL ticks of the updates,
+  not from the sim time (a shifted update's sim time says nothing about how long the server animated) and runs on every update.
+  Server-style physics scenarios `phys_def_*` in `tests/resolver_sim.lua` (before: flick 0.30, sideways flick 0.00, jitter 0.44; now 0.96-1.00).
 - FFI resolver (`fres` in the resolver block, menu: Resolver > FFI resolver, options in `SPECTER_SHARED.resolver_ffi_opts`):
   * reads the server animation layers (adjust layer 3 / activity 979 = realign, move layer 6) and the client animstate
     (`fres_animstate_t`, eye yaw 0x78, goal feet yaw 0x80, ... up to on_ground 0x108) through ffi; offsets are checked against the netvars

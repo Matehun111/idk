@@ -61,6 +61,12 @@ M.scenarios = {
     phys_lby_flick = function() return function(k) return { rel = (k % 80 < 60) and 0 or 50, phys = true } end end,
     phys_move_jitter = function() return function(k) return { rel = (k % 2 == 0) and 35 or -35, vel = 200, phys = true } end end,
     phys_slow_turn = function() return function(k) return { rel = ((k * 1.5) % 360) - 180, phys = true } end end,
+    -- defensive windows (6 of every 48 ticks, tickbase shifted, pitch snapped) on top of server-style physics:
+    -- the angles during the window are what the server animates, so the true body yaw during it follows from them
+    phys_def_flick = function() return function(k) local ph = k % 48; if ph >= 40 and ph < 46 then return { rel = 110, shifted = true, phys = true } end return { rel = 0, phys = true } end end,
+    phys_def_free = function() return function(k) local ph = k % 48; if ph >= 40 and ph < 46 then return { rel = 90, shifted = true, phys = true } end return { rel = 0, phys = true } end end,
+    phys_def_jitter = function() return function(k) local s = (k % 2 == 0) and 35 or -35; return { rel = s, shifted = (k % 48) >= 40 and (k % 48) < 46, phys = true } end end,
+    phys_def_lby = function() return function(k) local ph = k % 48; local w = ph >= 40 and ph < 46; return { rel = (k % 80 < 60) and 0 or 50, shifted = w, phys = true } end end,
     -- desync that depends on the freestand-ish side, then flips mid-run (player changes AA)
     static_flip = function()
         return function(k) return { rel = 0, T = (k < 900) and 58 or -58 } end

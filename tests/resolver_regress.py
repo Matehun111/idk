@@ -57,6 +57,18 @@ for scn in SCENARIOS:
         cells.append(f"{n.late_rate:>10.2f}")
     print(f"{scn:<16}" + "".join(cells))
 
+print("== defensive windows on server-style physics: hit rate of the shots at the defensive records")
+print(f"{'scenario':<18}{'20ms':>8}{'80ms':>8}")
+for scn in ("phys_def_flick", "phys_def_free", "phys_def_jitter", "phys_def_lby"):
+    cells = []
+    for ping in (20, 80):
+        n = run(scn, ping=ping, ticks=8000, ffi=True)
+        check(n.errors == 0, f"{scn} {ping}ms: {n.errors} errors")
+        check(n.def_shots >= 100, f"{scn} {ping}ms: only {n.def_shots} shots at defensive records")
+        check(n.def_rate >= 0.85, f"{scn} {ping}ms: defensive hit rate {n.def_rate:.2f} < 0.85")
+        cells.append(f"{n.def_rate:>8.2f}")
+    print(f"{scn:<18}" + "".join(cells))
+
 print("== garbage input (NaN / inf / nil props), must never throw")
 for scn in ("static_pos", "jitter_pos", "desync_jitter", "def_static", "moving_static"):
     n = run(scn, ping=40, fuzz=0.2, ticks=6000, ffi=True, balance_every=70, panel=True)
