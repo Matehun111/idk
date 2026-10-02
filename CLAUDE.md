@@ -56,6 +56,8 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - Side: z per situation = how sure the target is on the positive side, measured by every head hit / resolver miss (Bayes). The owners
   asked for the repo version (cloud + dev) to have a weaker resolver than their private copy: this version does NOT track side switches
   (no flip rates, no reaction delay learning). Do not put that back unless the owners ask.
+- Size model: a resolver miss updates the size only as much as the side is sure (`|2 pi - 1|`): with a 50 / 50 side, misses used to eat
+  the size (48 -> 8-20 deg, shots in the middle that hit neither side).
 - Sim (tests/resolver_world.lua, ceiling ~0.92): static / jitter / LBY / defensive 0.91-0.92; anti-brute 0.19-0.34, anti-miss 0.60-0.76,
   anti-shot ~0.32, random switches 0.40-0.43, coin flip body side 0.37-0.41.
 - Menu: Enable Resolver, info rows for the current threat (target, method = Static / LBY / Dynamic / Jitter / Defensive + winning model,

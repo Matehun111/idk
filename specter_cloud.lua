@@ -1081,7 +1081,11 @@ LPH_NO_VIRTUALIZE(function ()
                             l = likelihood(clamp((f == 1 and c or -c) + A[i], -60, 60), v, hit)
                         end
                         pred = pred + h[i] * l
-                        h[i] = h[i] * (temper == 1 and l or l ^ temper)
+                        -- a miss says little about the size when the side is unsure (a miss on one side with a 50 / 50 side
+                        -- belief used to eat the size: 48 -> 8-20 degrees, shots in the middle that hit neither side)
+                        local t = temper
+                        if f == 3 and not hit then t = t * math.abs(2 * pi - 1) end
+                        h[i] = h[i] * (t == 1 and l or l ^ t)
                         sum = sum + h[i]
                     end
                     local p0 = prior(f)
