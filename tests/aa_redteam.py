@@ -7,7 +7,7 @@ packet (yaw base at targets + yaw offset + native yaw jitter, body yaw side from
 freestanding, max desync by speed) and becomes the enemy of tests/resolver_world.lua, where resolvers shoot at it with
 backtrack and ping. Their hits / shots go back to the anti-aim as player_hurt / bullet_impact (its anti brute-force).
 
-The attackers are the resolver of this script in three setups (full, desync part only, jitter part only). Lower hit
+The attackers are the resolver of this script in three setups (full, without the jitter split, with a fixed size). Lower hit
 rate = harder to hit. This models the angles only: a real enemy cheat also reads animation layers, which the model
 does not have.
 
@@ -32,10 +32,11 @@ T = open(os.path.join(HERE, "resolver_regress.py"), encoding="utf-8").read()
 PRE = re.search(r"PRELUDE = '''(.*?)'''", T, re.S).group(1)
 POST = re.search(r"EPILOGUE = '''(.*?)'''", T, re.S).group(1)
 ATTACKER = PRE + BLOCK + POST
+# the resolver with its defaults, without the jitter split (sensitivity 90), and with a fixed size (side learned only)
 ATTACKERS = {
-    "full": ["Desync resolver", "Jitter resolver", "Neural network"],
-    "desync": ["Desync resolver"],
-    "jitter": ["Jitter resolver"],
+    "full": "",
+    "nojit": "ctl.item('Resolver jitter').value = 90",
+    "fixed": "ctl.item('Resolver override').value = true",
 }
 
 BRIDGE = r'''
@@ -120,8 +121,7 @@ def run(preset, state, attacker, ping=40, ticks=3000, seed=1, dev=None):
         w.frame()
     d = bridge(w, rt.table_from({"vx": vx, "vy": vy}))
     spec = rt.table_from([rt.table_from({"driver": d, "name": "us"})])
-    parts = "{" + ",".join(f'"{p}"' for p in ATTACKERS[attacker]) + "}"
-    conf = rt.eval(f'function(ctl) ctl.item("Resolver parts").value = {parts} end')
+    conf = rt.eval(f"function(ctl) {ATTACKERS[attacker]} end")
     s = world.run(ATTACKER, rt.table_from({"enemies": spec, "ticks": ticks, "ping": ping, "seed": seed, "configure": conf}))
     errs = list(s.ctl.errors.values()) + list(w.errors.values())
     return s.late_rate, errs, d

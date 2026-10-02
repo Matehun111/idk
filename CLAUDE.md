@@ -39,69 +39,52 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 ## Tier System
 4-tier feature gating: `debug` (full) > `specter` (no AA stealer) > `nightly` (no resolver) > `beta` (minimal)
 
-## Resolver (the owners' desync resolver + jitter resolver, one module)
+## Resolver (computed body yaw + learned models, one module)
 - Code lives between the `-- [resolver:begin]` / `-- [resolver:end]` markers in `specter_cloud.lua`. Keep the markers (tests extract the block).
-  The owners wrote / approved two separate scripts (a desync resolver and a jitter resolver) and asked for the old resolver (ping profiles,
-  FFI layers / animstate, defensive contexts, safe point / body aim levers, debugger panel) to be replaced by them. The old block is in git
-  history (commit 5081974) if anything has to be looked up.
-- One module because two scripts wrote the same player list fields: whichever callback ran later won (with the jitter script loaded first
-  the desync one overwrote it on every jittering enemy: 0.92 -> ~0.40 in the sim). Every enemy update is read once (`ingest`: sim tick,
-  eye yaw relative to us, choke, stance, max desync = 58 x speed factor, feet model) and goes to ONE part:
-  * jitter part (`jitter_resolve`, `JIT_ARMS`): the target jitters = 30+ deg spread and 2+ side flips in the last 12 records (stays one down
-    to 20 deg). Pattern regular / random / multi way; arms: feet model (server feet logic on netvars) / centre of the jitter / side of the
-    record, each also for the NEXT record, low side angles, learned angle table per jitter side (`table_*`), zero, native. Context
-    `<stance>` or `<stance>|z` (feet model says ~0). `pol_ema` = which sign hit more, session wide
-  * desync part (`desync_resolve`, `DES_ARMS`): everybody else (and the defensive records go to `def_resolve`). +/- full, +/- half, zero per stance (stand / move / air); first guess: the side
-    open to our eye (traces every 4 ticks, it changes only when two traces agree). Added after the owners asked for "perfect":
-    - `feet model` / `feet model inv`: the feet model's body yaw for the record (LBY breakers: 0.55-0.60 -> 0.92 in the sim)
-    - `side model` (side tracking, `side_*`): observations = shot results that show the side (head hit: that side, full angle missed: the
-      other side) at the arrival tick of the record shot at; reactions = every shot the target noticed (hit / miss, any reason), visible
-      from fire + round trip + the target's own delay. The delay is calibrated per player (`DELAYS`, `delay_score`: the one that explains
-      this round's observations best). Two observations with one reaction between them teach P(switch | hit) / P(switch | miss), none
-      between them the target's own switch rate. `side_predict` is a filter over the events (a head hit near certain, a miss `MISS_NOISE`).
-      The side model is exempt from the "same arm missed twice" penalty. Sim: anti-bruteforce on hit 0.26 -> 0.92, on miss 0.82 -> 0.90,
-      on every shot 0.45 -> 0.82, random switches 0.61 -> 0.79 (each random switch costs about one shot, that is the limit)
-  * the jitter part also has `desync call` (what the desync part would force) and its learned table is offered only when it is sure
-    (mass >= 0.35): against jitterers whose body side is random per packet (like ours) the yaw-based arms miss more often than a coin flip.
-    Side observations come from the shots of both parts
-  * both: Beta-like score of the player's own shots + 0.3 x everybody's, decay 0.9 / 0.97 per shot, the same arm missing twice in a row
-    loses its hits; memory per steam id (`mem[key].d` / `.j` / `.tables`), survives rounds (halved at a new round)
-- Neural network (`nn_*`, Parts > "Neural network", on by default): 20 inputs (what both parts see about the record: jitter pattern / side /
-  offset, feet model, side model, lby delta, speed, choke, open side, last hit angle, learned table angle, ...) -> 16 tanh -> 15 angle bins
-  (-56 .. 56, softmax). One network for all players, saved in `database` under `specter_nn_resolver` (`NN_VERSION`: bump it when the
-  inputs / sizes change; a save that does not match or has non-finite weights is replaced by a new network) on round start and shutdown;
-  Reset memory deletes it. Learns from every shot at a record it saw (hist `x`): head hit = cross entropy on the bins within TOL of the
-  angle, resolver miss = push those bins down, + 3 replayed results from a 192 buffer. It is one more arm ("neural net") in both parts,
-  offered after `NN_MIN` results, its bias from how often its own call was on the head of the head hits (`nn.agree`). In the sim it
-  learns the right angle (1.00 static / anti-brute / jitter, 0.88 LBY breaker) but rarely gets picked: the other arms are already at
-  the ceiling there; it is the fallback when they miss on a player. `resolver.nn_info()` = results learned, agreement.
-- Defensive records (tickbase shift: sim time not moving forward) are NOT skipped any more: `ingest` returns "def", the feet model runs on
-  their flicked angles (its clock is the arrival tick for every update), and `def_resolve` gives them their own angle (`DEF_ARMS`: hold,
-  feet model on this record +/-, +/- full, zero; learned in `m.f`, context `def|<stance>`, reason "defensive"). The desync part has a
-  zone context `<stance>|z` like the jitter part (feet model ~0 after a flick / realign: zero first). `applied_for` picks the closest
-  record at or before the target (defensive records go back in time). Sim `defensive` driver (flick 110 / 90 / -70, jitter base):
-  0.33-0.71 -> 0.92 (defensive records 0-21% -> 89-100%).
-- Shots are judged by what the RECORD they went at got (`p.hist` by sim tick, `applied_for`, `event.backtrack`), not by what is forced at
-  fire time. Head hit 1.5, body hit 0.5, resolver miss 1 (0.5 when backtracked 12+ ticks); spread / prediction / death misses are ignored.
-- Player list: forced once per new record (Correction active on, Force body yaw on, value); a tickbase shifted update (sim time not moving
-  forward) keeps the value of the last real record. Dead / dormant / gone enemies are released (gamesense's `get_players` does not list
-  them) with Correction active given back, also when it was `false`. A different steam id in a slot = a new player (slot reuse).
-- Interface the rest of the script uses: `resolver.on_fire / on_hit / on_miss` (from `miscellaneous:aim_*`, after the hit logger),
-  `new_round` (round start), `reset_player` (player death), `reset_all` (menu button), `shot_backtrack`, `shots[id]` (`reason` =
-  desync / jitter / jitter native / native, `value`), `database[idx]` (`stance`, `speed`, `consecutive_misses` for auto multipoint,
-  `mode` = "d" / "j" for the header), `memory[key].hit_value[stance]` (aa stealer), `forced`, `stats_hook` (set by the stats module).
-  The tiers without the resolver get a stub with the same names.
-- Menu: Enable Resolver, Parts (Desync resolver / Jitter resolver / Neural network / Log), Reset memory. With the jitter part off the desync part takes the
-  jittering enemies too; with the desync part off non-jittering enemies stay native.
-- Tests: `pip install lupa && python3 tests/resolver_regress.py` runs the real block in `tests/resolver_world.lua` (mock gamesense, enemies on a
-  hidden tick level with fakelag / tickbase shifts, a copy of the server feet logic for the true body yaw, aimbot with backtrack and ping
-  delayed results; `react_delay` makes anti-bruteforce drivers react later, `noise_p` adds misses for other reasons): hit rates per AA and
-  ping, side tracking with reaction delays / noise / inverted sign, parts, release on disable / death / dormancy / shutdown, Correction
-  active restore, shot attribution (0 shots judged by a value their record did not get), garbage netvars, 5 enemies, slot reuse, sim time
-  jumps, round / memory reset, log. Native alone is ~0.23 there, the ceiling ~0.92.
-- Load smoke test: `python3 tests/load_smoke.py [--dev-file] [--plan=nightly|beta|specter]` runs the whole script (or the dev build) in a
-  gamesense-like sandbox (no os / io / debug, strict globals, ghost API). Run it after every change that touches load-time code,
-  the loaders, the auth gate or the resolver.
+  The owners asked for "a completely new, simple resolver with no hardcode" and later for their `dynamic_resolver_simple.lua` to be put in:
+  no guess lists / arm biases any more. The previous block (desync + jitter parts, arms, neural network) is in git history (commit 01e1bd2).
+- Every enemy update is read once (`ingest`): eye yaw, LBY target, speed, stance, duck, max desync (58 x speed factor, lower when moving
+  crouched like the server), choke, jitter detection (spread >= "Jitter sensitivity" (30) and 2+ side flips in the last 12 records).
+  Tickbase shifted updates (sim time not moving forward) are "defensive" records with their own situation.
+- The feet model (`feet_update`, the server's feet logic on netvars: standing -> LBY at 100 deg/s, moving -> eye at 30-50 deg/s, clamped)
+  gives the COMPUTED body yaw `c` of every record. Per player and situation (`stand` / `move` / `air` / `j+` / `j-` / `def`) a belief
+  (`mem[key].b[ctx]`, started from the pooled `global[ctx]`) mixes three models, weighted by how well each predicted the shots:
+  computed (c + learned offset), mirrored (-c + learned offset), side (a learned size on the side the target is on now).
+  `decide` forces the angle with the most probability within TOL (12) of it, on exact angles (rounding c into a bin lost 1-2 deg = misses).
+- Results update the beliefs with Bayes: head hit = the body yaw was within TOL of the value the RECORD got (`P_HIT` 0.85), resolver miss =
+  it was not; FORGET 0.02 pulls back toward the start so a changing target is followed.
+- Side switches (`side_*`): z per situation = how sure the target is on the positive side. Every shot the target sees can flip it, with the
+  rates learned per player (after a hit / after a miss / per tick, counted from hard sides of consecutive results); when the answer shows
+  in the records is learned too: every delay of `DELAYS` (1..34 ticks, fine steps: coarse ones lost anti-brute at 80 ms + 10 tick reaction)
+  keeps its own z and rates, the one that predicted the results best is used. The size model is separate from the side (when they were one
+  histogram, misses with an unsure side ate the size).
+- Sim (tests/resolver_world.lua, ceiling ~0.92): static / jitter / LBY / defensive / anti-brute / anti-miss / anti-shot (also with reaction
+  delays 4 / 10 and an inverted sign) 0.91-0.92, random switches 0.71 / 0.68, coin flip body side 0.42-0.50 (= the limit).
+- Menu: Enable Resolver, info rows for the current threat (target, method = Static / LBY / Dynamic / Jitter / Defensive + winning model,
+  desync L/R, confidence), Jitter sensitivity, Override size (+ Size: the resolver keeps the side, the size is fixed), Log, Reset memory.
+- 64 records of history per player (`HIST`): shots at old records (extended backtrack) are still judged by what that record got.
+- Interface the rest of the script uses: `resolver.on_fire / on_hit / on_miss`, `new_round`, `reset_player`, `reset_all`, `shot_backtrack`,
+  `shots[id]` (`reason` = desync / jitter / defensive / native, `value`, `mode`), `database[idx]` (`stance`, `speed`, `consecutive_misses`,
+  `mode` = "d" / "j", `method`, `model_name`, `phit` = confidence, `value`), `memory[key].hit_value[stance]` (aa stealer), `forced`,
+  `stats_hook`. The tiers without the resolver get a stub with the same names.
+- Tests: `pip install lupa && python3 tests/resolver_regress.py` (hit rates per AA and ping, reaction delays, noise, inverted sign, options,
+  player list / release / Correction active restore, shot attribution, garbage netvars, 5 enemies, slot reuse, resets, log).
+- Load smoke test: `python3 tests/load_smoke.py [--dev-file] [--plan=nightly|beta|specter]`. Run it after every change that touches
+  load-time code, the loaders, the auth gate or the resolver.
+
+## Ragebot
+- Improved Multi-point "Auto" only lowers the scale (moving > 100, air, 2 misses); it no longer ADDS chest / stomach multipoints.
+- Resolver Safety (`config.ragebot.safety*`): per enemy player list "Override prefer body aim" / "Override safe point" from the resolver
+  (`database[idx]`): body aim / safe point after N resolver misses, body aim when the confidence is < 0.45 or HP <= the slider, prefer
+  body aim "Off" (head) when confidence >= 0.8 and no miss. Written on change only, "-" given back when it no longer applies / round start.
+- Extended Backtrack (Ping spike) defaults to 200 ms, the most gamesense allows. Together with the server's sv_maxunlag (0.2 s) that is
+  the real backtrack limit (~25 ticks); "64 ticks" only exists as the resolver's record history.
+
+## Recommended config
+- `settings.recommended()` (next to `settings.builtin`): resolver on, preset Distort (lowest best attacker in the red team), Yaw sway +
+  Edge on crouch, defensive with the new triggers, Adaptive fake lag, backtrack Maximum + extended 200 ms, multipoint auto, Resolver
+  Safety, DT guard, tuning (air / ground / noscope / weapon profiles / peek). "Reset to defaults" applies it after the builtin string;
+  the first start (no saved config) applies it and saves.
 
 ## Standalone desync resolver (`specter_resolver.lua`)
 - Same design as the OLD resolver block of the cloud script (before it was replaced by the owners' desync + jitter resolver: contexts, arms,
@@ -127,10 +110,6 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   hit triggers: `m_flNextAttack`, `m_flFlashDuration`, `m_flVelocityModifier`; our body yaw (`player.fakeyaw`): pose parameter 11;
   quick peek legs: the `cmd.in_*` move fields in setup_command; time scale: `host_timescale`. Do not bring ffi back.
 
-## Ragebot
-- Improved Multi-point "Auto" only lowers the scale (moving > 100, air, 2 misses); it no longer ADDS chest / stomach multipoints (with
-  everybody moving that made the aimbot pick body points first: "it shoots the body").
-
 ## Performance
 - `python3 tests/perf_profile.py [--hot N]` runs the WHOLE dev build in `tests/perf/mock.lua` (a mock game: local player, N enemies that
   move / jitter / choke, numeric ui handles like gamesense, real ffi memory for the animstate / usercmd helpers) and prints the script time
@@ -139,8 +118,7 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - Per-enemy work is budgeted: peek detection (`set_peeking_state`) autowalls the current threat + the last target every tick and the
   others in turns (`PEEK_BUDGET` per tick, results kept `PEEK_TTL` ticks); `c_math.extrapolate` is one trace; anti backstab sets up bones
   only for near enemies with a knife; the warmup AA scans the 64 player slots only after the round is decided; the resolver looks up the
-  steam id every 64 ticks, writes the plist switches every 64 ticks and the value on change, traces the open side every 4 ticks for the
-  threat and every 16 for the others. (20 enemies: hitbox_position 50 -> 12, trace_bullet 21 -> 7, trace_line 44 -> 11 per tick.)
+  steam id every 64 ticks, writes the plist switches every 64 ticks and the value on change (no traces any more). (20 enemies: hitbox_position 50 -> 12, trace_bullet 21 -> 7, trace_line 44 -> 11 per tick.)
 
 ## Anti-aim: body yaw side
 - `body_side()` (in `antiaimbot.main`, next to `custom_jitter`, also `antiaimbot.body_side`) is the side of the body yaw: a fresh coin flip
@@ -154,10 +132,12 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   side for the hold time (a resolver that misses once knows that side, and "flips after a hit" is learnable).
 - `antiaimbot.main:run` keeps gamesense's own AA switch (`reference.antiaim.master`) on while specter's AA is on, `release()` gives it
   back; it used to be set only by the menu code while the menu was open.
+- Modifications "Yaw sway" (a slow random drift of up to 12 deg on the 180 yaw) and "Edge on crouch" (edge yaw while standing crouched).
+- Defensive triggers also: On peek, Landing, Low HP (<= 40), Threat scoped.
 - Presets: Godmode, Phantom, Elite, Nova, Distort, Mirage (random-hold wide yaw, 5-way air), Void (asymmetric left / right with a random
   switch delay, 3-way air), Constructor.
 - `python3 tests/aa_redteam.py [preset ...]` (~35 min for all): the REAL anti-aim of the dev build runs in the mock game of
   `tests/perf/mock.lua`; what gamesense would do with the settings it writes is modelled per sent packet and becomes the enemy of
-  `tests/resolver_world.lua`; the resolver (full / desync part / jitter part) shoots at it, its hits / shots reach our anti brute-force.
+  `tests/resolver_world.lua`; the resolver (full / without the jitter split / fixed size) shoots at it, its hits / shots reach our anti brute-force.
   Fails when the best attacker hits a preset / state above 0.60 (a forced side guess is ~0.47). Now: 0.36-0.51, mean 0.44 (was 0.63).
   It models the angles only, not the animation layers a real cheat also reads.

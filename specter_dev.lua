@@ -704,100 +704,42 @@ LPH_NO_VIRTUALIZE(function ()
             end
         else
             -- [resolver:begin]
-            -- Resolver = the desync resolver + the jitter resolver in ONE module. They used to be two scripts that wrote the
-            -- same player list fields: whichever ran later won, so with the wrong load order the desync one overwrote the jitter
-            -- one on every jittering enemy. Now every enemy update is read once and handed to one of the two parts:
+            -- Specter resolver. No list of guesses, no hand-tuned order: the angle is computed, the rest is learned.
             --
-            --   * jitter part: enemies whose eye yaw keeps switching between two sides (30+ degrees, 2+ flips in the last 12
-            --     records). The pattern is classified (regular / random / multi way); the body yaw comes from the feet model
-            --     (the server's feet logic on netvars), the centre of the jitter, the side of the record or of the next one, a
-            --     learned angle table per jitter side, zero or the native resolver - whichever hit this player before
-            --   * desync part: everybody else. Both sides at full / half size and zero, learned per stance (stand / move / air);
-            --     first guess for a new player: the side that is open to our eye
+            -- The server decides a player's body yaw with its feet logic: standing, the feet turn to the lower body yaw target;
+            -- moving, they follow the eye yaw; never further than the max desync from the eye. The resolver runs the same logic
+            -- on what the server sends us (eye yaw, lower body yaw target, speed, sim time): the COMPUTED body yaw of a record.
+            -- What it cannot see (the choked ticks, a side the cheat picks) is LEARNED from the shots.
             --
-            -- Both learn per player (steam id; old shots count less and less, it survives rounds) on top of what worked on the
-            -- other players. A shot is judged by the angle the RECORD it went at got (backtrack), not by what is forced when
-            -- the shot is fired. Misses that are not the resolver's fault (spread, prediction error, death ...) are ignored.
+            -- Per player and situation (stance, jitter side, defensive record) it keeps a probability for every angle
+            -- (-60 .. 60), from three models:
+            --   computed   the computed body yaw + a learned offset
+            --   mirrored   minus the computed body yaw + a learned offset
+            --   side       a learned size, on the side the target is on now: a side it may switch after a hit, after a miss
+            --              or at random moments, how often and how quickly is learned per player (see "side switches")
+            -- A head hit says the body yaw was within TOL of the angle the record got, a resolver miss says it was not (Bayes).
+            -- Each model is weighted by how well it predicted the shots, and the angle most likely to hit is forced.
+            -- A shot is judged by what the RECORD it went at got (backtrack). Misses that are not about the angle are ignored.
             local MAX_DESYNC = 58
-            local WINDOW = 12             -- records the jitter analysis looks at
-            local RECORDS = 24            -- records kept per player (a slow jitter pattern needs a long window)
-            local HIST = 48               -- applied angles kept per player (to judge shots at older records)
-            local ENTER, EXIT = 30, 20    -- yaw spread (degrees) that makes a target a jitterer / lets it stay one
-            local BINS, STEP, TOL = 31, 4, 12      -- angle table: -60 .. 60 in steps of 4; an angle within TOL of the body yaw hits
-            local FS_INTERVAL = 4         -- ticks between the "which side is open" traces
-            local GAP_RESET = 64          -- ticks without an update (dormant, lag spike): the old records say nothing any more
-            local DES_FEET_BIAS = 0.00    -- first-guess order of the feet model arms in the desync part
-            local PRED_GAIN = 0.30        -- how much a sure side prediction moves the side model arm up
-            local REACT_DELAY = 1         -- ticks after the round trip until a reaction to a shot shows in the records (calibrated)
-            local MISS_NOISE = 0.15       -- how likely a resolver miss is although the angle was on the right side
+            local STEP, TOL = 4, 12           -- angles -60 .. 60 in steps of 4; within TOL of the body yaw the head is hit
+            local NB, NM = 31, 16             -- angle bins (-60 .. 60), size bins (0 .. 60)
+            local HIST = 64                   -- records remembered per player: a shot at a record up to 64 ticks old is still judged
+            local WINDOW = 12                 -- records the jitter detection looks at
+            local GAP_RESET = 64              -- ticks without an update (dormant, lag spike): the old records say nothing any more
+            local P_HIT, P_LUCK = 0.85, 0.05  -- the right angle hits the head / a wrong one still does
+            local FORGET = 0.02               -- per result, this much of a belief goes back to where it started (targets change)
+            local DECAY = 0.9                 -- model scores: weight of the older results
 
-            -- desync part: side (1 / -1, 0 = none), part of the max desync, tie-break bonus
-            local DES_ARMS = {
-                { side =  1, frac = 1.0, bias =  0.00, name = "+ full" },
-                { side = -1, frac = 1.0, bias =  0.00, name = "- full" },
-                { side =  1, frac = 0.5, bias = -0.05, name = "+ half" },
-                { side = -1, frac = 0.5, bias = -0.05, name = "- half" },
-                { side =  0, frac = 0.0, bias = -0.12, name = "zero"   },
-                -- the feet model (the server's feet logic on netvars, see feet_update): its body yaw for this record, both signs
-                { src = "feet", pol =  1, bias = DES_FEET_BIAS, name = "feet model"     },
-                { src = "feet", pol = -1, bias = DES_FEET_BIAS, name = "feet model inv" },
-                -- side tracking: the side the target is expected to be on now, from how it reacted to the last shots (side_predict)
-                { src = "pred",           bias = 0.00, name = "side model" },
-                -- the neural network's call (see nn_*)
-                { src = "nn",             bias = 0.00, name = "neural net" },
-            }
-
-            -- defensive records (tickbase shift: the sim time goes back, the enemy flicks its angles for a few ticks). They used
-            -- to be skipped (the last value stayed): the head is somewhere else then (sim: 0-21% hits on them), and the feet
-            -- logic the server ran on the flicked angles moved the body yaw of the records after the window too
-            local DEF_ARMS = {
-                { src = "hold",           bias =  0.02, name = "def hold"     },     -- what the last real record got
-                { src = "feet", pol =  1, bias =  0.03, name = "def feet"     },     -- the feet model run on this record
-                { src = "feet", pol = -1, bias =  0.00, name = "def feet inv" },
-                { side =  1,              bias =  0.00, name = "def + full"   },
-                { side = -1,              bias =  0.00, name = "def - full"   },
-                { src = "zero",           bias = -0.05, name = "def zero"     },
-            }
-
-            -- jitter part. pol: the sign the angle is given; next: made for the record AFTER the newest one (for the case that
-            -- the value reaches the animation one update late); bias: the order of the first guesses
-            local JIT_ARMS = {
-                { src = "feet",   pol =  1,                          bias =  0.03, name = "feet model"          },
-                { src = "feet",   pol = -1,                          bias =  0.03, name = "feet model inv"      },
-                { src = "center", pol =  1,                          bias =  0.00, name = "center"              },
-                { src = "center", pol = -1,                          bias =  0.00, name = "center inv"          },
-                { src = "feet",   pol =  1, next = true,             bias = -0.01, name = "feet model next"     },
-                { src = "feet",   pol = -1, next = true,             bias = -0.01, name = "feet model next inv" },
-                { src = "center", pol =  1, next = true,             bias = -0.02, name = "center next"         },
-                { src = "center", pol = -1, next = true,             bias = -0.02, name = "center next inv"     },
-                { src = "side",   pol =  1, frac = 1.0,              bias =  0.00, name = "cur +"               },
-                { src = "side",   pol = -1, frac = 1.0,              bias =  0.00, name = "cur -"               },
-                { src = "side",   pol =  1, frac = 1.0, next = true, bias =  0.00, name = "next +"              },
-                { src = "side",   pol = -1, frac = 1.0, next = true, bias =  0.00, name = "next -"              },
-                { src = "side",   pol =  1, frac = 0.6, low = true,  bias = -0.03, name = "cur + low"           },
-                { src = "side",   pol = -1, frac = 0.6, low = true,  bias = -0.03, name = "cur - low"           },
-                { src = "learned",                                   bias =  0.00, name = "learned"             },
-                { src = "learned", next = true,                      bias = -0.02, name = "learned next"        },
-                { src = "zero",                                      bias = -0.10, name = "zero"                },
-                { src = "native",                                    bias = -0.10, name = "native"              },
-                { src = "nn",                                        bias =  0.00, name = "neural net"          },
-                -- what the desync part would force (its side model / feet model): for jitterers whose body side does not
-                -- follow the yaw (a random side per packet) the yaw-based arms above are wrong more often than a coin flip
-                { src = "desync",                                    bias =  0.00, name = "desync call"         },
-            }
+            local A = {}                      -- angle of each bin
+            for i = 1, NB do A[i] = (i - 1) * STEP - 60 end
 
             local players = {}        -- [entindex] = see player_of (this round)
-            local mem = {}            -- [player key] = { d = desync stats, j = jitter stats, tables, hit_value, streaks }
-            local dglobal = {}        -- desync stats over all players
-            local fglobal = {}        -- defensive stats over all players
-            local jglobal = {}        -- jitter stats over all players
-            local gtable = {}         -- jitter angle tables over all players: the start of a new player
-            local pol_ema = 0         -- jitter: > 0 the "+" arms hit more, < 0 the "-" arms
+            local mem = {}            -- [player key] = { b = beliefs per situation, rates = side switch numbers, hit_value }
+            local global = {}         -- beliefs over all players per situation: where a new player starts
             local shots = {}          -- [shot id] = what the record the shot went at got
             local saved = {}          -- [entindex] = { ok, correction } "Correction active" before we touched it (= forced by us)
             local forced = {}         -- [entindex] = the value written to "Force body yaw value"
 
-            -- the rest of the script reads these (hit log, stats, multipoint, header, aa stealer)
             local function publish()
                 resolver.database, resolver.memory, resolver.shots, resolver.forced = players, mem, shots, forced
             end
@@ -808,18 +750,18 @@ LPH_NO_VIRTUALIZE(function ()
                 return item ~= nil and item:get() == true
             end
 
-            local function part(name)
-                local item = config.resolver and config.resolver.parts
-                local list = item and item:get()
-                if type(list) ~= "table" then return false end
-                for i = 1, #list do
-                    if list[i] == name then return true end
-                end
-                return false
+            -- a menu value, or the default when the item does not exist (tiers / tests without it)
+            local function option(name, default)
+                local item = config.resolver and config.resolver[name]
+                if item == nil then return default end
+                local ok, v = pcall(item.get, item)
+                if not ok or v == nil then return default end
+                return v
             end
 
             local function log(fmt, ...)
-                if not part("Log") then return end
+                local item = config.resolver and config.resolver.log
+                if not (item and item:get() == true) then return end
                 c_logger.log("%s", string.format(fmt, ...))
             end
 
@@ -863,48 +805,288 @@ LPH_NO_VIRTUALIZE(function ()
             local function memory_of(key)
                 local m = mem[key]
                 if not m then
-                    m = { d = {}, j = {}, f = {}, tables = {}, hit_value = {}, jmisses = 0 }
+                    m = { b = {}, hit_value = {} }
                     mem[key] = m
                 end
                 return m
             end
 
-            -- which side of the enemy's head is covered from our eye (1 / -1, 0 = no difference)
-            local function covered_side(idx, me)
-                local hx, hy, hz = entity.hitbox_position(idx, 0)
-                local ex, ey, ez = client.eye_position()
-                if not (finite(hx) and finite(hy) and finite(hz) and finite(ex) and finite(ey) and finite(ez)) then return 0 end
-                local dx, dy = ex - hx, ey - hy
-                local len = math.sqrt(dx * dx + dy * dy)
-                if len < 1 then return 0 end
-                local ux, uy = -dy / len, dx / len
-                local left, right = 0, 0
-                for _, off in ipairs({ 13, 26 }) do
-                    left = left + (tonumber((client.trace_line(me, hx + ux * off, hy + uy * off, hz, ex, ey, ez))) or 1)
-                    right = right + (tonumber((client.trace_line(me, hx - ux * off, hy - uy * off, hz, ex, ey, ez))) or 1)
-                end
-                if math.abs(left - right) < 0.3 then return 0 end
-                return left < right and 1 or -1
+            local function likelihood(a, v, hit)
+                local near = math.abs(a - v) <= TOL
+                if hit then return near and P_HIT or P_LUCK end
+                return near and (1 - P_HIT) or (1 - P_LUCK)
             end
 
-            -- the open side only changes when two traces in a row agree: an enemy at the edge of cover made it flap and with
-            -- equal scores the forced side flapped with it
-            local function update_open(p, idx, me)
-                local raw = -covered_side(idx, me)
-                if raw == p.open_raw then p.open_n = p.open_n + 1 else p.open_raw, p.open_n = raw, 1 end
-                if p.open_n >= 2 or not p.open_set then p.open, p.open_set = raw, true end
+            -- ── beliefs ────────────────────────────────────────────────────────────
+            -- where a belief starts: computed / mirrored trust the computation half (offset 0), the side model knows nothing
+            local function prior(f)
+                local n = f == 3 and NM or NB
+                local h = {}
+                for i = 1, n do h[i] = 1 / n end
+                if f ~= 3 then
+                    for i = 1, n do h[i] = h[i] * 0.5 end
+                    h[16] = h[16] + 0.5
+                end
+                return h
+            end
+
+            local function new_belief(from)
+                local b = { s = {} }
+                for f = 1, 3 do
+                    b[f] = {}
+                    local src = from and from[f] or prior(f)
+                    for i = 1, #src do b[f][i] = src[i] end
+                    b.s[f] = from and from.s[f] or 0
+                end
+                return b
+            end
+
+            local function belief_of(key, ctx)
+                local m = memory_of(key)
+                local b = m.b[ctx]
+                if not b then
+                    if not global[ctx] then global[ctx] = new_belief() end
+                    b = new_belief(global[ctx])
+                    m.b[ctx] = b
+                end
+                return b
+            end
+
+            local function weights(b)
+                local top = math.max(b.s[1], b.s[2], b.s[3])
+                local w, sum = {}, 0
+                for f = 1, 3 do
+                    w[f] = math.exp(b.s[f] - top)
+                    sum = sum + w[f]
+                end
+                for f = 1, 3 do w[f] = w[f] / sum end
+                return w
+            end
+
+            -- every angle the three models give a record whose computed body yaw is c, with its probability; pi = how likely
+            -- the target is on the positive side (side model)
+            local function components(b, c, pi)
+                local w = weights(b)
+                local ang, prob = {}, {}
+                for i = 1, NB do
+                    ang[#ang + 1], prob[#prob + 1] = clamp(c + A[i], -60, 60), w[1] * b[1][i]
+                    ang[#ang + 1], prob[#prob + 1] = clamp(-c + A[i], -60, 60), w[2] * b[2][i]
+                end
+                local M = b[3]
+                for j = 1, NM do
+                    local size = (j - 1) * STEP
+                    ang[#ang + 1], prob[#prob + 1] = size, w[3] * M[j] * pi
+                    ang[#ang + 1], prob[#prob + 1] = -size, w[3] * M[j] * (1 - pi)
+                end
+                return ang, prob
+            end
+
+            -- the angle most likely to hit (the most probability within TOL); ties: the one nearest to the computed body yaw
+            local function decide(b, c, pi)
+                local ang, prob = components(b, c, pi)
+                local best, best_p = 0, -1
+                local function try(a)
+                    a = clamp(a, -60, 60)
+                    local p = 0
+                    for i = 1, #ang do
+                        if math.abs(ang[i] - a) <= TOL then p = p + prob[i] end
+                    end
+                    p = p - math.abs(a - c) * 1e-6
+                    if p > best_p then best, best_p = a, p end
+                end
+                try(c)
+                try(-c)
+                for i = 1, NB do try(A[i]) end
+                return math.floor(best + 0.5), best_p
+            end
+
+            -- how likely a result is with the size model if the target was on the positive / negative side
+            local function side_likelihoods(b, v, hit)
+                local M = b[3]
+                local lp, lm = 0, 0
+                for j = 1, NM do
+                    local size = (j - 1) * STEP
+                    lp = lp + M[j] * likelihood(size, v, hit)
+                    lm = lm + M[j] * likelihood(-size, v, hit)
+                end
+                return lp, lm
+            end
+
+            -- one shot result: the record got v, its computed body yaw was c, the target was on the positive side with
+            -- probability pi. temper < 1 for the beliefs of everybody
+            local function update(b, c, v, hit, pi, temper)
+                for f = 1, 3 do
+                    local h = b[f]
+                    local pred, sum = 0, 0
+                    for i = 1, #h do
+                        local l
+                        if f == 3 then
+                            local size = (i - 1) * STEP
+                            l = pi * likelihood(size, v, hit) + (1 - pi) * likelihood(-size, v, hit)
+                        else
+                            l = likelihood(clamp((f == 1 and c or -c) + A[i], -60, 60), v, hit)
+                        end
+                        pred = pred + h[i] * l
+                        h[i] = h[i] * (temper == 1 and l or l ^ temper)
+                        sum = sum + h[i]
+                    end
+                    local p0 = prior(f)
+                    for i = 1, #h do h[i] = (1 - FORGET) * h[i] / sum + FORGET * p0[i] end
+                    b.s[f] = DECAY * b.s[f] + temper * math.log(math.max(pred, 1e-6))
+                end
+            end
+
+            -- ── side switches ──────────────────────────────────────────────────────
+            -- Some targets switch the side of their body yaw: after a hit, after a miss, on every shot, or at random moments.
+            -- z = what the resolver knows about the side in a situation: 1 = surely positive, -1 = surely negative, 0 = no idea.
+            -- Every shot the target sees can flip it, with the probability learned on this player after a hit / after a miss,
+            -- and some per tick. When the answer to a shot shows in the records (the target's ping, choke, own delay) is
+            -- learned too: every delay of DELAYS keeps its own z and numbers, and the one that predicted the results best is
+            -- used. A result is a measurement of the side on its record (Bayes), carried to now through the flips since.
+            local DELAYS = { 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34 }      -- ticks from our shot
+            local ND = #DELAYS
+
+            local function new_rates(from, w)
+                local F = {}
+                for k = 1, ND do
+                    local g = from and from[k]
+                    F[k] = { score = g and g.score * w or 0, nh = g and g.nh * w or 0, fh = g and g.fh * w or 0,
+                             nm = g and g.nm * w or 0, fm = g and g.fm * w or 0, ticks = g and g.ticks * w or 0, ft = g and g.ft * w or 0 }
+                end
+                return F
+            end
+            local grates = new_rates()
+
+            local function rates_of(key)
+                local m = memory_of(key)
+                if not m.rates then m.rates = new_rates(grates, 0.3) end
+                return m.rates
+            end
+
+            local function best_delay(F)
+                local best, bs = 1, -math.huge
+                for k = 1, ND do
+                    if F[k].score > bs then best, bs = k, F[k].score end
+                end
+                return best
+            end
+
+            local function q_of(R, kind, phit)
+                local qh, qm = (R.fh + 0.5) / (R.nh + 2.5), (R.fm + 0.5) / (R.nm + 2.5)
+                if kind == "hit" then return qh end
+                if kind == "miss" then return qm end
+                return phit * qh + (1 - phit) * qm
+            end
+
+            local function per_tick(R)
+                return (R.ft + 0.5) / (R.ticks + 3000)
+            end
+
+            local function z_of(p, ctx)
+                local z = p.z[ctx]
+                if not z then
+                    z = {}
+                    for k = 1, ND do z[k] = 0 end
+                    p.z[ctx] = z
+                end
+                return z
+            end
+
+            -- brings every z of the player to tick t: the time that passed, the shots whose answer is due
+            local function side_advance(p, t)
+                local F = rates_of(p.key)
+                local dt = p.z_t and math.max(t - p.z_t, 0) or 0
+                p.z_t = t
+                for k = 1, ND do
+                    local R = F[k]
+                    local keep = (1 - 2 * per_tick(R)) ^ dt
+                    for _, z in pairs(p.z) do z[k] = z[k] * keep end
+                    for i = 1, #p.events do
+                        local ev = p.events[i]
+                        if not ev.q[k] and ev.fire + DELAYS[k] <= t then
+                            local q = q_of(R, ev.kind, ev.phit)
+                            ev.q[k], ev.at[k] = q, ev.fire + DELAYS[k]
+                            for _, z in pairs(p.z) do z[k] = z[k] * (1 - 2 * q) end
+                        end
+                    end
+                end
+            end
+
+            -- the result of a shot is known: where its answer was taken with a guess, the guess is replaced (flips commute)
+            local function side_result(p, ev, kind)
+                ev.kind = kind
+                local F = rates_of(p.key)
+                for k = 1, ND do
+                    local old = ev.q[k]
+                    if old then
+                        local q = q_of(F[k], kind)
+                        local a = 1 - 2 * old
+                        if math.abs(a) > 0.05 then
+                            for _, z in pairs(p.z) do z[k] = clamp(z[k] * (1 - 2 * q) / a, -1, 1) end
+                        end
+                        ev.q[k] = q
+                    end
+                end
+            end
+
+            -- a shot result on the record of tick t in situation ctx: lp / lm = how likely it is if the target was on the
+            -- positive / negative side; zs = the z of every delay on that record
+            local function side_measure(p, ctx, t, zs, lp, lm)
+                local F = rates_of(p.key)
+                local z = z_of(p, ctx)
+                local last = p.obs[ctx]
+                -- the side this result shows on its own (not what was believed before): for counting the flips
+                local side = (lp >= 3 * lm and 1) or (lm >= 3 * lp and -1) or nil
+                for k = 1, ND do
+                    local R, G = F[k], grates[k]
+                    local pr = (1 + zs[k]) / 2
+                    local pred = math.max(pr * lp + (1 - pr) * lm, 1e-4)
+                    R.score = R.score * 0.97 + math.log(pred)
+                    G.score = G.score * 0.99 + 0.3 * math.log(pred)
+
+                    -- learn the flip rates: two sides in a row with the answer to one shot between them (a flip after a hit /
+                    -- after a miss), or with nothing between them (a flip per tick)
+                    if side and last and t > last.t then
+                        local only, n = nil, 0
+                        for i = 1, #p.events do
+                            local at = p.events[i].at[k]
+                            if at and at > last.t and at <= t then only, n = p.events[i], n + 1 end
+                        end
+                        local flip = side ~= last.side and 1 or 0
+                        if n == 1 and only.kind then
+                            local f = only.kind == "hit" and "h" or "m"
+                            R["n" .. f], R["f" .. f] = R["n" .. f] + 1, R["f" .. f] + flip
+                            G["n" .. f], G["f" .. f] = G["n" .. f] + 0.3, G["f" .. f] + 0.3 * flip
+                        elseif n == 0 then
+                            R.ticks, R.ft = R.ticks + (t - last.t), R.ft + flip
+                            G.ticks, G.ft = G.ticks + 0.3 * (t - last.t), G.ft + 0.3 * flip
+                        end
+                    end
+
+                    -- the measurement, carried from its record to now through the flips since
+                    local keep = (1 - 2 * per_tick(R)) ^ math.max((p.z_t or t) - t, 0)
+                    for i = 1, #p.events do
+                        local ev = p.events[i]
+                        if ev.at[k] and ev.at[k] > t then keep = keep * (1 - 2 * ev.q[k]) end
+                    end
+                    local q = (1 - keep) / 2
+                    local np, nm = (1 - q) * lp + q * lm, (1 - q) * lm + q * lp
+                    local cur = (1 + z[k]) / 2
+                    z[k] = clamp(2 * cur * np / math.max(cur * np + (1 - cur) * nm, 1e-9) - 1, -1, 1)
+                end
+                if side and (not last or t > last.t) then p.obs[ctx] = { t = t, side = side } end
             end
 
             -- ── feet model ─────────────────────────────────────────────────────────
             -- Standing, the feet turn to the lower body yaw target (100 deg/s); moving, they follow the eye yaw (30-50 deg/s).
             -- They are never further than the max body yaw away from the eye yaw. Eye yaw minus feet = body yaw of the record.
-            local function feet_update(p, eye, lby, st)
+            local function feet_update(p, eye, lby, t)
                 local moving = p.speed > 5 or p.stance == "air"
                 local target = moving and eye or lby
                 if target == nil then p.model = nil; return end
-                if p.feet == nil or p.feet_st == nil or st < p.feet_st then p.feet, p.feet_st = target, st end
-                local dt = clamp((st - p.feet_st) * globals.tickinterval(), 0, 0.25)
-                p.feet_st = st
+                if p.feet == nil or p.feet_t == nil or t < p.feet_t then p.feet, p.feet_t = target, t end
+                local dt = clamp((t - p.feet_t) * globals.tickinterval(), 0, 0.25)
+                p.feet_t = t
                 local rate = moving and (30 + 20 * clamp((p.speed - 70) / 65, 0, 1)) or 100
                 p.feet = approach(target, p.feet, rate * dt)
                 local d = normalize(eye - p.feet)
@@ -916,96 +1098,37 @@ LPH_NO_VIRTUALIZE(function ()
                 p.model = normalize(eye - p.feet)
             end
 
-            -- ── jitter analysis ────────────────────────────────────────────────────
-            -- the last n records, unwrapped around the newest one so -179 / 179 do not look like a 358 degree jump
-            local function window_of(r, n)
-                local newest = r[#r].rel
+            -- ── jitter: the eye yaw (relative to us) keeps switching between two sides ─────
+            local function jitter_of(p)
+                local r = p.records
+                local n = math.min(#r, WINDOW)
+                if n < 5 then p.jitter, p.side = false, 0; return end
+                local newest = r[#r]
                 local v, lo, hi = {}, math.huge, -math.huge
                 for i = 1, n do
-                    local x = newest + normalize(r[#r - n + i].rel - newest)
+                    local x = newest + normalize(r[#r - n + i] - newest)
                     v[i] = x
                     if x < lo then lo = x end
                     if x > hi then hi = x end
                 end
-                return v, lo, hi
-            end
-
-            -- sides in time order and the lengths of the runs on one side; a value near the middle (3 way jitter) belongs to
-            -- the run it is in. Returns the number of flips, the finished runs, the length of the running one, the newest side
-            -- and the sum / count of the offsets from the middle per side
-            local function runs_of(v, n, mid, dead)
-                local flips, runs, run, last = 0, {}, 0, 0
-                local sum, cnt = { [1] = 0, [-1] = 0 }, { [1] = 0, [-1] = 0 }
+                local spread, mid = hi - lo, (hi + lo) / 2
+                local flips, last = 0, 0
                 for i = 1, n do
                     local d = v[i] - mid
-                    local s = d > dead and 1 or (d < -dead and -1 or 0)
-                    if s ~= 0 and last ~= 0 and s ~= last then
-                        flips = flips + 1
-                        runs[#runs + 1] = run
-                        run = 0
-                    end
-                    if s ~= 0 then
-                        last = s
-                        sum[s], cnt[s] = sum[s] + d, cnt[s] + 1
-                    end
-                    run = run + 1
+                    local s = d > spread * 0.15 and 1 or (d < -spread * 0.15 and -1 or 0)
+                    if s ~= 0 and last ~= 0 and s ~= last then flips = flips + 1 end
+                    if s ~= 0 then last = s end
                 end
-                return flips, runs, run, last, sum, cnt
-            end
-
-            local function analyze(p)
-                local r = p.records
-                local n = math.min(#r, WINDOW)
-                if n < 5 then p.jitter, p.kind = false, "static"; return end
-
-                -- is it jittering right now: the short window (it reacts quickly)
-                local v, lo, hi = window_of(r, n)
-                local spread, mid = hi - lo, (hi + lo) / 2
-                local flips, _, _, last, sum, cnt = runs_of(v, n, mid, spread * 0.15)
-
-                -- how regular is it: the long window, where a slow pattern (a side held for 5+ records) shows enough runs.
-                -- The first run is cut by the start of the window, it does not count.
-                local regular, period = false, 1
-                local nl = math.min(#r, RECORDS)
-                local vl, llo, lhi = window_of(r, nl)
-                local _, runs, lrun = runs_of(vl, nl, (llo + lhi) / 2, (lhi - llo) * 0.15)
-                if #runs >= 3 then
-                    local rmin, rmax, total = math.huge, 0, 0
-                    for i = 2, #runs do
-                        rmin, rmax, total = math.min(rmin, runs[i]), math.max(rmax, runs[i]), total + runs[i]
-                    end
-                    period = math.max(1, math.floor(total / (#runs - 1) + 0.5))
-                    regular = rmax - rmin <= (rmax >= 4 and 1 or 0)
-                end
-
-                -- 3+ separate values: skitter / multi way
-                local sorted = {}
-                for i = 1, n do sorted[i] = v[i] end
-                table.sort(sorted)
-                local gap, clusters = math.max(8, spread * 0.22), 1
-                for i = 2, n do
-                    if sorted[i] - sorted[i - 1] > gap then clusters = clusters + 1 end
-                end
-
-                p.jitter = spread >= (p.jitter and EXIT or ENTER) and flips >= 2
-                p.kind = p.jitter and (clusters >= 3 and "multi" or (regular and "regular" or "random")) or "static"
-                p.side = last                                                  -- side of the newest record
-                p.next = (regular and lrun >= period) and -last or last       -- and of the one after it
-                p.offset = v[n] - mid                                          -- where the newest record sits from the centre
-                -- where the next record is expected to sit (the average of the records on that side), and how far from this one
-                local nx = p.next
-                p.next_offset = (nx ~= 0 and cnt[nx] > 0) and sum[nx] / cnt[nx] or p.offset
-                p.next_delta = nx == last and 0 or p.next_offset - p.offset
+                -- "Jitter sensitivity": the yaw spread that makes a target a jitterer (it stays one down to 2/3 of it)
+                local enter = clamp(tonumber(option("jitter", 30)) or 30, 5, 90)
+                p.jitter = spread >= (p.jitter and enter * 2 / 3 or enter) and flips >= 2
+                p.side = p.jitter and last or 0
             end
 
             -- ── players and records ────────────────────────────────────────────────
             local function new_player(key)
-                return {
-                    key = key, records = {}, hist = {}, jitter = false, kind = "static", side = 0, next = 0, offset = 0,
-                    next_offset = 0, next_delta = 0, speed = 0, maxd = MAX_DESYNC, maxd_f = MAX_DESYNC, stance = "stand", choke = 0,
-                    open = 0, open_raw = 0, open_n = 0, open_set = false, fs_tick = -100, consecutive_misses = 0, key_tick = -1000,
-                    obs = {}, reacts = {},
-                }
+                return { key = key, records = {}, hist = {}, events = {}, z = {}, obs = {}, jitter = false, side = 0, speed = 0,
+                         maxd = MAX_DESYNC, stance = "stand", consecutive_misses = 0, key_tick = -1000 }
             end
 
             local function player_of(idx, tick)
@@ -1023,672 +1146,62 @@ LPH_NO_VIRTUALIZE(function ()
                 return p
             end
 
-            local function drop_records(p)
-                p.records, p.hist, p.max_st, p.feet, p.feet_st, p.jitter, p.kind = {}, {}, nil, nil, nil, false, "static"
-                p.obs, p.reacts = {}, {}
-            end
-
-            -- reads a new network update of the enemy; true when there is a new record to resolve
+            -- reads a new network update of the enemy: "record", "defensive" (tickbase shift) or nil (nothing new)
             local function ingest(idx, p, me)
                 local sim = entity.get_prop(idx, "m_flSimulationTime")
-                if not finite(sim) or sim <= 0 then return false end
+                if not finite(sim) or sim <= 0 then return nil end
                 local st = math.floor(sim / globals.tickinterval() + 0.5)
-                if p.last_st == st then return false end
+                if p.last_st == st then return nil end
                 p.last_st = st
+                -- a jump back by more than a tickbase shift (map change, reconnect) or a long gap: start over
+                if p.max_st and (st < p.max_st - 32 or st - p.max_st > GAP_RESET) then
+                    p.records, p.hist, p.max_st, p.feet, p.feet_t, p.jitter, p.side = {}, {}, nil, nil, nil, false, 0
+                end
+                local _, eye = entity.get_prop(idx, "m_angEyeAngles")
+                if not finite(eye) then return nil end
+                local lby = entity.get_prop(idx, "m_flLowerBodyYawTarget")
+                lby = finite(lby) and lby or nil
+                -- the feet logic's clock is the tick the update arrived: a shifted update's sim time says nothing about how
+                -- long the server animated
+                local now = globals.tickcount()
 
-                -- a jump back by more than a tickbase shift (map change, reconnect) or a long gap (dormant, lag spike): start over
-                if p.max_st and (st < p.max_st - 32 or st - p.max_st > GAP_RESET) then drop_records(p) end
                 -- sim time that does not move forward: a tickbase shift (defensive). Its angles say nothing about the real AA
-                -- (they stay out of the jitter analysis), but the server animates them: the feet model runs on them, and the
-                -- record gets its own angle (def_resolve)
+                -- (they stay out of the jitter detection), but the server animates them
                 if p.max_st and st <= p.max_st then
-                    local _, deye = entity.get_prop(idx, "m_angEyeAngles")
-                    if not finite(deye) then return false end
-                    local dlby = entity.get_prop(idx, "m_flLowerBodyYawTarget")
-                    feet_update(p, deye, finite(dlby) and dlby or nil, globals.tickcount())
-                    p.def_st = st
-                    return "def"
+                    feet_update(p, eye, lby, now)
+                    p.st = st
+                    return "defensive"
                 end
 
-                local _, eye = entity.get_prop(idx, "m_angEyeAngles")
                 local ox, oy = entity.get_prop(idx, "m_vecOrigin")
                 local mx, my = entity.get_prop(me, "m_vecOrigin")
-                if not (finite(eye) and finite(ox) and finite(oy) and finite(mx) and finite(my)) then return false end
-
-                p.choke = p.max_st and clamp(st - p.max_st - 1, 0, 64) or 0
-                p.max_st = st
-
+                if not (finite(ox) and finite(oy) and finite(mx) and finite(my)) then return nil end
+                p.max_st, p.st = st, st
                 local vx, vy = entity.get_prop(idx, "m_vecVelocity")
                 p.speed = (finite(vx) and finite(vy)) and clamp(math.sqrt(vx * vx + vy * vy), 0, 320) or 0
                 local flags = entity.get_prop(idx, "m_fFlags")
                 if not finite(flags) then flags = 1 end
                 p.stance = bit.band(flags, 1) == 0 and "air" or (p.speed > 5 and "move" or "stand")
-                -- the usable desync gets smaller when the target runs
-                p.maxd_f = MAX_DESYNC * (1 - 0.35 * clamp(p.speed / 250, 0, 1))
-                p.maxd = math.floor(p.maxd_f + 0.5)
+                -- the server's max desync gets smaller when the player runs, and more when it runs crouched
+                local ratio = 1 - 0.35 * clamp(p.speed / 250, 0, 1)
+                local duck = entity.get_prop(idx, "m_flDuckAmount")
+                if finite(duck) and duck > 0 then
+                    ratio = ratio + clamp(duck, 0, 1) * clamp(p.speed / 85, 0, 1) * (0.5 - ratio)
+                end
+                p.maxd = MAX_DESYNC * ratio
+                feet_update(p, eye, lby, now)
 
-                local lby = entity.get_prop(idx, "m_flLowerBodyYawTarget")
-                p.lby_delta = finite(lby) and normalize(lby - eye) or nil
-                -- the feet model's clock is the arrival tick: a shifted update's sim time says nothing about how long the server
-                -- animated (for the normal updates the two are the same)
-                feet_update(p, eye, finite(lby) and lby or nil, globals.tickcount())
-
-                local rel = normalize(eye - math.deg(math.atan2(my - oy, mx - ox)) - 180)
-                p.records[#p.records + 1] = { rel = rel, st = st }
-                while #p.records > RECORDS do table.remove(p.records, 1) end
-                analyze(p)
-                return true
+                p.records[#p.records + 1] = normalize(eye - math.deg(math.atan2(my - oy, mx - ox)) - 180)
+                while #p.records > WINDOW do table.remove(p.records, 1) end
+                jitter_of(p)
+                return "record"
             end
 
-            -- ── learning ───────────────────────────────────────────────────────────
-            local function stats_of(store, ctx, n)
-                local set = store[ctx]
-                if not set then
-                    set = {}
-                    for i = 1, n do set[i] = { hit = 0, miss = 0 } end
-                    store[ctx] = set
-                end
-                return set
-            end
-
-            -- how well an arm did: this player's own shots, backed by what worked on everybody else
-            local function score(own, all, i)
-                local a, g = own[i], all[i]
-                return (a.hit + 0.3 * g.hit + 1) / (a.hit + a.miss + 0.3 * (g.hit + g.miss) + 2)
-            end
-
-            -- one shot result for an arm. The same arm missing twice in a row: what it did before does not count any more
-            -- (not for the side model: it reads every miss itself, a miss for another reason must not throw it out)
-            local function learn(store, global, streak_field, key, ctx, arm, n, hit, weight, keep_streak)
-                local own, all = stats_of(store, ctx, n), stats_of(global, ctx, n)
-                for i = 1, n do
-                    own[i].hit, own[i].miss = own[i].hit * 0.9, own[i].miss * 0.9
-                    all[i].hit, all[i].miss = all[i].hit * 0.97, all[i].miss * 0.97
-                end
-                local field = hit and "hit" or "miss"
-                own[arm][field] = own[arm][field] + weight
-                all[arm][field] = all[arm][field] + weight * 0.5
-
-                local m = memory_of(key)
-                if hit then
-                    m[streak_field] = nil
-                else
-                    local st = m[streak_field]
-                    if st and st.ctx == ctx and st.arm == arm then st.n = st.n + 1 else st = { ctx = ctx, arm = arm, n = 1 } end
-                    m[streak_field] = st
-                    if st.n >= 2 and not keep_streak then own[arm].hit = own[arm].hit * 0.3 end
-                end
-            end
-
-            local function desync_learn(key, stance, arm, hit, weight)
-                local m = memory_of(key)
-                learn(m.d, dglobal, "dstreak", key, stance, arm, #DES_ARMS, hit, weight, DES_ARMS[arm].src == "pred")
-            end
-
-            local function jitter_learn(key, ctx, arm, hit, weight)
-                local m = memory_of(key)
-                learn(m.j, jglobal, "jstreak", key, ctx, arm, #JIT_ARMS, hit, weight)
-                -- the sign the player list wants: learned from every arm that has a sign
-                local pol = JIT_ARMS[arm].pol
-                if pol then
-                    if hit then pol_ema = pol_ema * 0.9 + pol * 0.1 else pol_ema = pol_ema * 0.97 - pol * 0.02 end
-                end
-                m.jmisses = hit and 0 or (m.jmisses or 0) + 1
-            end
-
-            -- ── jitter angle tables ────────────────────────────────────────────────
-            -- For one side of the jitter: how likely the body yaw sits at each angle. A hit at an angle makes the angles within
-            -- TOL of it likely and the rest unlikely, a miss makes the angles within TOL of it unlikely. Some of the old belief
-            -- is always given back, so a target that changes can be followed.
-            local function angle_of(i)
-                return -60 + (i - 1) * STEP
-            end
-
-            local function table_of(store, ctx, side, from)
-                local c = store[ctx]
-                if not c then c = {}; store[ctx] = c end
-                local t = c[side]
-                if not t then
-                    t = { n = 0 }
-                    for i = 1, BINS do t[i] = from and from[i] or 1 / BINS end
-                    c[side] = t
-                end
-                return t
-            end
-
-            local function table_update(t, angle, hit, forget)
-                local total = 0
-                for i = 1, BINS do
-                    local near = math.abs(angle_of(i) - angle) <= TOL
-                    if hit then t[i] = t[i] * (near and 1 or 0.08) else t[i] = t[i] * (near and 0.15 or 1) end
-                    total = total + t[i]
-                end
-                if total <= 0 then
-                    for i = 1, BINS do t[i] = 1 / BINS end
-                    total = 1
-                end
-                for i = 1, BINS do t[i] = (1 - forget) * t[i] / total + forget / BINS end
-                t.n = t.n + 1
-            end
-
-            -- the most likely angle (the middle of the likely ones) and how sure that is (0 .. 1)
-            local function table_best(t)
-                local peak = 0
-                for i = 1, BINS do
-                    if t[i] > peak then peak = t[i] end
-                end
-                local top                         -- among equally likely angles the one closest to zero: smaller is safer
-                for i = 1, BINS do
-                    if t[i] >= peak * 0.97 and (top == nil or math.abs(angle_of(i)) < math.abs(angle_of(top))) then top = i end
-                end
-                local mass, wsum, w = 0, 0, 0
-                for i = 1, BINS do
-                    if math.abs(i - top) * STEP <= 8 then
-                        mass, wsum, w = mass + t[i], wsum + t[i] * angle_of(i), w + t[i]
-                    end
-                end
-                if w <= 0 then return angle_of(top), 0 end
-                return wsum / w, mass
-            end
-
-            -- a shot result at an angle: tells the table of the side that record was on (head hits only: a body hit says
-            -- nothing about the head angle)
-            local function table_learn(key, ctx, side, angle, hit)
-                if angle == nil or side == nil or side == 0 then return end
-                local own = table_of(memory_of(key).tables, ctx, side, gtable[ctx] and gtable[ctx][side])
-                table_update(own, angle, hit, 0.06)
-                table_update(table_of(gtable, ctx, side), angle, hit, 0.15)
-            end
-
-            -- ── resolving ──────────────────────────────────────────────────────────
-            -- side tracking (desync part). Two kinds of events, both on the client tick scale:
-            --   * observations: a shot result that shows which side the body yaw was on, at the time the record it went at
-            --     arrived (a head hit: that side; a full angle that missed: the other side). Backtracked shots show old times
-            --   * reactions: every shot the target noticed (hit / miss, any reason). It shows in the records from one round
-            --     trip after firing + the target's own delay (it hears about the shot through the server, its new angles come
-            --     back with its ping and choke). That delay is calibrated per player: the one that explains the observed sides best
-            -- Two observations with exactly one reaction between them tell whether the target switches sides after a hit /
-            -- after a miss (anti-bruteforce AAs: on hit, on miss, on every shot). The side now = the last observation, switched
-            -- once for every reaction since then that usually makes it switch. Plain random switches: the last observation.
-            local DELAYS = { 0, 1, 2, 3, 4, 6, 8, 10, 12, 16 }
-
-            local function side_stats(m)
-                local sd = m.sides
-                if not sd then
-                    sd = { hit = { s = 0, n = 0 }, miss = { s = 0, n = 0 }, own = { s = 0, t = 0 }, delay = REACT_DELAY }
-                    m.sides = sd
-                end
-                return sd
-            end
-
-            local function rate_of(c, res)
-                local prior = res == "hit" and 0.15 or 0.25        -- most targets do not switch on their own
-                return (c.s + prior * 2) / (c.n + 2)
-            end
-
-            local function side_reaction(p, s, res)
-                if not s.fire then return end
-                local r = p.reacts
-                r[#r + 1] = { tb = s.fire + s.rtt, res = res }
-                while #r > 32 do table.remove(r, 1) end
-            end
-
-            local function reactions_between(p, t0, t1, d)
-                local n, last = 0, nil
-                for _, r in ipairs(p.reacts) do
-                    local t = r.tb + d
-                    if t > t0 and t <= t1 then n, last = n + 1, r end
-                end
-                return n, last
-            end
-
-            -- switch counts from the observation window of this round with reaction delay d
-            local function window_counts(p, d)
-                local c = { hit = { s = 0, n = 0 }, miss = { s = 0, n = 0 } }
-                local list = p.obs
-                for i = 2, #list do
-                    local n, r = reactions_between(p, list[i - 1].t, list[i].t, d)
-                    if n == 1 then
-                        local x = c[r.res]
-                        x.s, x.n = x.s + (list[i - 1].side ~= list[i].side and 1 or 0), x.n + 1
-                    end
-                end
-                return c
-            end
-
-            -- how many consecutive observations delay d explains, with the switch rates it implies
-            local function delay_score(p, d)
-                local c = window_counts(p, d)
-                local flips = { hit = rate_of(c.hit, "hit") > 0.5, miss = rate_of(c.miss, "miss") > 0.5 }
-                local list, n = p.obs, 0
-                for i = 2, #list do
-                    local side = list[i - 1].side
-                    for _, r in ipairs(p.reacts) do
-                        local t = r.tb + d
-                        if t > list[i - 1].t and t <= list[i].t and flips[r.res] then side = -side end
-                    end
-                    if side == list[i].side then n = n + 1 end
-                end
-                return n, c
-            end
-
-            local function side_observe(p, s, hit, head)
-                if s.value == nil or not s.maxd or not s.rec_at then return end
-                local known
-                if hit and head then
-                    if math.abs(s.value) >= 12 then known = s.value > 0 and 1 or -1 end
-                elseif not hit and math.abs(s.value) >= 0.75 * s.maxd then
-                    known = s.value > 0 and -1 or 1
-                end
-                if known == nil then return end
-                local sd = side_stats(memory_of(p.key))
-                local list = p.obs
-                local o = { t = s.rec_at, side = known, hit = hit }
-                local at = #list + 1
-                while at > 1 and list[at - 1].t > o.t do at = at - 1 end
-                table.insert(list, at, o)
-                while #list > 12 do table.remove(list, 1); at = at - 1 end
-                -- what happened between this observation and its neighbours: one reaction in between = one lesson
-                for _, pair in ipairs({ { list[at - 1], o }, { o, list[at + 1] } }) do
-                    local a, b = pair[1], pair[2]
-                    if a and b then
-                        local n, r = reactions_between(p, a.t, b.t, sd.delay)
-                        if n == 1 then
-                            local c = sd[r.res]
-                            c.s, c.n = c.s * 0.9 + (a.side ~= b.side and 1 or 0), c.n * 0.9 + 1
-                        elseif n == 0 and b.t > a.t then
-                            -- no shot in between: a switch is the target's own (random side AAs)
-                            local c = sd.own
-                            c.s, c.t = c.s * 0.95 + (a.side ~= b.side and 1 or 0), c.t * 0.95 + (b.t - a.t)
-                        end
-                    end
-                end
-                -- is another reaction delay a better explanation of this round's observations? then switch to it and relearn
-                if #list >= 4 then
-                    local best, best_n, best_c = sd.delay, delay_score(p, sd.delay), nil
-                    for _, d in ipairs(DELAYS) do
-                        local n, c = delay_score(p, d)
-                        if n > best_n then best, best_n, best_c = d, n, c end
-                    end
-                    if best_c then
-                        sd.delay, sd.hit, sd.miss = best, best_c.hit, best_c.miss
-                    end
-                end
-            end
-
-            -- the side the target is expected to be on now and how sure that is (0 .. 1); nil when nothing is known.
-            -- A filter over this round's events in time order: P(side = +1) moves towards 0.5 with the target's own switch
-            -- rate, a reaction switches it with its learned probability, an observation updates it (a head hit is near certain,
-            -- a miss can also be a miss for another reason: MISS_NOISE)
-            local function mix(b, q)
-                return b * (1 - q) + (1 - b) * q
-            end
-
-            local function side_predict(p, m, now)
-                local obs = p.obs
-                if #obs == 0 then return nil, 0 end
-                local sd = side_stats(m)
-                local own = sd.own
-                local lam = clamp((own.s + 0.25) / (own.t + 400), 0, 0.25)     -- own switches per tick (prior: one per ~1600 ticks)
-                local ev = {}
-                for _, o in ipairs(obs) do ev[#ev + 1] = { t = o.t, o = o } end
-                local first = obs[1].t
-                for _, r in ipairs(p.reacts) do
-                    local t = r.tb + sd.delay
-                    if t > first and t <= now then ev[#ev + 1] = { t = t, r = r } end
-                end
-                -- a reaction at the tick a record arrived is already in that record
-                table.sort(ev, function(x, y)
-                    if x.t ~= y.t then return x.t < y.t end
-                    return x.r ~= nil and y.r == nil
-                end)
-                local b, t0 = 0.5, first
-                for _, e in ipairs(ev) do
-                    if e.t > t0 then b = mix(b, 0.5 * (1 - (1 - 2 * lam) ^ (e.t - t0))) end
-                    t0 = e.t
-                    if e.r then
-                        b = mix(b, rate_of(sd[e.r.res], e.r.res))
-                    else
-                        local o = e.o
-                        local other = o.hit and 0.03 or MISS_NOISE         -- likelihood of this observation on the other side
-                        local lp = o.side == 1 and 1 or other
-                        local lm = o.side == -1 and 1 or other
-                        local z = b * lp + (1 - b) * lm
-                        if z > 0 then b = b * lp / z end
-                    end
-                end
-                if now > t0 then b = mix(b, 0.5 * (1 - (1 - 2 * lam) ^ (now - t0))) end
-                return b >= 0.5 and 1 or -1, math.abs(2 * b - 1)
-            end
-
-            -- ── neural network ─────────────────────────────────────────────────────
-            -- A small neural network: 20 inputs -> 16 tanh -> 15 angle bins (-56 .. 56, softmax). One network for all players,
-            -- kept between sessions (database, NN_KEY). The inputs are what the two parts see about the record (jitter pattern
-            -- and side, offset, feet model, side model, lby, speed, choke, open side, the angle that last hit, the learned angle
-            -- table ...), so it can learn which of them to believe in which situation. It learns from every shot result at a
-            -- record it saw: a head hit at an angle = the body yaw is there, a resolver miss = it is not there (+ a few replayed
-            -- older results). Its call is one more arm ("neural net") in both parts: the per-player learning still decides
-            -- whether to trust it, and it is only offered after NN_MIN results.
-            local NN_IN, NN_HID, NN_OUT = 20, 16, 15
-            local NN_KEY, NN_VERSION = "specter_nn_resolver", 1
-            local NN_MIN = 30             -- shot results the network has learned from before it is offered as an arm
-            local NN_LR, NN_L2 = 0.04, 0.0005
-            local NN_BUFFER, NN_REPLAY = 192, 3
-
-            local function nn_center(k)
-                return -56 + (k - 1) * 8
-            end
-
-            local nn
-
-            local function nn_new()
-                local net = { version = NN_VERSION, w1 = {}, b1 = {}, w2 = {}, b2 = {}, n = 0, agree = 0.5, buffer = {}, seed = 12345 }
-                local seed = 987654321
-                local function rnd()
-                    seed = (seed * 1103515245 + 12345) % 2147483648
-                    return seed / 2147483648 - 0.5
-                end
-                for i = 1, NN_IN * NN_HID do net.w1[i] = rnd() * 0.6 end
-                for i = 1, NN_HID do net.b1[i] = 0 end
-                for i = 1, NN_HID * NN_OUT do net.w2[i] = rnd() * 0.2 end
-                for i = 1, NN_OUT do net.b2[i] = 0 end
-                return net
-            end
-
-            local function nn_valid(net)
-                if type(net) ~= "table" or net.version ~= NN_VERSION then return false end
-                if type(net.w1) ~= "table" or type(net.w2) ~= "table" or type(net.b1) ~= "table" or type(net.b2) ~= "table" then return false end
-                for i = 1, NN_IN * NN_HID do if not finite(net.w1[i]) then return false end end
-                for i = 1, NN_HID * NN_OUT do if not finite(net.w2[i]) then return false end end
-                for i = 1, NN_HID do if not finite(net.b1[i]) then return false end end
-                for i = 1, NN_OUT do if not finite(net.b2[i]) then return false end end
-                return finite(net.n) and finite(net.agree)
-            end
-
-            do
-                local ok, saved = pcall(database.read, NN_KEY)
-                nn = (ok and nn_valid(saved)) and saved or nn_new()
-                -- only well-formed replay entries survive a load
-                local buffer = {}
-                for _, e in ipairs(type(nn.buffer) == "table" and nn.buffer or {}) do
-                    local good = type(e) == "table" and type(e.x) == "table" and finite(e.v) and type(e.hit) == "boolean"
-                    if good then
-                        for i = 1, NN_IN do
-                            if not finite(e.x[i]) then good = false; break end
-                        end
-                    end
-                    if good then buffer[#buffer + 1] = e end
-                end
-                nn.buffer = buffer
-                if not finite(nn.seed) then nn.seed = 12345 end
-            end
-            local nn_dirty = false
-
-            local function nn_save()
-                if not nn_dirty then return end
-                nn_dirty = false
-                pcall(database.write, NN_KEY, nn)
-            end
-
-            local function nn_forward(x)
-                local h = {}
-                for j = 1, NN_HID do
-                    local sum, base = nn.b1[j], (j - 1) * NN_IN
-                    for i = 1, NN_IN do sum = sum + nn.w1[base + i] * x[i] end
-                    h[j] = math.tanh(sum)
-                end
-                local z, zmax = {}, -math.huge
-                for k = 1, NN_OUT do
-                    local sum, base = nn.b2[k], (k - 1) * NN_HID
-                    for j = 1, NN_HID do sum = sum + nn.w2[base + j] * h[j] end
-                    z[k] = sum
-                    if sum > zmax then zmax = sum end
-                end
-                local total = 0
-                for k = 1, NN_OUT do
-                    z[k] = math.exp(z[k] - zmax)
-                    total = total + z[k]
-                end
-                for k = 1, NN_OUT do z[k] = z[k] / total end
-                return z, h
-            end
-
-            -- the network's angle for a record (nil while it has not learned enough)
-            local function nn_predict(x, maxd)
-                if nn.n < NN_MIN then return nil end
-                local P = nn_forward(x)
-                local best = 1
-                for k = 2, NN_OUT do
-                    if P[k] > P[best] then best = k end
-                end
-                return math.floor(clamp(nn_center(best), -maxd, maxd) + 0.5)
-            end
-
-            -- one gradient step. hit: the body yaw was within TOL of v (cross entropy on those bins); miss: it was not
-            local function nn_step(x, v, hit, lr)
-                local P, h = nn_forward(x)
-                local near, S = {}, 0
-                for k = 1, NN_OUT do
-                    near[k] = math.abs(nn_center(k) - v) <= TOL
-                    if near[k] then S = S + P[k] end
-                end
-                local g = {}
-                if hit then
-                    S = math.max(S, 1e-9)
-                    for k = 1, NN_OUT do g[k] = P[k] - (near[k] and P[k] / S or 0) end
-                else
-                    local d = math.max(1 - S, 1e-6)
-                    for k = 1, NN_OUT do g[k] = P[k] * ((near[k] and 1 or 0) - S) / d end
-                end
-                local gh = {}
-                for j = 1, NN_HID do gh[j] = 0 end
-                for k = 1, NN_OUT do
-                    local gk = clamp(g[k], -1, 1) * lr
-                    local base = (k - 1) * NN_HID
-                    for j = 1, NN_HID do
-                        local w = nn.w2[base + j]
-                        gh[j] = gh[j] + w * gk
-                        nn.w2[base + j] = w * (1 - lr * NN_L2) - gk * h[j]
-                    end
-                    nn.b2[k] = nn.b2[k] - gk
-                end
-                for j = 1, NN_HID do
-                    local gj = gh[j] * (1 - h[j] * h[j])
-                    local base = (j - 1) * NN_IN
-                    for i = 1, NN_IN do
-                        nn.w1[base + i] = nn.w1[base + i] * (1 - lr * NN_L2) - gj * x[i]
-                    end
-                    nn.b1[j] = nn.b1[j] - gj
-                end
-            end
-
-            -- a shot result at a record the network saw: learn from it and from a few older ones
-            local function nn_learn(s, hit)
-                if not s.x or s.value == nil then return end
-                if hit and s.nnv ~= nil then
-                    -- how often the network's own call was where the head really was
-                    nn.agree = nn.agree * 0.95 + (math.abs(s.nnv - s.value) <= TOL and 0.05 or 0)
-                end
-                nn_step(s.x, s.value, hit, hit and NN_LR or NN_LR * 0.5)
-                local buf = nn.buffer
-                buf[#buf + 1] = { x = s.x, v = s.value, hit = hit }
-                while #buf > NN_BUFFER do table.remove(buf, 1) end
-                for _ = 1, math.min(NN_REPLAY, #buf - 1) do
-                    nn.seed = (nn.seed * 1103515245 + 12345) % 2147483648
-                    local e = buf[1 + math.floor(nn.seed / 2147483648 * (#buf - 1))]
-                    nn_step(e.x, e.v, e.hit, (e.hit and NN_LR or NN_LR * 0.5) * 0.5)
-                end
-                nn.n = nn.n + 1
-                nn_dirty = true
-            end
-
-            -- the inputs for a record: what both parts see about it
-            local function nn_features(p, m, pred_side, pred_conf)
-                local jit = p.jitter and 1 or 0
-                local zone = p.model ~= nil and math.abs(p.model) < 4
-                local ctx = zone and (p.stance .. "|z") or p.stance
-                local t = p.jitter and m.tables[ctx] and m.tables[ctx][p.side]
-                local hv = m.hit_value[p.stance]
-                local x = {
-                    jit,
-                    (p.jitter and p.kind == "regular") and 1 or 0,
-                    (p.jitter and p.kind == "random") and 1 or 0,
-                    (p.jitter and p.kind == "multi") and 1 or 0,
-                    jit * (p.side or 0),
-                    jit * (p.next or 0),
-                    clamp((p.offset or 0) / 60, -1, 1),
-                    p.model and clamp(p.model / 60, -1, 1) or 0,
-                    p.model and 1 or 0,
-                    clamp(p.speed / 250, 0, 1.3),
-                    p.stance == "air" and 1 or 0,
-                    clamp(p.choke / 14, 0, 1),
-                    p.open or 0,
-                    pred_side and pred_side * pred_conf or 0,
-                    hv and clamp(hv / 60, -1, 1) or 0,
-                    p.lby_delta and clamp(p.lby_delta / 180, -1, 1) or 0,
-                    p.maxd / MAX_DESYNC,
-                    clamp(pol_ema, -1, 1),
-                    (t and t.n >= 1) and clamp(table_best(t) / 60, -1, 1) or 0,
-                    zone and 1 or 0,
-                }
-                return x
-            end
-
-            -- how much the arms trust the network: by how often its call was where the head really was
-            local function nn_bias()
-                return 0.30 * (nn.agree - 0.5)
-            end
-
-            -- shot results learned from, how often its call was on the head (for the log / tests)
-            resolver.nn_info = function()
-                return nn.n, nn.agree
-            end
-
-            -- desync part: the arm with the best score for this stance; returns the value and the arm
-            local function desync_resolve(p)
-                local m = memory_of(p.key)
-                -- the feet model puts the feet on the eye yaw (no desync right now, e.g. after a defensive flick or an lby
-                -- realign): its own situation where zero is the first guess, learned apart (like the jitter part's zone)
-                local zone = p.model ~= nil and math.abs(p.model) < 4
-                local ctx = zone and (p.stance .. "|z") or p.stance
-                local own, all = stats_of(m.d, ctx, #DES_ARMS), stats_of(dglobal, ctx, #DES_ARMS)
-                local best, best_score, best_value = 1, -math.huge, 0
-                for i, a in ipairs(DES_ARMS) do
-                    local ok, value, bias = true, nil, a.bias
-                    if a.src == "feet" then
-                        ok = p.model ~= nil and math.abs(p.model) >= 4
-                        if ok then value = a.pol * p.model end
-                    elseif a.src == "pred" then
-                        local side, conf = p.pred_side, p.pred_conf
-                        ok = side ~= nil
-                        if ok then
-                            value = side * p.maxd_f
-                            bias = bias + PRED_GAIN * conf
-                        end
-                    elseif a.src == "nn" then
-                        ok = p.nn_value ~= nil
-                        value = p.nn_value
-                        bias = bias + nn_bias()
-                    else
-                        value = a.side * a.frac * p.maxd_f
-                        if a.side ~= 0 and a.side == p.open then bias = bias + 0.06 end
-                        if a.side == 0 and zone then bias = bias + 0.40 end
-                    end
-                    if ok then
-                        local s = score(own, all, i) + bias
-                        if s > best_score then best, best_score, best_value = i, s, value end
-                    end
-                end
-                return math.floor(clamp(best_value, -60, 60) + 0.5), best, ctx
-            end
-
-            -- defensive record: hold / feet model on this record / a full side / zero, learned in its own context
-            local function def_resolve(p)
-                local m = memory_of(p.key)
-                m.f = m.f or {}
-                local ctx = "def|" .. p.stance
-                local own, all = stats_of(m.f, ctx, #DEF_ARMS), stats_of(fglobal, ctx, #DEF_ARMS)
-                local best, best_score, best_value = 1, -math.huge, 0
-                for i, a in ipairs(DEF_ARMS) do
-                    local ok, value = true, nil
-                    if a.src == "hold" then
-                        ok = p.hold_value ~= nil
-                        value = p.hold_value
-                    elseif a.src == "feet" then
-                        ok = p.model ~= nil and math.abs(p.model) >= 4
-                        if ok then value = a.pol * p.model end
-                    elseif a.src == "zero" then
-                        value = 0
-                    else
-                        value = a.side * p.maxd_f
-                    end
-                    if ok then
-                        local sc = score(own, all, i) + a.bias
-                        if sc > best_score then best, best_score, best_value = i, sc, value end
-                    end
-                end
-                return math.floor(clamp(best_value, -60, 60) + 0.5), best, ctx
-            end
-
-            -- jitter part: the angle for the newest record. Returns the value (nil = native resolver), the arm and the context
-            local function jitter_resolve(p)
-                local m = memory_of(p.key)
-                -- the feet model puts the feet on the eye yaw (no desync right now): its own situation, learned apart from the rest
-                local zone = p.model ~= nil and math.abs(p.model) < 4
-                local ctx = zone and (p.stance .. "|z") or p.stance
-                local own, all = stats_of(m.j, ctx, #JIT_ARMS), stats_of(jglobal, ctx, #JIT_ARMS)
-                local model_next = p.model and clamp(p.model + p.next_delta, -p.maxd, p.maxd)
-                local pb = clamp(pol_ema, -1, 1) * 0.15
-                local noisy = p.kind == "random" or p.kind == "multi"      -- smaller / centred angles are safer then
-
-                local best, best_score, best_value = 1, -math.huge, nil
-                for i, a in ipairs(JIT_ARMS) do
-                    local ok, bias, value = true, a.bias, nil
-                    if a.src == "feet" then
-                        local mv = a.next and model_next or p.model
-                        ok = mv ~= nil and math.abs(mv) >= 4
-                        if ok then value = a.pol * mv end
-                        if p.choke >= 2 then bias = bias - 0.08 end        -- the feet move through updates we never see
-                    elseif a.src == "center" then
-                        local o = a.next and p.next_offset or p.offset
-                        ok = math.abs(o) >= 4
-                        value = a.pol * clamp(o, -p.maxd, p.maxd)
-                    elseif a.src == "learned" then
-                        local side = a.next and p.next or p.side
-                        local t = m.tables[ctx] and m.tables[ctx][side]
-                        ok = t ~= nil and t.n >= 1
-                        if ok then
-                            local angle, mass = table_best(t)
-                            value = angle
-                            ok = mass >= 0.35      -- an unsure table points near zero, which misses every full desync
-                            bias = bias + 0.40 * clamp((mass - 0.30) / 0.60, 0, 1)      -- the more sure, the earlier it is tried
-                            if (m.jmisses or 0) >= 3 then bias = bias + 0.25 end      -- everything else keeps missing
-                        end
-                    elseif a.src == "side" then
-                        value = a.pol * (a.next and p.next or p.side) * p.maxd * a.frac
-                    elseif a.src == "zero" then
-                        value = 0
-                        if noisy then bias = bias + 0.12 end
-                        if zone then bias = bias + 0.40 end
-                    elseif a.src == "nn" then
-                        ok = p.nn_value ~= nil
-                        value = p.nn_value
-                        bias = bias + nn_bias()
-                    elseif a.src == "desync" then
-                        value = desync_resolve(p)
-                    end                                                    -- native: nil
-                    if a.next and p.kind ~= "regular" then bias = bias - 0.12 end    -- "next" is a coin toss then
-                    if a.low and noisy then bias = bias + 0.08 end
-
-                    if ok then
-                        local sc = score(own, all, i) + bias - i * 0.001
-                        if a.pol then sc = sc + a.pol * pb end
-                        if sc > best_score then best, best_score, best_value = i, sc, value end
-                    end
-                end
-
-                if best_value ~= nil then best_value = math.floor(clamp(best_value, -60, 60) + 0.5) end
-                return best_value, best, ctx
+            -- the situation a record is learned in
+            local function situation(p, kind)
+                if kind == "defensive" then return "def" end
+                if p.jitter then return p.side > 0 and "j+" or "j-" end
+                return p.stance
             end
 
             -- what was given to the record a shot went at: `bt` ticks behind the newest one
@@ -1707,11 +1220,6 @@ LPH_NO_VIRTUALIZE(function ()
                 return found
             end
 
-            local function arm_name(mode, arm)
-                local a = (mode == "j" and JIT_ARMS or (mode == "f" and DEF_ARMS or DES_ARMS))[arm or 0]
-                return a and a.name or "-"
-            end
-
             -- ── player list ────────────────────────────────────────────────────────
             local function unforce(idx)
                 local s = saved[idx]
@@ -1722,9 +1230,8 @@ LPH_NO_VIRTUALIZE(function ()
             end
 
             -- the switches are written when we take a player over and every 64 ticks after (in case something else turned
-            -- them off), the value only when it changes: the player list used to get 3 writes per record per enemy
+            -- them off), the value only when it changes
             local function force(idx, value)
-                if value == nil then unforce(idx); return end
                 local s = saved[idx]
                 local tick = globals.tickcount()
                 if not s then
@@ -1756,60 +1263,42 @@ LPH_NO_VIRTUALIZE(function ()
                     if next(saved) then release_all() end
                     return
                 end
-                local use_desync, use_jitter, use_nn = part("Desync resolver"), part("Jitter resolver"), part("Neural network")
-
                 local tick = globals.tickcount()
                 local seen = {}
-                local threat = client.current_threat()
                 for _, idx in ipairs(entity.get_players(true)) do
                     if entity.is_alive(idx) and not entity.is_dormant(idx) then
                         seen[idx] = true
                         local p = player_of(idx, tick)
-                        -- the open side traces: every 4 ticks for the current threat, every 16 for the others
-                        local every = idx == threat and FS_INTERVAL or FS_INTERVAL * 4
-                        if tick - p.fs_tick >= every or tick < p.fs_tick then
-                            p.fs_tick = tick
-                            update_open(p, idx, me)
-                        end
                         local kind = ingest(idx, p, me)
-                        if kind == "def" then
-                            -- defensive record: its own angle, remembered like any other record
-                            local value, arm, ctx
-                            if use_desync or use_jitter then value, arm, ctx = def_resolve(p) end
-                            local h = p.hist
-                            h[#h + 1] = { st = p.def_st, mode = value ~= nil and "f" or nil, value = value, arm = arm, ctx = ctx, side = 0,
-                                          stance = p.stance, kind = "defensive", maxd = p.maxd_f, at = tick }
-                            while #h > HIST do table.remove(h, 1) end
-                            p.def_count = (p.def_count or 0) + 1
-                            force(idx, value)
-                        elseif kind then
-                            local m = memory_of(p.key)
-                            p.pred_side, p.pred_conf = side_predict(p, m, tick)
-                            p.nn_x, p.nn_value = nil, nil
-                            if use_nn then
-                                p.nn_x = nn_features(p, m, p.pred_side, p.pred_conf)
-                                p.nn_value = nn_predict(p.nn_x, p.maxd)
+                        if kind then
+                            local ctx = situation(p, kind)
+                            local c = p.model or 0
+                            side_advance(p, tick)
+                            local z = z_of(p, ctx)
+                            local zs = {}
+                            for k = 1, ND do zs[k] = z[k] end
+                            local b = belief_of(p.key, ctx)
+                            local pi = (1 + zs[best_delay(rates_of(p.key))]) / 2
+                            local value, phit = decide(b, c, pi)
+                            -- "Override size": the side from the resolver, the size from the menu
+                            if option("override", false) == true then
+                                local side = value > 0 and 1 or (value < 0 and -1 or (pi >= 0.5 and 1 or -1))
+                                value = side * math.floor(clamp(tonumber(option("override_size", 35)) or 35, 0, 60) + 0.5)
                             end
-                            local value, arm, ctx, mode
-                            if p.jitter and use_jitter then
-                                value, arm, ctx = jitter_resolve(p)
-                                mode = "j"
-                            elseif use_desync then
-                                value, arm, ctx = desync_resolve(p)
-                                mode = "d"
-                            end
-                            p.mode, p.value, p.arm = mode, value, arm
-                            p.hold_value = value
+                            local w = weights(b)
+                            local model = (w[1] >= w[2] and w[1] >= w[3]) and "computed" or (w[2] >= w[3] and "mirrored" or "side")
+                            p.mode, p.value, p.ctx, p.phit, p.model_name = p.jitter and "j" or "d", value, ctx, phit, model
+                            p.method = kind == "defensive" and "Defensive" or (p.jitter and "Jitter"
+                                or (model ~= "side" and (p.stance == "stand" and "LBY" or "Dynamic") or "Static"))
                             -- remember what this record got: a shot at it later (backtrack) is judged by this
                             local h = p.hist
-                            h[#h + 1] = { st = p.max_st, mode = mode, value = value, arm = arm, ctx = ctx, side = p.side, stance = p.stance, kind = p.kind,
-                                          maxd = p.maxd_f, at = tick, x = p.nn_x, nnv = p.nn_value }
+                            h[#h + 1] = { st = p.st, value = value, c = c, ctx = ctx, stance = p.stance, at = tick, phit = phit, zs = zs,
+                                          mode = kind == "defensive" and "f" or p.mode }
                             while #h > HIST do table.remove(h, 1) end
                             force(idx, value)
                         end
                     end
                 end
-
                 -- dead, dormant or gone (get_players does not list them): give them back to the native resolver
                 for idx in pairs(saved) do
                     if not seen[idx] then unforce(idx) end
@@ -1834,24 +1323,35 @@ LPH_NO_VIRTUALIZE(function ()
                 local p = players[e.target]
                 local bt = resolver.shot_backtrack(e)
                 local h = p and applied_for(p, bt)
-                local ok, lat = pcall(client.latency)
-                lat = (ok and finite(lat) and lat > 0) and lat or 0
-                local shot = { idx = e.target, key = p and p.key, bt = bt, time = now, reason = "native",
-                               fire = globals.tickcount(), rtt = math.floor(2 * lat / globals.tickinterval() + 0.5) + 1 }
-                if h and h.mode then
-                    shot.mode, shot.ctx, shot.arm, shot.value = h.mode, h.ctx, h.arm, h.value
-                    shot.side, shot.stance, shot.kind, shot.maxd, shot.rec_at = h.side, h.stance, h.kind, h.maxd, h.at
-                    shot.x, shot.nnv = h.x, h.nnv
-                    if h.value == nil then
-                        shot.reason = "jitter native"
-                    elseif h.mode == "f" then
-                        shot.reason = "defensive"
-                    else
-                        shot.reason = h.mode == "j" and "jitter" or "desync"
-                    end
+                local shot = { idx = e.target, key = p and p.key, bt = bt, time = now, reason = "native" }
+                if p then
+                    -- the target sees this shot: its answer (a side switch?) shows in its records some ticks later
+                    local ev = { fire = globals.tickcount(), phit = h and h.phit or 0.5, q = {}, at = {} }
+                    p.events[#p.events + 1] = ev
+                    while #p.events > 16 do table.remove(p.events, 1) end
+                    shot.ev = ev
+                end
+                if h then
+                    shot.value, shot.c, shot.ctx, shot.stance, shot.at, shot.zs, shot.mode = h.value, h.c, h.ctx, h.stance, h.at, h.zs, h.mode
+                    shot.reason = h.ctx == "def" and "defensive" or (h.ctx:sub(1, 1) == "j" and "jitter" or "desync")
                 end
                 shots[shot_id(e)] = shot
                 if resolver.stats_hook then pcall(resolver.stats_hook, "fire", shot, e, p) end
+            end
+
+            local function learn(s, hit)
+                local b = belief_of(s.key, s.ctx)
+                local p = players[s.idx]
+                local pi = 0.5
+                if p and p.key == s.key then
+                    -- the side the target was on when the record was made, and what this result says about it
+                    pi = (1 + s.zs[best_delay(rates_of(p.key))]) / 2
+                    local lp, lm = side_likelihoods(b, s.value, hit)
+                    side_measure(p, s.ctx, s.at, s.zs, lp, lm)
+                end
+                update(b, s.c, s.value, hit, pi, 1)
+                if not global[s.ctx] then global[s.ctx] = new_belief() end
+                update(global[s.ctx], s.c, s.value, hit, pi, 0.3)
             end
 
             resolver.on_hit = function(e)
@@ -1862,27 +1362,13 @@ LPH_NO_VIRTUALIZE(function ()
                 local p = players[e.target]
                 if resolver.stats_hook then pcall(resolver.stats_hook, "hit", s, e, p) end
                 if p then p.consecutive_misses = 0 end
-                local mine = s and p and s.key == p.key
-                if mine then side_reaction(p, s, "hit") end
-                if not s or not s.mode or not s.key then return end
-
-                local head = e.hitgroup == 1
-                local weight = head and 1.5 or 0.5        -- body hits say less about the head angle than head hits
-                if head then nn_learn(s, true) end
-                if mine and s.mode ~= "f" then side_observe(p, s, true, head) end
-                if s.mode == "f" then
-                    local m = memory_of(s.key)
-                    m.f = m.f or {}
-                    learn(m.f, fglobal, "fstreak", s.key, s.ctx, s.arm, #DEF_ARMS, true, weight)
-                elseif s.mode == "j" then
-                    jitter_learn(s.key, s.ctx, s.arm, true, weight)
-                    if head then table_learn(s.key, s.ctx, s.side, s.value, true) end
-                else
-                    desync_learn(s.key, s.ctx, s.arm, true, weight)
-                    if head and s.value ~= nil then memory_of(s.key).hit_value[s.stance or "stand"] = s.value end
-                end
-                log("%s: hit %s with %s (%s %s, %s)", name_of(e.target), head and "head" or "body", tostring(s.value),
-                    s.mode == "j" and "jitter" or (s.mode == "f" and "defensive" or "desync"), arm_name(s.mode, s.arm), s.mode == "j" and s.kind or s.stance)
+                if s and s.ev and p and s.key == p.key then side_result(p, s.ev, "hit") end
+                if not s or s.value == nil or not s.key then return end
+                -- only a head hit says where the head was
+                if e.hitgroup ~= 1 then return end
+                learn(s, true)
+                memory_of(s.key).hit_value[s.stance or "stand"] = s.value
+                log("%s: hit head with %d (%s)", name_of(e.target), s.value, s.ctx)
             end
 
             resolver.on_miss = function(e)
@@ -1892,48 +1378,21 @@ LPH_NO_VIRTUALIZE(function ()
                 shots[id] = nil
                 local p = players[e.target]
                 if resolver.stats_hook then pcall(resolver.stats_hook, "miss", s, e, p) end
-                local mine = s and p and s.key == p.key
-                if mine then side_reaction(p, s, "miss") end      -- the target noticed it, whatever the reason
+                -- the target saw the shot, whatever the reason of the miss
+                if s and s.ev and p and s.key == p.key then side_result(p, s.ev, "miss") end
                 -- spread, prediction error, death ... are not about the angle
                 if e.reason ~= "?" and e.reason ~= "resolver" then return end
                 if p then p.consecutive_misses = p.consecutive_misses + 1 end
-                if not s or not s.mode or not s.key then return end
-
-                local weight = s.bt >= 12 and 0.5 or 1      -- an old record carries lag compensation noise too
-                nn_learn(s, false)
-                if mine and s.mode ~= "f" then side_observe(p, s, false, false) end
-                if s.mode == "f" then
-                    local m = memory_of(s.key)
-                    m.f = m.f or {}
-                    learn(m.f, fglobal, "fstreak", s.key, s.ctx, s.arm, #DEF_ARMS, false, weight)
-                elseif s.mode == "j" then
-                    jitter_learn(s.key, s.ctx, s.arm, false, weight)
-                    table_learn(s.key, s.ctx, s.side, s.value, false)
-                else
-                    desync_learn(s.key, s.ctx, s.arm, false, weight)
-                end
-                log("%s: missed %s (%s %s, %s)", name_of(e.target), tostring(s.value), s.mode == "j" and "jitter" or "desync",
-                    arm_name(s.mode, s.arm), s.mode == "j" and s.kind or s.stance)
+                if not s or s.value == nil or not s.key then return end
+                learn(s, false)
+                log("%s: missed %d (%s)", name_of(e.target), s.value, s.ctx)
             end
 
             -- ── rounds / reset ─────────────────────────────────────────────────────
-            -- new round: keep what was learned, but as a hint, not as a fact
             resolver.new_round = function()
                 release_all()
-                nn_save()
-                if nn.n > 0 then
-                    log("neural net: learned from %d shots, its call was on the head in %d%% of the head hits", nn.n, math.floor(nn.agree * 100 + 0.5))
-                end
                 players, shots = {}, {}
                 publish()
-                for _, m in pairs(mem) do
-                    for _, store in ipairs({ m.d, m.j, m.f or {} }) do
-                        for _, set in pairs(store) do
-                            for i = 1, #set do set[i].hit, set[i].miss = set[i].hit * 0.5, set[i].miss * 0.5 end
-                        end
-                    end
-                    m.dstreak, m.jstreak, m.jmisses = nil, nil, 0
-                end
             end
 
             resolver.reset_player = function(idx)
@@ -1943,10 +1402,7 @@ LPH_NO_VIRTUALIZE(function ()
 
             resolver.reset_all = function()
                 release_all()
-                nn, nn_dirty = nn_new(), false
-                pcall(database.write, NN_KEY, nil)
-                players, mem, shots = {}, {}, {}
-                dglobal, jglobal, fglobal, gtable, pol_ema = {}, {}, {}, {}, 0
+                players, mem, shots, global, grates = {}, {}, {}, {}, new_rates()
                 publish()
             end
 
@@ -1959,10 +1415,7 @@ LPH_NO_VIRTUALIZE(function ()
                         client.error_log("[specter resolver] " .. tostring(err))
                     end
                 end)
-                client.set_event_callback("shutdown", function()
-                    pcall(release_all)
-                    pcall(nn_save)
-                end)
+                client.set_event_callback("shutdown", function() pcall(release_all) end)
             end
             -- [resolver:end]
         end
@@ -3697,7 +3150,7 @@ LPH_NO_VIRTUALIZE(function ()
         config.ragebot.extended_bt_mode = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "•  Mode\nextended_bt", {
             "Only with target", "Always"
         }):record("ragebot", "extended_bt_mode"):save()
-        config.ragebot.extended_bt_amount = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Amount\nextended_bt", 50, 200, 150, true, "ms")
+        config.ragebot.extended_bt_amount = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Amount\nextended_bt", 50, 200, 200, true, "ms")
             :record("ragebot", "extended_bt_amount"):save()
 
         do
@@ -3816,6 +3269,78 @@ LPH_NO_VIRTUALIZE(function ()
             end)
         end
 
+        -- Resolver safety: per enemy, from what the resolver knows about it. Body aim / safe point after the resolver missed it,
+        -- when the resolver is unsure of the angle of the newest record, or when the enemy is low; head when the resolver is
+        -- sure. Written to the player list (only on change), given back when it does not apply any more.
+        config.ragebot.safety = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Resolver Safety")
+            :record("ragebot", "safety"):save()
+        config.ragebot.safety_on = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "•  Options\nsafety", {
+            "Body aim after misses", "Safe point after misses", "Body aim when unsure", "Body aim on low HP", "Head when sure"
+        }):record("ragebot", "safety_on"):save()
+        pcall(function() config.ragebot.safety_on:set({ "Body aim after misses", "Safe point after misses", "Body aim on low HP", "Head when sure" }) end)
+        config.ragebot.safety_misses = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Misses\nsafety", 1, 5, 2)
+            :record("ragebot", "safety_misses"):save()
+        config.ragebot.safety_hp = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Low HP\nsafety", 1, 100, 50, true, " hp")
+            :record("ragebot", "safety_hp"):save()
+
+        do
+            local written = {}      -- [entindex] = { baim = "On" / "Off" / nil, sp = "On" / nil }
+
+            local function put(idx, field, key, value)
+                local w = written[idx]
+                if not w then w = {}; written[idx] = w end
+                if w[key] == value then return end
+                pcall(plist.set, idx, field, value or "-")
+                w[key] = value
+            end
+
+            local function release(idx)
+                local w = written[idx]
+                if not w then return end
+                if w.baim then pcall(plist.set, idx, "Override prefer body aim", "-") end
+                if w.sp then pcall(plist.set, idx, "Override safe point", "-") end
+                written[idx] = nil
+            end
+
+            local function release_all()
+                for idx in pairs(written) do release(idx) end
+            end
+
+            client.set_event_callback("net_update_end", function()
+                if not config.ragebot.safety:get() or not entity_get_local_player() then
+                    if next(written) then release_all() end
+                    return
+                end
+                local on = config.ragebot.safety_on:get() or {}
+                local misses_needed = config.ragebot.safety_misses:get()
+                local low_hp = config.ragebot.safety_hp:get()
+                local seen = {}
+                for _, idx in ipairs(entity.get_players(true)) do
+                    seen[idx] = true
+                    local d = resolver.database and resolver.database[idx]
+                    local missed = d and (d.consecutive_misses or 0) >= misses_needed
+                    local unsure = d and d.phit ~= nil and d.phit < 0.45
+                    local sure = d and d.phit ~= nil and d.phit >= 0.8 and (d.consecutive_misses or 0) == 0
+                    local hp = entity_get_prop(idx, "m_iHealth") or 100
+                    local baim
+                    if (missed and c_table.contains(on, "Body aim after misses"))
+                        or (unsure and c_table.contains(on, "Body aim when unsure"))
+                        or (hp <= low_hp and c_table.contains(on, "Body aim on low HP")) then
+                        baim = "On"
+                    elseif sure and c_table.contains(on, "Head when sure") then
+                        baim = "Off"
+                    end
+                    put(idx, "Override prefer body aim", "baim", baim)
+                    put(idx, "Override safe point", "sp", (missed and c_table.contains(on, "Safe point after misses")) and "On" or nil)
+                end
+                for idx in pairs(written) do
+                    if not seen[idx] then release(idx) end
+                end
+            end)
+            client.set_event_callback("round_start", release_all)
+            client.set_event_callback("shutdown", function() pcall(release_all) end)
+        end
+
         -- Tuning page: adaptive air chance, ground / noscope scaling, weapon profiles, peek assist.
         -- Applied by the rage override block at the end of the file (it reads these through SPECTER_SHARED).
         do
@@ -3891,7 +3416,7 @@ LPH_NO_VIRTUALIZE(function ()
 
         -- the part of the resolver that forced the record a shot went at ("jitter native" = the jitter part chose native)
         local function method_of(reason)
-            if reason == "desync" or reason == "jitter" then return reason end
+            if reason == "desync" or reason == "jitter" or reason == "defensive" then return reason end
             return "native"
         end
 
@@ -4641,7 +4166,9 @@ LPH_NO_VIRTUALIZE(function ()
             config.antiaimbot.options = menu.new_item(ui.new_multiselect, "AA", "Other", "Modifications", {
                 "On use antiaim",
                 "Fast ladder",
-                "Dormant preset"
+                "Dormant preset",
+                "Yaw sway",
+                "Edge on crouch"
             }):record("antiaimbot", "options"):save()
 
             config.antiaimbot.preset = menu.new_item(ui.new_combobox, "AA", "Anti-aimbot angles", "Preset\naa",
@@ -4670,11 +4197,44 @@ LPH_NO_VIRTUALIZE(function ()
             if TIER.HAS_RESOLVER then
                 config.resolver.enabled = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Enable Resolver")
                     :record("resolver", "enabled"):save()
-                config.resolver.parts = menu.new_item(ui.new_multiselect, "AA", "Anti-aimbot angles", "•  Parts\nresolver", {
-                    "Desync resolver", "Jitter resolver", "Neural network", "Log"
-                }):record("resolver", "parts"):save()
-                pcall(function() config.resolver.parts:set({ "Desync resolver", "Jitter resolver", "Neural network", "Log" }) end)
-                config.uix.res_hint = mui.hint(mui.CONTENT, "jitter: enemies whose yaw jitters  ·  desync: everybody else  ·  neural network: learns from every shot")
+                pcall(function() config.resolver.enabled:set(true) end)
+                -- what the resolver does with the current threat (the dynamic resolver's info lines)
+                local function info()
+                    local t = client.current_threat()
+                    return t and resolver.database[t], t
+                end
+                config.resolver.info = {
+                    mui.row(mui.CONTENT, "◎", "Target", function()
+                        local d, t = info()
+                        return d and (entity.get_player_name(t) or "-") or "-"
+                    end),
+                    mui.row(mui.CONTENT, "≡", "Method", function()
+                        local d = info()
+                        return d and d.method and (d.method .. "  ·  " .. (d.model_name or "-")) or "-"
+                    end),
+                    mui.row(mui.CONTENT, "∠", "Desync", function()
+                        local d = info()
+                        if not (d and d.value) then return "-" end
+                        return string_format("%d°  %s", math.abs(d.value), d.value > 0 and "R" or (d.value < 0 and "L" or "-"))
+                    end),
+                    mui.row(mui.CONTENT, "✓", "Confidence", function()
+                        local d = info()
+                        return d and d.phit and (math.floor(d.phit * 100 + 0.5) .. "%") or "-"
+                    end),
+                }
+                config.resolver.log = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Log\nresolver")
+                    :record("resolver", "log"):save()
+                config.resolver.jitter = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Jitter sensitivity\nresolver", 5, 60, 30, true, "°")
+                    :record("resolver", "jitter"):save()
+                config.resolver.override = menu.new_item(ui.new_checkbox, "AA", "Anti-aimbot angles", "Override size\nresolver")
+                    :record("resolver", "override"):save()
+                config.resolver.override_size = menu.new_item(ui.new_slider, "AA", "Anti-aimbot angles", "•  Size\nresolver", 0, 60, 35, true, "°")
+                    :record("resolver", "override_size"):save()
+                config.uix.res_hint = mui.hint(mui.CONTENT, "computes the body yaw like the server, learns the rest from every shot")
+                client.set_event_callback("paint_ui", function()
+                    if not ui_is_menu_open() then return end
+                    for _, row in ipairs(config.resolver.info) do mui.refresh(row) end
+                end)
                 config.resolver.reset = menu.new_item(ui.new_button, "AA", "Other", "Reset memory\nresolver", function()
                     resolver.reset_all()
                     c_logger.log("Resolver memory cleared.")
@@ -4734,7 +4294,11 @@ LPH_NO_VIRTUALIZE(function ()
                 "Reloading",
                 "Weapon switch",
                 "After shot",
-                "Enemy visible"
+                "Enemy visible",
+                "On peek",
+                "Landing",
+                "Low HP",
+                "Threat scoped"
             }):record("antiaimbot", "defensive_triggers"):save()
 
             -- when the forced states actually break lag comp: all the time, only while the threat can
@@ -4952,6 +4516,9 @@ LPH_NO_VIRTUALIZE(function ()
                         override.set(reference.antiaim.yaw.base, yaw_base)
 
                         local edge_yaw = self.edge_yaw or false
+                        local mods = config.antiaimbot.options:get() or {}
+                        -- "Edge on crouch": standing crouched next to a wall, the head goes behind it
+                        if not edge_yaw and c_table.contains(mods, "Edge on crouch") and player.state == "Crouching" then edge_yaw = true end
 
                         override.set(reference.antiaim.yaw.edge, edge_yaw)
 
@@ -4967,6 +4534,16 @@ LPH_NO_VIRTUALIZE(function ()
 
                         local yaw_type = self.yaw_type or '180'
                         local yaw_offset = self.yaw_offset or 0
+                        -- "Yaw sway": a slow random drift of up to 12 degrees on top of the yaw, so the yaw of the records
+                        -- never sits on the same value (resolvers that learn an angle per yaw value keep starting over)
+                        if yaw_type == '180' and c_table.contains(mods, "Yaw sway") then
+                            local sw = AntiAim.sway or { v = 0, to = 0 }
+                            AntiAim.sway = sw
+                            if math_abs(sw.to - sw.v) < 1 then sw.to = client_random_int(-12, 12) end
+                            sw.v = sw.v + math_max(-1.5, math_min(1.5, sw.to - sw.v))
+                            yaw_offset = math_floor(yaw_offset + sw.v + 0.5)
+                            if yaw_offset > 180 then yaw_offset = yaw_offset - 360 elseif yaw_offset < -180 then yaw_offset = yaw_offset + 360 end
+                        end
 
                         override.set(reference.antiaim.yaw.yaw.type, yaw_type)
                         override.set(reference.antiaim.yaw.yaw.value, yaw_offset)
@@ -5637,6 +5214,18 @@ LPH_NO_VIRTUALIZE(function ()
                     local needs_sight = activation == "When visible" or c_table.contains(defensive_triggers, 'Enemy visible')
                     local visible, visible_since = false, -10
                     if needs_sight then visible, visible_since = antiaimbot.defensive.threat_visible(me) end
+
+                    -- peeking the threat, the ticks after landing, low on health, a threat that is scoped in (it is about to shoot)
+                    if c_table.contains(defensive_triggers, 'On peek') and player.peeking
+                    or c_table.contains(defensive_triggers, 'Landing') and player.landing
+                    or c_table.contains(defensive_triggers, 'Low HP') and (entity_get_prop(me, 'm_iHealth') or 100) <= 40 then
+                        defensive_triggered = true
+                    end
+                    if c_table.contains(defensive_triggers, 'Threat scoped') then
+                        local threat = client.current_threat()
+                        local scoped = threat and entity_get_prop(threat, 'm_bIsScoped')
+                        if scoped == 1 or scoped == true then defensive_triggered = true end
+                    end
 
                     -- right after our own shot (the shot tick is when we are easiest to hit back)
                     if c_table.contains(defensive_triggers, 'After shot') and now - (antiaimbot.defensive.last_shot or -10) < 0.25 then
@@ -11467,6 +11056,92 @@ LPH_NO_VIRTUALIZE(function ()
                 c_logger.log('Config exported.')
             end
 
+            -- the recommended setup: what the simulations and the red team found best (Distort had the lowest hit rate of the
+            -- best attacker), everything that only helps switched on. Applied by "Reset to defaults" and on the first start
+            function settings.recommended()
+                local function set(item, v) if item and item.set then pcall(item.set, item, v) end end
+                local A, R, T, F, RS = config.antiaimbot, config.ragebot, config.tuning or {}, config.fakelag or {}, config.resolver or {}
+                local NAV = config.navigation or {}
+
+                -- resolver
+                set(RS.enabled, true)
+                set(RS.jitter, 30)
+                set(RS.override, false)
+
+                -- anti-aim
+                set(NAV.aa_enable, true)
+                set(A.preset, "Specter Distort")
+                set(A.options, { "On use antiaim", "Fast ladder", "Dormant preset", "Yaw sway", "Edge on crouch" })
+                set(A.anti_brute, true)
+                set(A.anti_brute_threshold, 30)
+                set(A.anti_brute_duration, 8)
+                set(A.anti_brute_triggers, { "Hit", "Near miss" })
+                set(A.safe_head, true)
+                set(A.safe_head_conditions, { "Air knife", "Air zeus", "Air & Crouch", "Crouching" })
+                set(A.warmup_aa, true)
+                set(A.manual_yaw, true)
+                set(A.manual_options, { "Jitter disabled" })
+                set(A.fs_options, { "Jitter disabled" })
+                set(A.freestanding_disabler_states, { "Air", "Air & Crouch" })
+                set(A.animation_breaker, true)
+                set(A.animation_breaker_leg, "Walking")
+                set(A.animation_breaker_air, "Walking")
+                set(A.animation_breaker_other, { "Quick peek legs", "Pitch zero on land" })
+
+                -- defensive
+                set(A.defensive_aa, true)
+                set(A.force_target_yaw, true)
+                set(A.defensive_target, { "Double tap", "On shot anti-aim" })
+                set(A.defensive_conditions, { "Crouch moving", "Air", "Air & Crouch" })
+                set(A.defensive_triggers, { "Flashed", "Damage received", "Reloading", "Weapon switch", "After shot", "On peek", "Landing", "Threat scoped" })
+                set(A.defensive_activation, "When visible")
+                set(A.defensive_preset, "Auto")
+                set(A.defensive_conditions_auto, { "On peek", "Safe head", "Triggered", "Crouch moving", "Air", "Air & Crouch" })
+
+                -- fake lag
+                set(F.enable, true)
+                set(F.type, "Adaptive")
+                set(F.ticks, 14)
+                set(F.variance, 30)
+                set(F.triggers, { "Peek", "Air", "Damage received" })
+                set(F.smart_lc, true)
+
+                -- ragebot
+                set(R.backtrack_optimization, true)
+                set(R.backtrack_level, "Maximum")
+                set(R.extended_bt, true)
+                set(R.extended_bt_mode, "Only with target")
+                set(R.extended_bt_amount, 200)
+                set(R.multipoint, true)
+                set(R.multipoint_auto, true)
+                set(R.multipoint_hitboxes, { "Head", "Chest", "Stomach" })
+                set(R.multipoint_scale, 60)
+                set(R.safety, true)
+                set(R.safety_on, { "Body aim after misses", "Safe point after misses", "Body aim on low HP", "Head when sure" })
+                set(R.safety_misses, 2)
+                set(R.safety_hp, 50)
+                set(R.dt_guard, true)
+                set(R.dt_guard_on, { "Grenades", "Revolver", "Fake duck", "After misses" })
+                set(R.dt_guard_misses, 3)
+
+                -- tuning
+                set(T.air, true)
+                set(T.air_hc, 40)
+                set(T.air_scale, 30)
+                set(T.air_weapon, "All")
+                set(T.ground, true)
+                set(T.ground_min, 50)
+                set(T.noscope, true)
+                set(T.noscope_hc, 45)
+                set(T.profiles, true)
+                for g, w in pairs(T.wp or {}) do set(w.on, g == "AWP" or g == "Scout" or g == "Auto" or g == "Deagle") end
+                set(T.peek, true)
+                set(T.peek_hc, 12)
+                set(T.peek_dmg, 5)
+                set(T.peek_scope, true)
+                set(T.peek_baim, false)
+            end
+
             function settings.builtin()
                 local success, err = config_system.import_from_str("eyJidWlsZGVyIjp7IkFBOjpTdGFuZGluZzo6Sml0dGVyVmFsdWUiOlswXSwiQUE6OlN0YW5kaW5nOjpZYXdCYXNlIjpbIkxvY2FsIHZpZXciXSwiQUE6OkFpciAmIENyb3VjaDo6WWF3U3dpdGNoRGVsYXlTZWNvbmQiOls2XSwiQUE6OkFpciAmIENyb3VjaDo6UGl0Y2hDdXN0b20iOlswXSwiQUE6Ok1vdmluZzo6UGl0Y2giOlsiT2ZmIl0sIkFBOjpGYWtlIGxhZzo6WWF3QmFzZSI6WyJMb2NhbCB2aWV3Il0sIkFBOjpDcm91Y2hpbmc6OkppdHRlclJhbmRvbWl6ZSI6WzBdLCJBQTo6U2xvdy1tb3Rpb246Ollhd0RlbGF5ZWRTd2l0Y2giOltmYWxzZV0sIkFBOjpBaXI6Ollhd0Jhc2UiOlsiTG9jYWwgdmlldyJdLCJBQTo6RmFrZSBsYWc6OkJvZHlWYWx1ZSI6WzBdLCJBQTo6U3RhbmRpbmc6OkVuYWJsZWQiOltmYWxzZV0sIkFBOjpGYWtlIGxhZzo6WWF3Sml0dGVyIjpbIk9mZiJdLCJBQTo6QWlyOjpZYXdTcGVlZCI6WzVdLCJBQTo6U3RhbmRpbmc6Ollhd1JpZ2h0IjpbMF0sIkFBOjpHbG9iYWw6Ollhd0N1c3RvbSI6WzBdLCJBQTo6U3RhbmRpbmc6OlBpdGNoIjpbIk9mZiJdLCJBQTo6U3RhbmRpbmc6Ollhd0RlbGF5ZWRTd2l0Y2giOltmYWxzZV0sIkFBOjpHbG9iYWw6Ollhd1N3aXRjaERlbGF5U2Vjb25kIjpbNl0sIkFBOjpDcm91Y2hpbmc6Ollhd0xlZnQiOlswXSwiQUE6OkNyb3VjaGluZzo6WWF3VHlwZSI6WyJPZmYiXSwiQUE6OkNyb3VjaCBtb3Zpbmc6OkppdHRlclZhbHVlIjpbMF0sIkFBOjpGYWtlIGxhZzo6Sml0dGVyVmFsdWUiOlswXSwiQUE6Ok1vdmluZzo6Qm9keVlhdyI6WyJPZmYiXSwiQUE6OkNyb3VjaCBtb3Zpbmc6Ollhd1NwZWVkIjpbNV0sIkFBOjpBaXI6Ollhd0RlbGF5ZWRTd2l0Y2giOltmYWxzZV0sIkFBOjpDcm91Y2ggbW92aW5nOjpCb2R5WWF3IjpbIk9mZiJdLCJBQTo6R2xvYmFsOjpZYXdKaXR0ZXIiOlsiT2ZmIl0sIkFBOjpBaXI6Ollhd0RlbGF5IjpbNV0sIkFBOjpDcm91Y2hpbmc6OkVuYWJsZWQiOltmYWxzZV0sIkFBOjpNb3Zpbmc6Ollhd0N1c3RvbSI6WzBdLCJBQTo6RmFrZSBsYWc6OlBpdGNoIjpbIk9mZiJdLCJBQTo6U3RhbmRpbmc6OkJvZHlZYXciOlsiT2ZmIl0sIkFBOjpGYWtlIGxhZzo6WWF3TGVmdCI6WzBdLCJBQTo6U2xvdy1tb3Rpb246Ollhd0N1c3RvbSI6WzBdLCJBQTo6RmFrZSBsYWc6Ollhd1JpZ2h0IjpbMF0sIkFBOjpBaXIgJiBDcm91Y2g6Ollhd1R5cGUiOlsiT2ZmIl0sIkFBOjpBaXI6OlBpdGNoQ3VzdG9tIjpbMF0sIkFBOjpDcm91Y2ggbW92aW5nOjpZYXdMZWZ0IjpbMF0sIkFBOjpDcm91Y2ggbW92aW5nOjpZYXdTd2l0Y2hEZWxheVNlY29uZCI6WzZdLCJBQTo6TW92aW5nOjpZYXdSaWdodCI6WzBdLCJBQTo6TW92aW5nOjpKaXR0ZXJWYWx1ZSI6WzBdLCJBQTo6QWlyOjpCb2R5WWF3IjpbIk9mZiJdLCJBQTo6U2xvdy1tb3Rpb246Ollhd0xlZnQiOlswXSwiQUE6OlNsb3ctbW90aW9uOjpZYXdEZWxheSI6WzVdLCJBQTo6QWlyOjpZYXdUeXBlIjpbIk9mZiJdLCJBQTo6U3RhbmRpbmc6Ollhd0ppdHRlciI6WyJPZmYiXSwiQUE6OlN0YW5kaW5nOjpZYXdEZWxheSI6WzVdLCJBQTo6QWlyOjpKaXR0ZXJWYWx1ZSI6WzBdLCJBQTo6QWlyICYgQ3JvdWNoOjpZYXdTcGVlZCI6WzVdLCJBQTo6QWlyOjpFbmFibGVkIjpbZmFsc2VdLCJBQTo6RmFrZSBsYWc6OkVuYWJsZWQiOltmYWxzZV0sIkFBOjpTdGFuZGluZzo6WWF3U3dpdGNoRGVsYXkiOls2XSwiQUE6OkZha2UgbGFnOjpCb2R5WWF3IjpbIk9mZiJdLCJBQTo6Q3JvdWNoaW5nOjpQaXRjaCI6WyJPZmYiXSwiQUE6OkNyb3VjaGluZzo6WWF3U3dpdGNoRGVsYXkiOls2XSwiQUE6OkFpciAmIENyb3VjaDo6Sml0dGVyUmFuZG9taXplIjpbMF0sIkFBOjpNb3Zpbmc6Ollhd1N3aXRjaERlbGF5IjpbNl0sIkFBOjpHbG9iYWw6Ollhd1N3aXRjaERlbGF5IjpbNl0sIkFBOjpDcm91Y2ggbW92aW5nOjpKaXR0ZXJSYW5kb21pemUiOlswXSwiQUE6OkNyb3VjaGluZzo6WWF3RGVsYXkiOls1XSwiQUE6OkNyb3VjaGluZzo6UGl0Y2hDdXN0b20iOlswXSwiQUE6OkNyb3VjaCBtb3Zpbmc6OlBpdGNoIjpbIk9mZiJdLCJBQTo6U2xvdy1tb3Rpb246Ollhd1NwZWVkIjpbNV0sIkFBOjpBaXIgJiBDcm91Y2g6Ollhd0N1c3RvbSI6WzBdLCJBQTo6U3RhbmRpbmc6Ollhd0xlZnQiOlswXSwiQUE6OlN0YW5kaW5nOjpCb2R5VmFsdWUiOlswXSwiQUE6Okdsb2JhbDo6Qm9keVZhbHVlIjpbMF0sIkFBOjpDcm91Y2hpbmc6Ollhd0Jhc2UiOlsiTG9jYWwgdmlldyJdLCJBQTo6U2xvdy1tb3Rpb246Ollhd0Jhc2UiOlsiTG9jYWwgdmlldyJdLCJBQTo6RmFrZSBsYWc6Ollhd0RlbGF5ZWRTd2l0Y2giOltmYWxzZV0sIkFBOjpTbG93LW1vdGlvbjo6Sml0dGVyVmFsdWUiOlswXSwiQUE6OkZha2UgbGFnOjpQaXRjaEN1c3RvbSI6WzBdLCJBQTo6Q3JvdWNoIG1vdmluZzo6WWF3UmlnaHQiOlswXSwiQUE6OkZha2UgbGFnOjpZYXdTd2l0Y2hEZWxheSI6WzZdLCJBQTo6RmFrZSBsYWc6Ollhd1R5cGUiOlsiT2ZmIl0sIkFBOjpDcm91Y2ggbW92aW5nOjpZYXdDdXN0b20iOlswXSwiQUE6OkFpciAmIENyb3VjaDo6Qm9keVZhbHVlIjpbMF0sIkFBOjpHbG9iYWw6OlBpdGNoIjpbIk9mZiJdLCJBQTo6QWlyICYgQ3JvdWNoOjpZYXdTd2l0Y2hEZWxheSI6WzZdLCJBQTo6R2xvYmFsOjpCb2R5WWF3IjpbIk9mZiJdLCJBQTo6TW92aW5nOjpZYXdEZWxheSI6WzVdLCJBQTo6Q3JvdWNoaW5nOjpCb2R5VmFsdWUiOlswXSwiQUE6OkNyb3VjaCBtb3Zpbmc6Ollhd0Jhc2UiOlsiTG9jYWwgdmlldyJdLCJBQTo6Q3JvdWNoIG1vdmluZzo6WWF3VHlwZSI6WyJPZmYiXSwiQUE6OlNsb3ctbW90aW9uOjpQaXRjaEN1c3RvbSI6WzBdLCJBQTo6U2xvdy1tb3Rpb246Ollhd1N3aXRjaERlbGF5U2Vjb25kIjpbNl0sIkFBOjpDcm91Y2ggbW92aW5nOjpZYXdEZWxheSI6WzVdLCJBQTo6Q3JvdWNoIG1vdmluZzo6WWF3U3dpdGNoRGVsYXkiOls2XSwiQUE6OkFpcjo6Sml0dGVyUmFuZG9taXplIjpbMF0sIkFBOjpBaXI6Ollhd1N3aXRjaERlbGF5U2Vjb25kIjpbNl0sIkFBOjpNb3Zpbmc6Ollhd0Jhc2UiOlsiTG9jYWwgdmlldyJdLCJBQTo6R2xvYmFsOjpQaXRjaEN1c3RvbSI6WzBdLCJBQTo6RmFrZSBsYWc6OkppdHRlclJhbmRvbWl6ZSI6WzBdLCJBQTo6Q3JvdWNoIG1vdmluZzo6Qm9keVZhbHVlIjpbMF0sIkFBOjpTbG93LW1vdGlvbjo6UGl0Y2giOlsiT2ZmIl0sIkFBOjpDcm91Y2hpbmc6Ollhd0N1c3RvbSI6WzBdLCJBQTo6U2xvdy1tb3Rpb246OkppdHRlclJhbmRvbWl6ZSI6WzBdLCJBQTo6R2xvYmFsOjpZYXdSaWdodCI6WzBdLCJBQTo6Q3JvdWNoaW5nOjpZYXdTcGVlZCI6WzVdLCJBQTo6TW92aW5nOjpFbmFibGVkIjpbZmFsc2VdLCJBQTo6U3RhbmRpbmc6Ollhd1NwZWVkIjpbNV0sIkFBOjpDcm91Y2hpbmc6OkppdHRlclZhbHVlIjpbMF0sIkFBOjpDcm91Y2ggbW92aW5nOjpZYXdKaXR0ZXIiOlsiT2ZmIl0sIkFBOjpBaXI6Ollhd0xlZnQiOlswXSwiQUE6OkFpciAmIENyb3VjaDo6WWF3RGVsYXkiOls1XSwiQUE6Okdsb2JhbDo6WWF3TGVmdCI6WzBdLCJBQTo6U3RhbmRpbmc6OkppdHRlclJhbmRvbWl6ZSI6WzBdLCJBQTo6U2xvdy1tb3Rpb246Ollhd0ppdHRlciI6WyJPZmYiXSwiQUE6Ok1vdmluZzo6WWF3U3BlZWQiOls1XSwiQUE6Okdsb2JhbDo6WWF3VHlwZSI6WyJPZmYiXSwiQUE6OkFpciAmIENyb3VjaDo6WWF3Sml0dGVyIjpbIk9mZiJdLCJBQTo6TW92aW5nOjpQaXRjaEN1c3RvbSI6WzBdLCJBQTo6U2xvdy1tb3Rpb246OkVuYWJsZWQiOltmYWxzZV0sIkFBOjpDcm91Y2hpbmc6Ollhd1N3aXRjaERlbGF5U2Vjb25kIjpbNl0sIkFBOjpGYWtlIGxhZzo6WWF3RGVsYXkiOls1XSwiQUE6Ok1vdmluZzo6WWF3TGVmdCI6WzBdLCJBQTo6Q3JvdWNoIG1vdmluZzo6RW5hYmxlZCI6W2ZhbHNlXSwiQUE6OkFpcjo6WWF3UmlnaHQiOlswXSwiQUE6OlNsb3ctbW90aW9uOjpCb2R5WWF3IjpbIk9mZiJdLCJBQTo6QWlyOjpQaXRjaCI6WyJPZmYiXSwiQUE6Ok1vdmluZzo6WWF3VHlwZSI6WyJPZmYiXSwiQUE6OlNsb3ctbW90aW9uOjpCb2R5VmFsdWUiOlswXSwiQUE6Ok1vdmluZzo6Qm9keVZhbHVlIjpbMF0sIkFBOjpTdGFuZGluZzo6WWF3U3dpdGNoRGVsYXlTZWNvbmQiOls2XSwiQUE6Ok1vdmluZzo6WWF3RGVsYXllZFN3aXRjaCI6W2ZhbHNlXSwiQUE6OkZha2UgbGFnOjpZYXdDdXN0b20iOlswXSwiQUE6Okdsb2JhbDo6WWF3RGVsYXllZFN3aXRjaCI6W2ZhbHNlXSwiQUE6OkZha2UgbGFnOjpZYXdTd2l0Y2hEZWxheVNlY29uZCI6WzZdLCJBQTo6QWlyICYgQ3JvdWNoOjpZYXdCYXNlIjpbIkxvY2FsIHZpZXciXSwiQUE6Ok1vdmluZzo6WWF3U3dpdGNoRGVsYXlTZWNvbmQiOls2XSwiQUE6OlN0YW5kaW5nOjpZYXdDdXN0b20iOlswXSwiQUE6OlN0YW5kaW5nOjpZYXdUeXBlIjpbIk9mZiJdLCJBQTo6U2xvdy1tb3Rpb246Ollhd1JpZ2h0IjpbMF0sIkFBOjpDcm91Y2hpbmc6Ollhd1JpZ2h0IjpbMF0sIkFBOjpHbG9iYWw6OkppdHRlclZhbHVlIjpbMF0sIkFBOjpTdGFuZGluZzo6UGl0Y2hDdXN0b20iOlswXSwiQUE6Ok1vdmluZzo6WWF3Sml0dGVyIjpbIk9mZiJdLCJBQTo6R2xvYmFsOjpZYXdCYXNlIjpbIkxvY2FsIHZpZXciXSwiQUE6OkNyb3VjaGluZzo6WWF3RGVsYXllZFN3aXRjaCI6W2ZhbHNlXSwiQUE6OlNsb3ctbW90aW9uOjpZYXdUeXBlIjpbIk9mZiJdLCJBQTo6QWlyICYgQ3JvdWNoOjpFbmFibGVkIjpbZmFsc2VdLCJBQTo6Q3JvdWNoIG1vdmluZzo6WWF3RGVsYXllZFN3aXRjaCI6W2ZhbHNlXSwiQUE6Okdsb2JhbDo6WWF3U3BlZWQiOls1XSwiQUE6OkFpciAmIENyb3VjaDo6WWF3RGVsYXllZFN3aXRjaCI6W2ZhbHNlXSwiQUE6OkFpciAmIENyb3VjaDo6Qm9keVlhdyI6WyJPZmYiXSwiQUE6Okdsb2JhbDo6WWF3RGVsYXkiOls1XSwiQUE6OkFpciAmIENyb3VjaDo6Sml0dGVyVmFsdWUiOlswXSwiQUE6Ok1vdmluZzo6Sml0dGVyUmFuZG9taXplIjpbMF0sIkFBOjpDcm91Y2ggbW92aW5nOjpQaXRjaEN1c3RvbSI6WzBdLCJBQTo6QWlyICYgQ3JvdWNoOjpQaXRjaCI6WyJPZmYiXSwiQUE6OkFpcjo6WWF3Sml0dGVyIjpbIk9mZiJdLCJBQTo6Q3JvdWNoaW5nOjpCb2R5WWF3IjpbIk9mZiJdLCJBQTo6QWlyOjpZYXdTd2l0Y2hEZWxheSI6WzZdLCJBQTo6QWlyICYgQ3JvdWNoOjpZYXdMZWZ0IjpbMF0sIkFBOjpBaXI6Ollhd0N1c3RvbSI6WzBdLCJBQTo6Q3JvdWNoaW5nOjpZYXdKaXR0ZXIiOlsiT2ZmIl0sIkFBOjpBaXI6OkJvZHlWYWx1ZSI6WzBdLCJBQTo6RmFrZSBsYWc6Ollhd1NwZWVkIjpbNV0sIkFBOjpHbG9iYWw6OkppdHRlclJhbmRvbWl6ZSI6WzBdLCJBQTo6U2xvdy1tb3Rpb246Ollhd1N3aXRjaERlbGF5IjpbNl0sIkFBOjpBaXIgJiBDcm91Y2g6Ollhd1JpZ2h0IjpbMF19LCJ2aXN1YWxzIjp7ImluZGljYXRvcl92ZXJ0aWNhbF9vZmZzZXQiOlsyMF0sIm1hbnVhbF9hcnJvd3NfYWNjZW50IjpbMjU1LDAsMCwyNTVdLCJkYW1hZ2VfbWFya2VyIjpbdHJ1ZV0sImluZGljYXRvcnMiOlt0cnVlXSwicjhfaW5kaWNhdG9yX2NvbG9yIjpbMjU1LDAsMCwyNTVdLCJpbmRpY2F0b3Jfb3B0aW9ucyI6W1siVmVsb2NpdHkgbW9kaWZpZXIiLCJBZGp1c3Qgd2hpbGUgc2NvcGVkIiwiQWx0ZXIgYWxwaGEgd2hpbGUgc2NvcGVkIiwiQWx0ZXIgYWxwaGEgb24gZ3JlbmFkZSJdXSwiaW5kaWNhdG9yX2NvbG9yIjpbMjU1LDI1NSwyNTUsMjU1XSwicjhfaW5kaWNhdG9yIjpbZmFsc2VdLCJtYW51YWxfYXJyb3dzX29wdGlvbnMiOlt7fV0sIm1hbnVhbF9hcnJvd3Nfc2l6ZSI6WzEwXSwiaW5kaWNhdG9yX3N0eWxlIjpbIlJlbmV3ZWQiXSwibWFudWFsX2Fycm93c19vZmZzZXQiOlszNV0sIm1hbnVhbF9hcnJvd3NfY29sb3IiOls3Nyw3Nyw3NywyNTVdLCJtYW51YWxfYXJyb3dzIjpbZmFsc2VdLCJtYW51YWxfYXJyb3dzX3N0eWxlIjpbIlRyaWFuZ2xlcyJdLCJkYW1hZ2VfbWFya2VyX2NvbG9yIjpbMjU1LDAsMCwyNTVdLCJpbmRpY2F0b3JfcmVuZXdlZF9jb2xvciI6WzEzNywxMzcsMTM3LDI1NV19LCJhbnRpYWltYm90Ijp7ImRlZmVuc2l2ZV9jb25kaXRpb25zX2F1dG8iOltbIk9uIHBlZWsiLCJMZWdpdCBBQSIsIkVkZ2UgZGlyZWN0aW9uIiwiU2FmZSBoZWFkIiwiVHJpZ2dlcmVkIiwiU3RhbmRpbmciLCJTbG93LW1vdGlvbiIsIk1vdmluZyIsIkNyb3VjaGluZyIsIkNyb3VjaCBtb3ZpbmciLCJBaXIiLCJBaXIgJiBDcm91Y2giXV0sImlkZWFsX3RpY2siOltmYWxzZV0sIm1hbnVhbF95YXciOlt0cnVlXSwiYW5pbWF0aW9uX2JyZWFrZXJfYWlyIjpbIldhbGtpbmciXSwic2FmZV9oZWFkX2NvbmRpdGlvbnMiOltbIkFpciBrbmlmZSIsIkFpciB6ZXVzIiwiQWlyICYgQ3JvdWNoIiwiQ3JvdWNoIG1vdmluZyIsIkNyb3VjaGluZyIsIlNsb3ctbW90aW9uIiwiU3RhbmRpbmciXV0sInNhZmVfaGVhZCI6W3RydWVdLCJvcHRpb25zIjpbWyJPbiB1c2UgYW50aWFpbSIsIkZhc3QgbGFkZGVyIiwiRG9ybWFudCBwcmVzZXQiXV0sIndhcm11cF9hYV9jb25kaXRpb25zIjpbWyJXYXJtdXAiLCJSb3VuZCBlbmQiXV0sImFuaW1hdGlvbl9icmVha2VyX2xlZyI6WyJXYWxraW5nIl0sIm1hbnVhbF9vcHRpb25zIjpbWyJKaXR0ZXIgZGlzYWJsZWQiXV0sImZyZWVzdGFuZGluZ19kaXNhYmxlcl9zdGF0ZXMiOltbIkFpciIsIkFpciAmIENyb3VjaCJdXSwid2FybXVwX2FhIjpbdHJ1ZV0sImFuaW1hdGlvbl9icmVha2VyX290aGVyIjpbWyJRdWljayBwZWVrIGxlZ3MiLCJQaXRjaCB6ZXJvIG9uIGxhbmQiXV0sImFuaW1hdGlvbl9icmVha2VyIjpbdHJ1ZV0sImRlZmVuc2l2ZV9hYSI6W3RydWVdLCJhaXJfZXhwbG9pdCI6W2ZhbHNlXSwiZGVmZW5zaXZlX2NvbmRpdGlvbnMiOltbIkNyb3VjaGluZyIsIkNyb3VjaCBtb3ZpbmciLCJBaXIiLCJBaXIgJiBDcm91Y2giXV0sImlkZWFsX3RpY2tfaG90a2V5IjpbIk9uIGhvdGtleSJdLCJwcmVzZXQiOlsiU3BlY3RlciBHb2Rtb2RlIl0sImRlZmVuc2l2ZV90YXJnZXQiOltbIkRvdWJsZSB0YXAiXV0sImFpcl9leHBsb2l0X2hvdGtleSI6WyJPbiBob3RrZXkiXSwiZnNfb3B0aW9ucyI6W1siSml0dGVyIGRpc2FibGVkIl1dLCJkZWZlbnNpdmVfcHJlc2V0IjpbIkF1dG8iXSwiZGVmZW5zaXZlX3RyaWdnZXJzIjpbWyJGbGFzaGVkIiwiRGFtYWdlIHJlY2VpdmVkIiwiUmVsb2FkaW5nIiwiV2VhcG9uIHN3aXRjaCJdXSwiZm9yY2VfdGFyZ2V0X3lhdyI6W3RydWVdfSwibWlzY2VsbGFuZW91cyI6eyJjaGVhdF90d2Vha3NfbGlzdCI6W1siVW5jaGFyZ2UgaGVscGVyIiwiU3VwZXIgdG9zcyBvbiBncmVuYWRlIHJlbGVhc2UiLCJBbGxvdyBjcm91Y2ggb24gZmFrZWR1Y2siXV0sImF1dG9tYXRpY190cCI6W3t9XSwiY2xhbnRhZyI6W2ZhbHNlXSwidHJhc2h0YWxrIjpbZmFsc2VdLCJjb25zb2xlX2ZpbHRlciI6W3RydWVdLCJhdXRvbWF0aWNfdHBfZGVsYXkiOlsyXSwiY3VzdG9tX291dHB1dCI6W3RydWVdLCJldmVudF9sb2dnZXIiOlt0cnVlXSwiY2hlYXRfdHdlYWtzIjpbdHJ1ZV19LCJkZWZlbnNpdmUiOnsiREVGOjpBaXI6OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpPbiBwZWVrOjpQaXRjaCI6WyJEZWZhdWx0Il0sIkRFRjo6T24gcGVlazo6WWF3UmFuZG9taXplIjpbMF0sIkRFRjo6Q3JvdWNoIG1vdmluZzo6WWF3TGVmdFN0YXJ0IjpbMF0sIkRFRjo6U2xvdy1tb3Rpb246OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpHbG9iYWw6Ollhd1NwZWVkIjpbMV0sIkRFRjo6R2xvYmFsOjpZYXdSYW5kb21pemUiOlswXSwiREVGOjpNb3Zpbmc6OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpMZWdpdCBBQTo6UGl0Y2hDdXN0b20iOls4OV0sIkRFRjo6U3RhbmRpbmc6Ollhd1JhbmRvbWl6ZSI6WzBdLCJERUY6OkNyb3VjaGluZzo6WWF3RGVsYXkiOls2XSwiREVGOjpTbG93LW1vdGlvbjo6WWF3U3BlZWQiOlsxXSwiREVGOjpHbG9iYWw6OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpFZGdlIGRpcmVjdGlvbjo6RW5hYmxlZCI6W2ZhbHNlXSwiREVGOjpNb3Zpbmc6Ollhd0xlZnQiOlswXSwiREVGOjpNb3Zpbmc6Ollhd1RvIjpbMF0sIkRFRjo6QWlyICYgQ3JvdWNoOjpZYXdMZWZ0VGFyZ2V0IjpbMF0sIkRFRjo6TGVnaXQgQUE6OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpDcm91Y2hpbmc6OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpDcm91Y2hpbmc6Ollhd1RvIjpbMF0sIkRFRjo6U2xvdy1tb3Rpb246Ollhd1JpZ2h0VGFyZ2V0IjpbMF0sIkRFRjo6Q3JvdWNoaW5nOjpZYXciOlsiRGVmYXVsdCJdLCJERUY6OlNsb3ctbW90aW9uOjpFbmFibGVkIjpbZmFsc2VdLCJERUY6Ok1vdmluZzo6WWF3TGVmdFN0YXJ0IjpbMF0sIkRFRjo6T24gcGVlazo6UGl0Y2hDdXN0b20iOls4OV0sIkRFRjo6QWlyOjpQaXRjaEN1c3RvbSI6Wzg5XSwiREVGOjpHbG9iYWw6Ollhd1JpZ2h0VGFyZ2V0IjpbMF0sIkRFRjo6U3RhbmRpbmc6OlBpdGNoIjpbIkRlZmF1bHQiXSwiREVGOjpTbG93LW1vdGlvbjo6WWF3TGVmdFRhcmdldCI6WzBdLCJERUY6OkFpcjo6WWF3UmFuZG9taXplIjpbMF0sIkRFRjo6R2xvYmFsOjpZYXdSaWdodFN0YXJ0IjpbMF0sIkRFRjo6U3RhbmRpbmc6Ollhd0Zyb20iOlswXSwiREVGOjpNb3Zpbmc6Ollhd1JpZ2h0U3RhcnQiOlswXSwiREVGOjpNb3Zpbmc6Ollhd0xlZnRUYXJnZXQiOlswXSwiREVGOjpBaXIgJiBDcm91Y2g6Ollhd1JpZ2h0VGFyZ2V0IjpbMF0sIkRFRjo6R2xvYmFsOjpZYXdMZWZ0VGFyZ2V0IjpbMF0sIkRFRjo6QWlyICYgQ3JvdWNoOjpFbmFibGVkIjpbZmFsc2VdLCJERUY6Okdsb2JhbDo6WWF3TGVmdCI6WzBdLCJERUY6OkNyb3VjaCBtb3Zpbmc6OlBpdGNoQ3VzdG9tIjpbODldLCJERUY6OkFpciAmIENyb3VjaDo6WWF3UmFuZG9taXplIjpbMF0sIkRFRjo6R2xvYmFsOjpZYXdSaWdodCI6WzBdLCJERUY6Ok1vdmluZzo6WWF3RnJvbSI6WzBdLCJERUY6OkNyb3VjaCBtb3Zpbmc6Ollhd1NwZWVkIjpbMV0sIkRFRjo6Q3JvdWNoaW5nOjpZYXdSaWdodFN0YXJ0IjpbMF0sIkRFRjo6U2xvdy1tb3Rpb246Ollhd0Zyb20iOlswXSwiREVGOjpTYWZlIGhlYWQ6OkVuYWJsZWQiOltmYWxzZV0sIkRFRjo6VHJpZ2dlcmVkOjpFbmFibGVkIjpbZmFsc2VdLCJERUY6OkxlZ2l0IEFBOjpZYXdSYW5kb21pemUiOlswXSwiREVGOjpHbG9iYWw6OlBpdGNoQ3VzdG9tIjpbODldLCJERUY6OkFpciAmIENyb3VjaDo6UGl0Y2hDdXN0b20iOls4OV0sIkRFRjo6TGVnaXQgQUE6Ollhd1NwZWVkIjpbMV0sIkRFRjo6TW92aW5nOjpZYXdSaWdodCI6WzBdLCJERUY6OkFpciAmIENyb3VjaDo6WWF3RnJvbSI6WzBdLCJERUY6Ok1vdmluZzo6UGl0Y2hDdXN0b20iOls4OV0sIkRFRjo6QWlyOjpZYXdMZWZ0U3RhcnQiOlswXSwiREVGOjpDcm91Y2ggbW92aW5nOjpZYXdSaWdodCI6WzBdLCJERUY6Ok1vdmluZzo6WWF3RGVsYXkiOls2XSwiREVGOjpBaXIgJiBDcm91Y2g6OllhdyI6WyJEZWZhdWx0Il0sIkRFRjo6TGVnaXQgQUE6Ollhd0xlZnQiOlswXSwiREVGOjpHbG9iYWw6OllhdyI6WyJEZWZhdWx0Il0sIkRFRjo6U3RhbmRpbmc6Ollhd0xlZnQiOlswXSwiREVGOjpBaXI6Ollhd1JpZ2h0U3RhcnQiOlswXSwiREVGOjpDcm91Y2hpbmc6Ollhd0xlZnQiOlswXSwiREVGOjpBaXI6OkVuYWJsZWQiOltmYWxzZV0sIkRFRjo6QWlyOjpZYXdSaWdodFRhcmdldCI6WzBdLCJERUY6OkNyb3VjaGluZzo6WWF3UmFuZG9taXplIjpbMF0sIkRFRjo6U3RhbmRpbmc6Ollhd1JpZ2h0IjpbMF0sIkRFRjo6T24gcGVlazo6WWF3UmlnaHQiOlswXSwiREVGOjpMZWdpdCBBQTo6RW5hYmxlZCI6W2ZhbHNlXSwiREVGOjpTbG93LW1vdGlvbjo6WWF3TGVmdFN0YXJ0IjpbMF0sIkRFRjo6QWlyICYgQ3JvdWNoOjpZYXdUbyI6WzBdLCJERUY6Ok9uIHBlZWs6Ollhd0xlZnRUYXJnZXQiOlswXSwiREVGOjpTbG93LW1vdGlvbjo6WWF3UmFuZG9taXplIjpbMF0sIkRFRjo6T24gcGVlazo6WWF3U3BlZWQiOlsxXSwiREVGOjpTdGFuZGluZzo6RW5hYmxlZCI6W2ZhbHNlXSwiREVGOjpTdGFuZGluZzo6WWF3IjpbIkRlZmF1bHQiXSwiREVGOjpBaXI6OllhdyI6WyJEZWZhdWx0Il0sIkRFRjo6QWlyICYgQ3JvdWNoOjpZYXdEZWxheSI6WzZdLCJERUY6OkxlZ2l0IEFBOjpZYXdGcm9tIjpbMF0sIkRFRjo6Q3JvdWNoIG1vdmluZzo6WWF3RGVsYXkiOls2XSwiREVGOjpBaXI6Ollhd0Zyb20iOlswXSwiREVGOjpTbG93LW1vdGlvbjo6UGl0Y2hDdXN0b20iOls4OV0sIkRFRjo6U2xvdy1tb3Rpb246Ollhd1JpZ2h0U3RhcnQiOlswXSwiREVGOjpDcm91Y2hpbmc6OkVuYWJsZWQiOltmYWxzZV0sIkRFRjo6T24gcGVlazo6WWF3IjpbIkRlZmF1bHQiXSwiREVGOjpTdGFuZGluZzo6WWF3UmlnaHRTdGFydCI6WzBdLCJERUY6Ok9uIHBlZWs6OkVuYWJsZWQiOltmYWxzZV0sIkRFRjo6TGVnaXQgQUE6Ollhd0RlbGF5IjpbNl0sIkRFRjo6QWlyOjpZYXdUbyI6WzBdLCJERUY6OlN0YW5kaW5nOjpZYXdMZWZ0U3RhcnQiOlswXSwiREVGOjpDcm91Y2ggbW92aW5nOjpZYXdSaWdodFRhcmdldCI6WzBdLCJERUY6Okdsb2JhbDo6WWF3RGVsYXkiOls2XSwiREVGOjpDcm91Y2ggbW92aW5nOjpZYXciOlsiRGVmYXVsdCJdLCJERUY6Ok1vdmluZzo6RW5hYmxlZCI6W2ZhbHNlXSwiREVGOjpDcm91Y2hpbmc6Ollhd1JpZ2h0VGFyZ2V0IjpbMF0sIkRFRjo6Q3JvdWNoaW5nOjpZYXdTcGVlZCI6WzFdLCJERUY6OkFpcjo6WWF3U3BlZWQiOlsxXSwiREVGOjpFZGdlIGRpcmVjdGlvbjo6VGFyZ2V0Ijpbe31dLCJERUY6Ok1vdmluZzo6WWF3UmFuZG9taXplIjpbMF0sIkRFRjo6U3RhbmRpbmc6OlBpdGNoQ3VzdG9tIjpbODldLCJERUY6Ok1vdmluZzo6WWF3U3BlZWQiOlsxXSwiREVGOjpTdGFuZGluZzo6WWF3TGVmdFRhcmdldCI6WzBdLCJERUY6Ok1vdmluZzo6WWF3UmlnaHRUYXJnZXQiOlswXSwiREVGOjpPbiBwZWVrOjpZYXdMZWZ0U3RhcnQiOlswXSwiREVGOjpDcm91Y2hpbmc6Ollhd1JpZ2h0IjpbMF0sIkRFRjo6Q3JvdWNoaW5nOjpQaXRjaEN1c3RvbSI6Wzg5XSwiREVGOjpBaXIgJiBDcm91Y2g6Ollhd1JpZ2h0U3RhcnQiOlswXSwiREVGOjpDcm91Y2ggbW92aW5nOjpQaXRjaCI6WyJEZWZhdWx0Il0sIkRFRjo6TGVnaXQgQUE6Ollhd1RvIjpbMF0sIkRFRjo6TGVnaXQgQUE6Ollhd1JpZ2h0VGFyZ2V0IjpbMF0sIkRFRjo6U3RhbmRpbmc6Ollhd1JpZ2h0VGFyZ2V0IjpbMF0sIkRFRjo6R2xvYmFsOjpZYXdGcm9tIjpbMF0sIkRFRjo6R2xvYmFsOjpZYXdMZWZ0U3RhcnQiOlswXSwiREVGOjpTbG93LW1vdGlvbjo6WWF3RGVsYXkiOls2XSwiREVGOjpDcm91Y2ggbW92aW5nOjpZYXdSYW5kb21pemUiOlswXSwiREVGOjpMZWdpdCBBQTo6WWF3TGVmdFRhcmdldCI6WzBdLCJERUY6OkFpciAmIENyb3VjaDo6WWF3TGVmdCI6WzBdLCJERUY6Ok9uIHBlZWs6Ollhd0Zyb20iOlswXSwiREVGOjpMZWdpdCBBQTo6WWF3TGVmdFN0YXJ0IjpbMF0sIkRFRjo6T24gcGVlazo6WWF3VG8iOlswXSwiREVGOjpDcm91Y2hpbmc6Ollhd0xlZnRUYXJnZXQiOlswXSwiREVGOjpDcm91Y2ggbW92aW5nOjpZYXdUbyI6WzBdLCJERUY6OlNsb3ctbW90aW9uOjpZYXciOlsiRGVmYXVsdCJdLCJERUY6OkNyb3VjaCBtb3Zpbmc6Ollhd0Zyb20iOlswXSwiREVGOjpTbG93LW1vdGlvbjo6WWF3VG8iOlswXSwiREVGOjpPbiBwZWVrOjpZYXdEZWxheSI6WzZdLCJERUY6Ok1vdmluZzo6WWF3IjpbIkRlZmF1bHQiXSwiREVGOjpTbG93LW1vdGlvbjo6WWF3TGVmdCI6WzBdLCJERUY6Okdsb2JhbDo6WWF3VG8iOlswXSwiREVGOjpDcm91Y2ggbW92aW5nOjpZYXdSaWdodFN0YXJ0IjpbMF0sIkRFRjo6Q3JvdWNoaW5nOjpZYXdGcm9tIjpbMF0sIkRFRjo6QWlyICYgQ3JvdWNoOjpZYXdTcGVlZCI6WzFdLCJERUY6OlNsb3ctbW90aW9uOjpZYXdSaWdodCI6WzBdLCJERUY6OkNyb3VjaCBtb3Zpbmc6Ollhd0xlZnRUYXJnZXQiOlswXSwiREVGOjpPbiBwZWVrOjpZYXdMZWZ0IjpbMF0sIkRFRjo6TGVnaXQgQUE6Ollhd1JpZ2h0U3RhcnQiOlswXSwiREVGOjpPbiBwZWVrOjpZYXdSaWdodFN0YXJ0IjpbMF0sIkRFRjo6Q3JvdWNoaW5nOjpZYXdMZWZ0U3RhcnQiOlswXSwiREVGOjpBaXIgJiBDcm91Y2g6Ollhd0xlZnRTdGFydCI6WzBdLCJERUY6Okdsb2JhbDo6RW5hYmxlZCI6W2ZhbHNlXSwiREVGOjpBaXI6Ollhd0RlbGF5IjpbNl0sIkRFRjo6Q3JvdWNoIG1vdmluZzo6WWF3TGVmdCI6WzBdLCJERUY6OkFpciAmIENyb3VjaDo6WWF3UmlnaHQiOlswXSwiREVGOjpMZWdpdCBBQTo6WWF3IjpbIkRlZmF1bHQiXSwiREVGOjpBaXI6Ollhd0xlZnRUYXJnZXQiOlswXSwiREVGOjpTdGFuZGluZzo6WWF3VG8iOlswXSwiREVGOjpBaXI6Ollhd1JpZ2h0IjpbMF0sIkRFRjo6QWlyOjpZYXdMZWZ0IjpbMF0sIkRFRjo6Q3JvdWNoIG1vdmluZzo6RW5hYmxlZCI6W2ZhbHNlXSwiREVGOjpPbiBwZWVrOjpZYXdSaWdodFRhcmdldCI6WzBdLCJERUY6OlN0YW5kaW5nOjpZYXdTcGVlZCI6WzFdLCJERUY6OlN0YW5kaW5nOjpZYXdEZWxheSI6WzZdLCJERUY6OkxlZ2l0IEFBOjpZYXdSaWdodCI6WzBdLCJERUY6OkFpciAmIENyb3VjaDo6UGl0Y2giOlsiRGVmYXVsdCJdfSwibWFudWFscyI6eyJyaWdodCI6WyJPbiBob3RrZXkiXSwibGVmdCI6WyJPbiBob3RrZXkiXSwiYmFja3dhcmQiOlsiT24gaG90a2V5Il0sImVkZ2UiOlsiT24gaG90a2V5Il0sImZvcndhcmQiOlsiT24gaG90a2V5Il0sInJlc2V0IjpbIk9uIGhvdGtleSJdLCJmcmVlc3RhbmRpbmciOlsiT24gaG90a2V5Il19LCJmYWtlbGFnIjp7ImVuYWJsZSI6W3RydWVdLCJ0aWNrcyI6WzE0XSwidHlwZSI6WyJSYW5kb21pemUiXX19_Specter");
 
@@ -11475,6 +11150,7 @@ LPH_NO_VIRTUALIZE(function ()
                 end
 
                 antiaimbot_builder.load_defaults()
+                settings.recommended()
                 config_system:save_local(true)
                 c_logger.log('Builtin config loaded.')
             end
@@ -12219,8 +11895,11 @@ LPH_NO_VIRTUALIZE(function ()
                 config_system.loaded_once = true
                 pcall(config.global.apply_name)
 
-                if config.global.public_mode:get() and not had_saved then
+                if not had_saved then
+                    -- first start: the recommended setup
                     antiaimbot_builder.load_defaults()
+                    pcall(settings.recommended)
+                    pcall(config_system.save_local, config_system, true)
                 end
             end)
         end
@@ -12262,8 +11941,12 @@ LPH_NO_VIRTUALIZE(function ()
                     H.gap:display()
                     RS.enabled:display()
                     if RS.enabled:get() then
-                        RS.parts:display()
                         config.uix.res_hint:display()
+                        for _, row in ipairs(RS.info) do row:display() end
+                        RS.jitter:display()
+                        RS.override:display()
+                        if RS.override:get() then RS.override_size:display() end
+                        RS.log:display()
                     end
 
                     P.tools:display()
@@ -12331,6 +12014,12 @@ LPH_NO_VIRTUALIZE(function ()
                         R.multipoint_auto:display()
                         R.multipoint_hitboxes:display()
                         R.multipoint_scale:display()
+                    end
+                    R.safety:display()
+                    if R.safety:get() then
+                        R.safety_on:display()
+                        R.safety_misses:display()
+                        R.safety_hp:display()
                     end
                     R.dt_guard:display()
                     if R.dt_guard:get() then

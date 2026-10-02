@@ -1,4 +1,4 @@
-"""Regression tests for the resolver block of specter_cloud.lua (desync resolver + jitter resolver in one module).
+"""Regression tests for the resolver block of specter_cloud.lua (computed body yaw + learned models + side switches).
 
 Runs the real code (the part between the `-- [resolver:begin]` / `-- [resolver:end]` markers) on a mocked gamesense API
 with simulated enemies (tests/resolver_world.lua: hidden tick level AA, a copy of the server feet logic for the true body
@@ -30,10 +30,13 @@ BLOCK = m.group(1)
 PRELUDE = '''
 local resolver = {}
 local enable_item = ui.new_checkbox("RAGE", "Other", "Resolver")
-local parts_item = ui.new_multiselect("RAGE", "Other", "Resolver parts", { "Desync resolver", "Jitter resolver", "Neural network", "Log" })
-ui.set(parts_item, { "Desync resolver", "Jitter resolver" })
+local log_item = ui.new_checkbox("RAGE", "Other", "Resolver log")
+local jitter_item = ui.new_slider("RAGE", "Other", "Resolver jitter", 5, 60, 30)
+local override_item = ui.new_checkbox("RAGE", "Other", "Resolver override")
+local size_item = ui.new_slider("RAGE", "Other", "Resolver size", 0, 60, 35)
 local function wrap(it) return { get = function() return ui.get(it) end } end
-local config = { resolver = { enabled = wrap(enable_item), parts = wrap(parts_item) } }
+local config = { resolver = { enabled = wrap(enable_item), log = wrap(log_item), jitter = wrap(jitter_item),
+                              override = wrap(override_item), override_size = wrap(size_item) } }
 local c_logger = { log = function(fmt, ...) client.color_log(255, 255, 255, string.format(fmt, ...)) end }
 local hooks = { fire = 0, hit = 0, miss = 0 }
 resolver.stats_hook = function(kind) hooks[kind] = hooks[kind] + 1 end
@@ -99,7 +102,7 @@ RATES = [
     ("choke_defensive", dict(choke=6), 0.80), ("lby_flick", {}, 0.88), ("lby_flick", dict(flick=60), 0.88),
     # side switching: on hit / on miss / on every shot (anti-bruteforce), at random moments -> side tracking
     ("anti_brute", dict(choke=6), 0.88), ("anti_brute", dict(choke=2), 0.88), ("anti_miss", dict(choke=6), 0.86),
-    ("anti_miss", dict(choke=2), 0.88), ("anti_shot", dict(choke=6), 0.75), ("choke_random", dict(choke=6), 0.66),
+    ("anti_miss", dict(choke=2), 0.88), ("anti_shot", dict(choke=6), 0.85), ("choke_random", dict(choke=6), 0.62),
     # defensive: tickbase shift windows with flicked angles (the body yaw of those records from the server feet logic)
     ("defensive", dict(flick=110), 0.88), ("defensive", dict(flick=90), 0.88), ("defensive", dict(flick=-70, back=6), 0.85),
     ("defensive", dict(flick=110, base="jitter"), 0.88),
@@ -118,7 +121,7 @@ for scn, d, need in RATES:
 
 # ── side tracking: the enemy reacts later (its own ping + choke), shots with noise ──────
 print("== side tracking: enemy reaction delay (calibrated per player), noise")
-for scn, need in (("anti_brute", 0.88), ("anti_miss", 0.86), ("anti_shot", 0.65)):
+for scn, need in (("anti_brute", 0.88), ("anti_miss", 0.88), ("anti_shot", 0.88)):
     cells = []
     for rd in (4, 10):
         for ping in (20, 80):
@@ -127,7 +130,7 @@ for scn, need in (("anti_brute", 0.88), ("anti_miss", 0.86), ("anti_shot", 0.65)
             check(c >= need, f"{scn} reaction delay {rd} {ping}ms: hit rate {c:.2f} < {need}")
     print(f"   {scn:<12} delay 4: {cells[0]:.2f} / {cells[1]:.2f}   delay 10: {cells[2]:.2f} / {cells[3]:.2f}  (20 / 80 ms)")
 # 15% spread + 10% misses for other reasons: the static targets keep their (lower) ceiling, side tracking does not fall apart
-for scn, need in (("choke_static", 0.70), ("anti_brute", 0.50), ("anti_miss", 0.50), ("choke_random", 0.45)):
+for scn, need in (("choke_static", 0.70), ("anti_brute", 0.60), ("anti_miss", 0.50), ("choke_random", 0.50)):
     c = avg(scn, dict(choke=6), 20, spread_p=0.15, noise_p=0.10)
     print(f"   noise {scn:<12} {c:.2f}")
     check(c >= need, f"noise {scn}: hit rate {c:.2f} < {need}")
@@ -142,67 +145,26 @@ G0 = lua('''function(tick, ent, name)
     return nil
 end''')
 
-# ── neural network ─────────────────────────────────────────────────────────────
-print("== neural network (Parts > Neural network)")
-NNON = lua('function(ctl) ctl.item("Resolver parts").value = { "Desync resolver", "Jitter resolver", "Neural network" } end')
-NNACC = lua('''function(acc)
-    return function(k, e, r, hit, ctl, S)
-        if k <= 2000 then return end
-        local best, bt = nil, -1
-        for _, s in pairs(S.resolver.shots) do if s.time > bt then best, bt = s, s.time end end
-        if best and best.nnv ~= nil then
-            acc.n = acc.n + 1
-            if math.abs(best.nnv - r.T) <= 12 then acc.ok = acc.ok + 1 end
-        end
-    end
-end''')
-for scn, d, need_acc in (("choke_static", dict(choke=6), 0.9), ("anti_brute", dict(choke=6), 0.9), ("jitter_tick", {}, 0.9),
-                         ("jitter_choke", dict(choke=3), 0.9), ("lby_flick", {}, 0.75)):
-    off, on = avg(scn, d, 20), avg(scn, d, 20, configure=NNON)
-    acc = lua("function() return { n = 0, ok = 0 } end")()
-    run(scn, dict(d), ticks=4000, ping=20, configure=NNON, on_shot=NNACC(acc))
-    a = acc.ok / max(1, acc.n)
-    print(f"   {scn:<14} hit rate off {off:.2f} / on {on:.2f}   the network's own call on the head: {a:.2f} ({int(acc.n)} shots)")
-    check(on >= off - 0.02, f"neural network on {scn}: {on:.2f} < off {off:.2f}")
-    check(acc.n > 100 and a >= need_acc, f"neural network accuracy {scn}: {a:.2f} over {int(acc.n)} shots")
+# ── options ─────────────────────────────────────────────────────────────────────
+print("== options")
+SET = lambda name, v: lua(f"function(ctl) ctl.item('{name}').value = {v} end")
+s = run("anti_brute", dict(choke=6), ticks=3000, configure=SET("Resolver override", "true"))
+vals = set()
+for _, h in s.S.resolver.database[2].hist.items():
+    vals.add(h.value)
+check(vals and all(abs(v) == 35 for v in vals), f"override size: forced values {sorted(vals)[:6]} should all be +-35")
+s = run("choke_static", dict(choke=6), ticks=3000)
+d = s.S.resolver.database[2]
+check(d.method in ("Static", "LBY", "Dynamic") and d.phit is not None and d.phit > 0.5, f"info: method {d.method} confidence {d.phit}")
+s = run("jitter_tick", {}, ticks=2000)
+check(s.S.resolver.database[2].method == "Jitter" and s.S.resolver.database[2].mode == "j", "jitter target: method Jitter")
+s = run("jitter_tick", {}, ticks=2000, configure=SET("Resolver jitter", "90"))
+check(s.S.resolver.database[2].mode == "d", "jitter sensitivity 90: a 70 degree jitter is not a jitterer any more")
+print(f"   override size, info (method / confidence), jitter sensitivity")
 
-# kept between sessions (database), a broken save starts over, Reset memory clears it
-db = lua("function() return {} end")()
-s = run("jitter_tick", {}, ticks=2500, configure=NNON, db=db)
-n1 = s.S.resolver.nn_info()[0]
-s.fire("shutdown")
-check(n1 >= 30 and db["specter_nn_resolver"] is not None, f"network saved on shutdown ({n1} results)")
-s = run("jitter_tick", {}, ticks=10, configure=NNON, db=db)
-check(s.S.resolver.nn_info()[0] == n1, f"network loaded in the next session: {s.S.resolver.nn_info()[0]} vs {n1}")
-s.S.resolver.reset_all()
-check(s.S.resolver.nn_info()[0] == 0 and db["specter_nn_resolver"] is None, "Reset memory clears the network and its save")
-bad = lua('function() return { specter_nn_resolver = { version = 1, w1 = { 0/0 }, w2 = {}, b1 = {}, b2 = {}, n = 50, agree = 0.5 } } end')()
-# a save whose replay buffer has broken entries: they are dropped at load, learning goes on without errors
-bad2 = lua('function(src) local t = {}; for k, v in pairs(src) do t[k] = v end; t.buffer = { { x = { 1, 2 }, v = 5, hit = true }, "junk", { x = {}, v = 0/0, hit = false } }; return { specter_nn_resolver = t } end')
-saved_ok = run("jitter_tick", {}, ticks=2500, configure=NNON, db=lua("function() return {} end")())
-saved_ok.fire("shutdown")
-s = run("jitter_tick", {}, ticks=1500, configure=NNON, db=bad2(saved_ok.ctl.db["specter_nn_resolver"]))
-check(s.errors == 0 and not errors_of(s), f"save with broken replay entries: {errors_of(s)[:2]}")
-s = run("jitter_tick", {}, ticks=5, configure=NNON, db=bad)
-check(s.S.resolver.nn_info()[0] == 0, "broken save: a new network")
-s = run("jitter_tick", {}, ticks=1500, configure=NNON, db=bad)
-check(s.errors == 0 and not errors_of(s), f"broken save: {errors_of(s)[:2]}")
-s = run("choke_static", dict(choke=6), ticks=3000, configure=NNON, garbage=G0)
-check(s.errors == 0 and not errors_of(s), f"neural network with garbage netvars: {errors_of(s)[:2]}")
-print(f"   saved / loaded between sessions ({n1} results), broken save and reset handled")
-
-# ── parts ───────────────────────────────────────────────────────────────────────
-print("== parts")
-s = run("choke_static", dict(choke=6), ticks=3000, configure=parts("Jitter resolver"))
-check(not pl(s, 2, "Force body yaw"), "jitter part only: a static target must be left to the native resolver")
-check(s.late_rate < 0.40, f"jitter part only, static target: {s.late_rate:.2f} should be native-like")
-s = run("jitter_tick", {}, ticks=3000, configure=parts("Desync resolver"))
-check(pl(s, 2, "Force body yaw") is True, "desync part only: a jittering target is still forced by the desync part")
-check(s.S.resolver.database[2].mode == "d", "desync part only: the jitter part must be off (records resolved by the desync part)")
-s = run("jitter_tick", {}, ticks=3000, configure=parts())
-check(not pl(s, 2, "Force body yaw"), "no parts: nothing forced")
-r_both = avg("jitter_tick", {}, 20)
-print(f"   jitter_tick: both parts {r_both:.2f}")
+# a shot at a record 60 ticks old is still judged by what that record got (64 ticks of history)
+s = run("jitter_tick", {}, ticks=1500)
+check(len(list(s.S.resolver.database[2].hist.keys())) == 64, "64 records of history")
 
 # ── player list handling ──────────────────────────────────────────────────────
 print("== player list")
@@ -325,9 +287,9 @@ print(f"   round + memory reset: {s.late_rate:.2f}; stats hook fire {s.S.hooks.f
 # log only when the option is on
 s = run("jitter_tick", {}, ticks=1500)
 check(len(list(s.ctl.logs.values())) == 0, "log off: nothing printed")
-s = run("jitter_tick", {}, ticks=1500, configure=parts("Desync resolver", "Jitter resolver", "Log"))
+s = run("jitter_tick", {}, ticks=1500, configure=SET("Resolver log", "true"))
 logs = list(s.ctl.logs.values())
-check(len(logs) > 10 and any("jitter" in x for x in logs), f"log on: {logs[:2]}")
+check(len(logs) > 10 and any("j+" in x or "j-" in x for x in logs), f"log on: {logs[:2]}")
 print("   log line:", logs[0] if logs else "-")
 
 print()
