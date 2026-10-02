@@ -53,13 +53,11 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   `decide` forces the angle with the most probability within TOL (12) of it, on exact angles (rounding c into a bin lost 1-2 deg = misses).
 - Results update the beliefs with Bayes: head hit = the body yaw was within TOL of the value the RECORD got (`P_HIT` 0.85), resolver miss =
   it was not; FORGET 0.02 pulls back toward the start so a changing target is followed.
-- Side switches (`side_*`): z per situation = how sure the target is on the positive side. Every shot the target sees can flip it, with the
-  rates learned per player (after a hit / after a miss / per tick, counted from hard sides of consecutive results); when the answer shows
-  in the records is learned too: every delay of `DELAYS` (1..34 ticks, fine steps: coarse ones lost anti-brute at 80 ms + 10 tick reaction)
-  keeps its own z and rates, the one that predicted the results best is used. The size model is separate from the side (when they were one
-  histogram, misses with an unsure side ate the size).
-- Sim (tests/resolver_world.lua, ceiling ~0.92): static / jitter / LBY / defensive / anti-brute / anti-miss / anti-shot (also with reaction
-  delays 4 / 10 and an inverted sign) 0.91-0.92, random switches 0.71 / 0.68, coin flip body side 0.42-0.50 (= the limit).
+- Side: z per situation = how sure the target is on the positive side, measured by every head hit / resolver miss (Bayes). The owners
+  asked for the repo version (cloud + dev) to have a weaker resolver than their private copy: this version does NOT track side switches
+  (no flip rates, no reaction delay learning). Do not put that back unless the owners ask.
+- Sim (tests/resolver_world.lua, ceiling ~0.92): static / jitter / LBY / defensive 0.91-0.92; anti-brute 0.19-0.34, anti-miss 0.60-0.76,
+  anti-shot ~0.32, random switches 0.40-0.43, coin flip body side 0.37-0.41.
 - Menu: Enable Resolver, info rows for the current threat (target, method = Static / LBY / Dynamic / Jitter / Defensive + winning model,
   desync L/R, confidence), Jitter sensitivity, Override size (+ Size: the resolver keeps the side, the size is fixed), Log, Reset memory.
 - 64 records of history per player (`HIST`): shots at old records (extended backtrack) are still judged by what that record got.
@@ -139,6 +137,6 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   switch delay, 3-way air), Constructor.
 - `python3 tests/aa_redteam.py [preset ...]` (~35 min for all): the REAL anti-aim of the dev build runs in the mock game of
   `tests/perf/mock.lua`; what gamesense would do with the settings it writes is modelled per sent packet and becomes the enemy of
-  `tests/resolver_world.lua`; the resolver (full / without the jitter split / fixed size) shoots at it, its hits / shots reach our anti brute-force.
+  `tests/resolver_world.lua`; the resolver of the repo (full / without the jitter split / fixed size; it does not track side switches) shoots at it, its hits / shots reach our anti brute-force.
   Fails when the best attacker hits a preset / state above 0.60 (a forced side guess is ~0.47). Now: 0.36-0.51, mean 0.44 (was 0.63).
   It models the angles only, not the animation layers a real cheat also reads.

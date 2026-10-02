@@ -870,8 +870,7 @@ LPH_NO_VIRTUALIZE(function ()
             -- (-60 .. 60), from three models:
             --   computed   the computed body yaw + a learned offset
             --   mirrored   minus the computed body yaw + a learned offset
-            --   side       a learned size, on the side the target is on now: a side it may switch after a hit, after a miss
-            --              or at random moments, how often and how quickly is learned per player (see "side switches")
+            --   side       a learned size on the side the shots showed (see "side")
             -- A head hit says the body yaw was within TOL of the angle the record got, a resolver miss says it was not (Bayes).
             -- Each model is weighted by how well it predicted the shots, and the angle most likely to hit is forced.
             -- A shot is judged by what the RECORD it went at got (backtrack). Misses that are not about the angle are ignored.
@@ -1091,145 +1090,18 @@ LPH_NO_VIRTUALIZE(function ()
                 end
             end
 
-            -- ── side switches ──────────────────────────────────────────────────────
-            -- Some targets switch the side of their body yaw: after a hit, after a miss, on every shot, or at random moments.
+            -- ── side ───────────────────────────────────────────────────────────────
             -- z = what the resolver knows about the side in a situation: 1 = surely positive, -1 = surely negative, 0 = no idea.
-            -- Every shot the target sees can flip it, with the probability learned on this player after a hit / after a miss,
-            -- and some per tick. When the answer to a shot shows in the records (the target's ping, choke, own delay) is
-            -- learned too: every delay of DELAYS keeps its own z and numbers, and the one that predicted the results best is
-            -- used. A result is a measurement of the side on its record (Bayes), carried to now through the flips since.
-            local DELAYS = { 1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 27, 30, 34 }      -- ticks from our shot
-            local ND = #DELAYS
-
-            local function new_rates(from, w)
-                local F = {}
-                for k = 1, ND do
-                    local g = from and from[k]
-                    F[k] = { score = g and g.score * w or 0, nh = g and g.nh * w or 0, fh = g and g.fh * w or 0,
-                             nm = g and g.nm * w or 0, fm = g and g.fm * w or 0, ticks = g and g.ticks * w or 0, ft = g and g.ft * w or 0 }
-                end
-                return F
-            end
-            local grates = new_rates()
-
-            local function rates_of(key)
-                local m = memory_of(key)
-                if not m.rates then m.rates = new_rates(grates, 0.3) end
-                return m.rates
-            end
-
-            local function best_delay(F)
-                local best, bs = 1, -math.huge
-                for k = 1, ND do
-                    if F[k].score > bs then best, bs = k, F[k].score end
-                end
-                return best
-            end
-
-            local function q_of(R, kind, phit)
-                local qh, qm = (R.fh + 0.5) / (R.nh + 2.5), (R.fm + 0.5) / (R.nm + 2.5)
-                if kind == "hit" then return qh end
-                if kind == "miss" then return qm end
-                return phit * qh + (1 - phit) * qm
-            end
-
-            local function per_tick(R)
-                return (R.ft + 0.5) / (R.ticks + 3000)
-            end
-
+            -- Every head hit / resolver miss is a measurement of it (Bayes)
             local function z_of(p, ctx)
                 local z = p.z[ctx]
-                if not z then
-                    z = {}
-                    for k = 1, ND do z[k] = 0 end
-                    p.z[ctx] = z
-                end
+                if z == nil then z = 0; p.z[ctx] = 0 end
                 return z
             end
 
-            -- brings every z of the player to tick t: the time that passed, the shots whose answer is due
-            local function side_advance(p, t)
-                local F = rates_of(p.key)
-                local dt = p.z_t and math.max(t - p.z_t, 0) or 0
-                p.z_t = t
-                for k = 1, ND do
-                    local R = F[k]
-                    local keep = (1 - 2 * per_tick(R)) ^ dt
-                    for _, z in pairs(p.z) do z[k] = z[k] * keep end
-                    for i = 1, #p.events do
-                        local ev = p.events[i]
-                        if not ev.q[k] and ev.fire + DELAYS[k] <= t then
-                            local q = q_of(R, ev.kind, ev.phit)
-                            ev.q[k], ev.at[k] = q, ev.fire + DELAYS[k]
-                            for _, z in pairs(p.z) do z[k] = z[k] * (1 - 2 * q) end
-                        end
-                    end
-                end
-            end
-
-            -- the result of a shot is known: where its answer was taken with a guess, the guess is replaced (flips commute)
-            local function side_result(p, ev, kind)
-                ev.kind = kind
-                local F = rates_of(p.key)
-                for k = 1, ND do
-                    local old = ev.q[k]
-                    if old then
-                        local q = q_of(F[k], kind)
-                        local a = 1 - 2 * old
-                        if math.abs(a) > 0.05 then
-                            for _, z in pairs(p.z) do z[k] = clamp(z[k] * (1 - 2 * q) / a, -1, 1) end
-                        end
-                        ev.q[k] = q
-                    end
-                end
-            end
-
-            -- a shot result on the record of tick t in situation ctx: lp / lm = how likely it is if the target was on the
-            -- positive / negative side; zs = the z of every delay on that record
-            local function side_measure(p, ctx, t, zs, lp, lm)
-                local F = rates_of(p.key)
-                local z = z_of(p, ctx)
-                local last = p.obs[ctx]
-                -- the side this result shows on its own (not what was believed before): for counting the flips
-                local side = (lp >= 3 * lm and 1) or (lm >= 3 * lp and -1) or nil
-                for k = 1, ND do
-                    local R, G = F[k], grates[k]
-                    local pr = (1 + zs[k]) / 2
-                    local pred = math.max(pr * lp + (1 - pr) * lm, 1e-4)
-                    R.score = R.score * 0.97 + math.log(pred)
-                    G.score = G.score * 0.99 + 0.3 * math.log(pred)
-
-                    -- learn the flip rates: two sides in a row with the answer to one shot between them (a flip after a hit /
-                    -- after a miss), or with nothing between them (a flip per tick)
-                    if side and last and t > last.t then
-                        local only, n = nil, 0
-                        for i = 1, #p.events do
-                            local at = p.events[i].at[k]
-                            if at and at > last.t and at <= t then only, n = p.events[i], n + 1 end
-                        end
-                        local flip = side ~= last.side and 1 or 0
-                        if n == 1 and only.kind then
-                            local f = only.kind == "hit" and "h" or "m"
-                            R["n" .. f], R["f" .. f] = R["n" .. f] + 1, R["f" .. f] + flip
-                            G["n" .. f], G["f" .. f] = G["n" .. f] + 0.3, G["f" .. f] + 0.3 * flip
-                        elseif n == 0 then
-                            R.ticks, R.ft = R.ticks + (t - last.t), R.ft + flip
-                            G.ticks, G.ft = G.ticks + 0.3 * (t - last.t), G.ft + 0.3 * flip
-                        end
-                    end
-
-                    -- the measurement, carried from its record to now through the flips since
-                    local keep = (1 - 2 * per_tick(R)) ^ math.max((p.z_t or t) - t, 0)
-                    for i = 1, #p.events do
-                        local ev = p.events[i]
-                        if ev.at[k] and ev.at[k] > t then keep = keep * (1 - 2 * ev.q[k]) end
-                    end
-                    local q = (1 - keep) / 2
-                    local np, nm = (1 - q) * lp + q * lm, (1 - q) * lm + q * lp
-                    local cur = (1 + z[k]) / 2
-                    z[k] = clamp(2 * cur * np / math.max(cur * np + (1 - cur) * nm, 1e-9) - 1, -1, 1)
-                end
-                if side and (not last or t > last.t) then p.obs[ctx] = { t = t, side = side } end
+            local function side_measure(p, ctx, lp, lm)
+                local cur = (1 + z_of(p, ctx)) / 2
+                p.z[ctx] = clamp(2 * cur * lp / math.max(cur * lp + (1 - cur) * lm, 1e-9) - 1, -0.98, 0.98)
             end
 
             -- ── feet model ─────────────────────────────────────────────────────────
@@ -1282,7 +1154,7 @@ LPH_NO_VIRTUALIZE(function ()
 
             -- ── players and records ────────────────────────────────────────────────
             local function new_player(key)
-                return { key = key, records = {}, hist = {}, events = {}, z = {}, obs = {}, jitter = false, side = 0, speed = 0,
+                return { key = key, records = {}, hist = {}, z = {}, jitter = false, side = 0, speed = 0,
                          maxd = MAX_DESYNC, stance = "stand", consecutive_misses = 0, key_tick = -1000 }
             end
 
@@ -1428,12 +1300,9 @@ LPH_NO_VIRTUALIZE(function ()
                         if kind then
                             local ctx = situation(p, kind)
                             local c = p.model or 0
-                            side_advance(p, tick)
-                            local z = z_of(p, ctx)
-                            local zs = {}
-                            for k = 1, ND do zs[k] = z[k] end
+                            local zs = z_of(p, ctx)
                             local b = belief_of(p.key, ctx)
-                            local pi = (1 + zs[best_delay(rates_of(p.key))]) / 2
+                            local pi = (1 + zs) / 2
                             local value, phit = decide(b, c, pi)
                             -- "Override size": the side from the resolver, the size from the menu
                             if option("override", false) == true then
@@ -1479,13 +1348,6 @@ LPH_NO_VIRTUALIZE(function ()
                 local bt = resolver.shot_backtrack(e)
                 local h = p and applied_for(p, bt)
                 local shot = { idx = e.target, key = p and p.key, bt = bt, time = now, reason = "native" }
-                if p then
-                    -- the target sees this shot: its answer (a side switch?) shows in its records some ticks later
-                    local ev = { fire = globals.tickcount(), phit = h and h.phit or 0.5, q = {}, at = {} }
-                    p.events[#p.events + 1] = ev
-                    while #p.events > 16 do table.remove(p.events, 1) end
-                    shot.ev = ev
-                end
                 if h then
                     shot.value, shot.c, shot.ctx, shot.stance, shot.at, shot.zs, shot.mode = h.value, h.c, h.ctx, h.stance, h.at, h.zs, h.mode
                     shot.reason = h.ctx == "def" and "defensive" or (h.ctx:sub(1, 1) == "j" and "jitter" or "desync")
@@ -1500,9 +1362,9 @@ LPH_NO_VIRTUALIZE(function ()
                 local pi = 0.5
                 if p and p.key == s.key then
                     -- the side the target was on when the record was made, and what this result says about it
-                    pi = (1 + s.zs[best_delay(rates_of(p.key))]) / 2
+                    pi = (1 + s.zs) / 2
                     local lp, lm = side_likelihoods(b, s.value, hit)
-                    side_measure(p, s.ctx, s.at, s.zs, lp, lm)
+                    side_measure(p, s.ctx, lp, lm)
                 end
                 update(b, s.c, s.value, hit, pi, 1)
                 if not global[s.ctx] then global[s.ctx] = new_belief() end
@@ -1517,7 +1379,6 @@ LPH_NO_VIRTUALIZE(function ()
                 local p = players[e.target]
                 if resolver.stats_hook then pcall(resolver.stats_hook, "hit", s, e, p) end
                 if p then p.consecutive_misses = 0 end
-                if s and s.ev and p and s.key == p.key then side_result(p, s.ev, "hit") end
                 if not s or s.value == nil or not s.key then return end
                 -- only a head hit says where the head was
                 if e.hitgroup ~= 1 then return end
@@ -1533,8 +1394,6 @@ LPH_NO_VIRTUALIZE(function ()
                 shots[id] = nil
                 local p = players[e.target]
                 if resolver.stats_hook then pcall(resolver.stats_hook, "miss", s, e, p) end
-                -- the target saw the shot, whatever the reason of the miss
-                if s and s.ev and p and s.key == p.key then side_result(p, s.ev, "miss") end
                 -- spread, prediction error, death ... are not about the angle
                 if e.reason ~= "?" and e.reason ~= "resolver" then return end
                 if p then p.consecutive_misses = p.consecutive_misses + 1 end
@@ -1557,7 +1416,7 @@ LPH_NO_VIRTUALIZE(function ()
 
             resolver.reset_all = function()
                 release_all()
-                players, mem, shots, global, grates = {}, {}, {}, {}, new_rates()
+                players, mem, shots, global = {}, {}, {}, {}
                 publish()
             end
 
