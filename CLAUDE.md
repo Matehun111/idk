@@ -77,8 +77,9 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - Resolver Safety (`config.ragebot.safety*`): per enemy player list "Override prefer body aim" / "Override safe point" from the resolver
   (`database[idx]`): body aim / safe point after N resolver misses, body aim when the confidence is < 0.45 or HP <= the slider, prefer
   body aim "Off" (head) when confidence >= 0.8 and no miss. Written on change only, "-" given back when it no longer applies / round start.
-- Extended Backtrack (Ping spike) defaults to 200 ms, the most gamesense allows. Together with the server's sv_maxunlag (0.2 s) that is
-  the real backtrack limit (~25 ticks); "64 ticks" only exists as the resolver's record history.
+- Extended Backtrack (Ping spike) defaults to 200 ms, the most gamesense allows. The server compensates the real ping + the fake ping
+  (+ interp, up to sv_maxunlag) and accepts records up to 0.2 s around that, so shots at 30-40 tick old records are normal (owners saw
+  it in game; more on 128 tick). The resolver keeps 64 records per player, every one of those shots is judged by what its record got.
 
 ## Recommended config
 - `settings.recommended()` (next to `settings.builtin`): resolver on, preset Distort (lowest best attacker in the red team), Yaw sway +
