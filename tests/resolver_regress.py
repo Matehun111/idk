@@ -278,7 +278,10 @@ s = run("jitter_tick", {}, ticks=1500)
 check(len(list(s.ctl.logs.values())) == 0, "log off: nothing printed")
 s = run("jitter_tick", {}, ticks=1500, configure=SET("Resolver log", "true"))
 logs = list(s.ctl.logs.values())
-check(len(logs) > 10 and any("j+" in x or "j-" in x for x in logs), f"log on: {logs[:2]}")
+check(len(logs) == 0, f"resolver prints nothing of its own (the hitlog shows the angle): {logs[:2]}")
+last = s.S.resolver.last_log
+logs = [last] if last else []
+check(bool(last) and ("j+" in last or "j-" in last), f"last_log: {last}")
 print("   log line:", logs[0] if logs else "-")
 
 print()

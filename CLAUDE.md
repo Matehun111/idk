@@ -20,6 +20,8 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 ## Editing Rules
 - Edit `specter_cloud.lua` only. Then run `python3 tools/make_dev.py` (rewrites `specter_dev.lua`) and commit both together.
   `python3 tests/load_smoke.py --dev-file` fails when the dev build is out of date.
+  Exception (owners, Oct 2026): the owners' private dev copy was ported into `specter_cloud.lua` and ONLY the cloud was uploaded;
+  `specter_dev.lua` was left as it was. Regenerate it only when the owners ask.
 - The dev build is just the normal code: the owners said many times that it needs no login, no checks and no loader. Do not add any.
 - Also update `server.js` when the change adds/changes API endpoints or auth globals, and `specter_loader.lua` when it affects the
   auth globals or the loading flow.
@@ -53,22 +55,32 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   `decide` forces the angle with the most probability within TOL (12) of it, on exact angles (rounding c into a bin lost 1-2 deg = misses).
 - Results update the beliefs with Bayes: head hit = the body yaw was within TOL of the value the RECORD got (`P_HIT` 0.85), resolver miss =
   it was not; FORGET 0.02 pulls back toward the start so a changing target is followed.
-- Side: z per situation = how sure the target is on the positive side, measured by every head hit / resolver miss (Bayes). The owners
-  asked for the repo version (cloud + dev) to have a weaker resolver than their private copy: this version does NOT track side switches
-  (no flip rates, no reaction delay learning). Do not put that back unless the owners ask.
+- Side: z per situation = how sure the target is on the positive side, measured by every head hit / resolver miss (Bayes). Side
+  switches are tracked (`DELAYS`, `rates_of`, `side_advance`): per player how often the target flips after a hit / a miss / a shot / per
+  tick and with which delay (after our shot or after the result reached it). The cloud has the SAME resolver as the owners' private copy
+  (owners, Oct 2026: "teljesen ugyanaz"); the weaker repo version without side tracking is in git history (6ebf5ca).
+- Extra side signals, each used only when it predicted better than the side filter: packet cycles (`PATTERNS` 2/3/4/6), animation
+  layer 6 playback rate classes (`resolver.read_layer6`, ffi, read only), hide head predictor (`fs_class`: where the enemy saw us from,
+  ping late; pooled over players in `gfeat`), "Hide head predictor" option. Ping scale: `PING_TABLE` (0-150 ms in steps of 5, from
+  the sim) sets FORGET / P_HIT / DECAY / TOL / RDECAY by our scoreboard ping ("Auto") or a manual value.
+- Zero rule: on a record whose computed body yaw is ~0 (|c| < `ZERO_MIN` 20: micromovement keeps the LBY on the eye yaw, the netvars
+  show no desync) a near-0 angle is only given after a head hit near 0 on such records (`zero_of`) or 2 resolver misses away from 0
+  since the last hit; jitter / defensive records are exempt. It used to shoot the first shots of a new player at 0 / -12.
 - Size model: a resolver miss updates the size only as much as the side is sure (`|2 pi - 1|`): with a 50 / 50 side, misses used to eat
   the size (48 -> 8-20 deg, shots in the middle that hit neither side).
-- Sim (tests/resolver_world.lua, ceiling ~0.92): static / jitter / LBY / defensive 0.91-0.92; anti-brute 0.19-0.34, anti-miss 0.60-0.76,
-  anti-shot ~0.32, random switches 0.40-0.43, coin flip body side 0.37-0.41.
+- Sim (tests/resolver_world.lua, ceiling ~0.92): static / jitter / LBY / anti-brute / anti-miss / anti-shot 0.91-0.92, defensive 0.84-0.92,
+  random switches 0.74-0.80, coin flip body side ~0.47-0.50 (a coin flip can not be beaten, 0.5 is the best any guess gets).
 - Menu: Enable Resolver, info rows for the current threat (target, method = Static / LBY / Dynamic / Jitter / Defensive + winning model,
-  desync L/R, confidence), Jitter sensitivity, Override size (+ Size: the resolver keeps the side, the size is fixed), Log, Reset memory.
+  desync L/R, lag comp, confidence), Show angle in hitlog, Jitter sensitivity, Hide head predictor, Ping scale (Auto / Manual + value),
+  Override size (+ Size: the resolver keeps the side, the size is fixed), Reset memory. The resolver prints nothing itself: its last
+  line is `resolver.last_log`, the hitlog shows the angle (`res N°`).
 - 64 records of history per player (`HIST`): shots at old records (extended backtrack) are still judged by what that record got.
 - Interface the rest of the script uses: `resolver.on_fire / on_hit / on_miss`, `new_round`, `reset_player`, `reset_all`, `shot_backtrack`,
   `shots[id]` (`reason` = desync / jitter / defensive / native, `value`, `mode`), `database[idx]` (`stance`, `speed`, `consecutive_misses`,
   `mode` = "d" / "j", `method`, `model_name`, `phit` = confidence, `value`), `memory[key].hit_value[stance]` (aa stealer), `forced`,
   `stats_hook`. The tiers without the resolver get a stub with the same names.
 - Tests: `pip install lupa && python3 tests/resolver_regress.py` (hit rates per AA and ping, reaction delays, noise, inverted sign, options,
-  player list / release / Correction active restore, shot attribution, garbage netvars, 5 enemies, slot reuse, resets, log).
+  player list / release / Correction active restore, shot attribution, garbage netvars, 5 enemies, slot reuse, resets, last_log).
 - Load smoke test: `python3 tests/load_smoke.py [--dev-file] [--plan=nightly|beta|specter]`. Run it after every change that touches
   load-time code, the loaders, the auth gate or the resolver.
 
@@ -80,6 +92,13 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
 - Extended Backtrack (Ping spike) defaults to 200 ms, the most gamesense allows. The server compensates the real ping + the fake ping
   (+ interp, up to sv_maxunlag) and accepts records up to 0.2 s around that, so shots at 30-40 tick old records are normal (owners saw
   it in game; more on 128 tick). The resolver keeps 64 records per player, every one of those shots is judged by what its record got.
+- Tuning (`config.tuning`, rage UI flat in `SPECTER_SHARED.rage_ui`): quick peek options per weapon group (Early autostop: stop when the
+  gun is ready within a per weapon window and our bullet can hurt the threat, held 0.1 s after the shot; Slow motion; Move between
+  shots), Force shot (hotkey + hit chance), Fake duck speed limit, Bizon air spray (Fun). Dormant aimbot: hitbox heights from the last
+  visible frame, sound position prediction (`dormant_track`), hit chance from the weapon spread, kill first. Predict enemies: Active =
+  Always / Ping 55+ / Ping under 40.
+- Anti-bruteforce: Stage pick "Adaptive" (per enemy steam id and stage how often it got hit / dodged, Thompson style pick) or "Cycle",
+  Stages used, Refresh jitter on trigger. Roll anti-aim on a key.
 
 ## Recommended config
 - `settings.recommended()` (next to `settings.builtin`): resolver on, preset Distort (lowest best attacker in the red team), Yaw sway +
@@ -105,11 +124,15 @@ The owner speaks Hungarian. Respond in Hungarian when they write in Hungarian.
   script must never write), player list, menu, ping profile switching, several enemies, remembered priors, options, panel, events.
 - It has nothing to do with the resolver of `specter_cloud.lua` any more: a change to one is never ported to the other unless the owners ask.
 
-## No ffi
-- The owners asked for the gamesense api instead of ffi: the script has no `ffi` / `vtable_bind` / `find_signature` any more. On the
-  ground + landing: `m_fFlags` and the landing tick; our own defensive: `m_nTickBase` falling behind the highest seen; reload / flash /
-  hit triggers: `m_flNextAttack`, `m_flFlashDuration`, `m_flVelocityModifier`; our body yaw (`player.fakeyaw`): pose parameter 11;
-  quick peek legs: the `cmd.in_*` move fields in setup_command; time scale: `host_timescale`. Do not bring ffi back.
+## FFI (back, guarded)
+- The owners asked for ffi again (Oct 2026: "Ffi sokkal jobb"); commit 01e1bd2 had replaced it with the gamesense api. Memory reads:
+  timescale (engine vtable), the client entity list, animstate (on ground / landing), animation layers (offset from a signature;
+  reload / flash / hit triggers, the resolver's layer 6, animation breaker), sequence activity (signature), the usercmd (our body yaw,
+  quick peek legs), m_flOldSimulationTime (our own defensive).
+- Every one of them is created with `pcall` (`find_sig`, `ffi_note` logs what is missing) and gives nil when it is not there; the users
+  then fall back to the gamesense api of the no-ffi version: host_timescale, m_fFlags + landing tick, m_flNextAttack /
+  m_flFlashDuration / m_flVelocityModifier, pose parameter 11, cmd.in_* in setup_command, m_nTickBase. A game / gamesense update that
+  moves a signature must never stop the script from loading. Keep it that way for every new memory read.
 
 ## Performance
 - `python3 tests/perf_profile.py [--hot N]` runs the WHOLE dev build in `tests/perf/mock.lua` (a mock game: local player, N enemies that
