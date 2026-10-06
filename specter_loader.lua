@@ -8,8 +8,14 @@ local AUTH_VER   = 3
 local DB_USERS   = "specter_users_v3"
 local DB_SESSION = "specter_session_v3"
 
--- ██ SET YOUR SERVER URL HERE ██
-local SERVER_URL = LPH_ENCSTR("https://your-server.railway.app")
+-- Luraph defines these when the loader is obfuscated; without it they are plain pass-throughs
+if not LPH_OBFUSCATED then
+    LPH_ENCSTR = function(...) return ... end
+    LPH_NO_VIRTUALIZE = function(...) return ... end
+end
+
+-- ██ THE LICENSE SERVER (Railway domain of the server service, no "/" at the end) ██
+local SERVER_URL = LPH_ENCSTR("https://specter-license-mh111.up.railway.app")
 
 -- ── LIBS ─────────────────────────────────────────────────────────────
 local http  = require "gamesense/http"
@@ -20,17 +26,28 @@ local _bxor = bit.bxor
 local _band = bit.band
 local _flr  = math.floor
 
-if not LPH_OBFUSCATED then LPH_NO_VIRTUALIZE = function(...) return ... end end
-
 -- ── HELPERS ──────────────────────────────────────────────────────────
 local function clog(r,g,b,m) client.color_log(r,g,b,"[Specter] "..tostring(m)) end
 local function info(m) clog(130,195,255,m) end
 local function warn(m) clog(255,200,80,m) end
 local function err(m)  clog(255,60,60,m)  end
 
+-- our steam id: from panorama (works in the main menu too), else from the local player in a match. The same id both ways,
+-- so a key registered in the menu still matches in game
+local function get_steam_id()
+    local ok, xuid = pcall(function() return panorama.open().MyPersonaAPI.GetXuid() end)
+    if ok and xuid ~= nil and tostring(xuid):match("^%d+$") and tostring(xuid) ~= "0" then return tostring(xuid) end
+    local lp = entity.get_local_player()
+    local ok2, sid = pcall(function() return lp and entity.get_steam64(lp) end)
+    if ok2 and sid then
+        sid = type(sid) == "number" and _sf("%.0f", sid) or tostring(sid)
+        if sid:match("^%d+$") and sid ~= "0" then return sid end
+    end
+    return nil
+end
+
 local function get_hwid()
-    local lp    = entity.get_local_player()
-    local steam = lp and entity.get_steam64(lp) or "0"
+    local steam = get_steam_id() or "0"
     local raw   = "SPEC_HWID:"..tostring(steam)..":v"..AUTH_VER
     local h = 5381
     for i=1,#raw do h = _band(_bxor(h*33,string.byte(raw,i)),0xFFFFFFFF) end
@@ -74,6 +91,11 @@ end
 
 -- ── SERVER AUTH: verify key → get ticket → fetch script ─────────────
 local function load_from_server(key, hwid, on_plan)
+    if hwid == nil or not get_steam_id() then
+        set_status(255,120,50, "Steam id not ready, try again in a moment.")
+        warn("Could not read your steam id yet.")
+        return
+    end
     set_status(255,200,80, "Verifying license...")
     info("Verifying key with server...")
 
@@ -131,9 +153,23 @@ local function load_from_server(key, hwid, on_plan)
                 return
             end
             local body2 = type(resp2)=="table" and resp2.body or resp2
+            local status2 = type(resp2)=="table" and resp2.status or 200
+            if status2 ~= 200 then
+                local okj, d = pcall(json.parse, body2 or "")
+                local reason = okj and type(d)=="table" and d.reason or ("http "..tostring(status2))
+                local reasons = {
+                    script_missing = "No script on the server yet (/script_upload in Discord).",
+                    ticket_expired = "Too slow, try again.",
+                    hwid_mismatch  = "Key locked to another PC.",
+                    wrong_plan     = "Plan changed, try again.",
+                }
+                set_status(255,60,60, reasons[reason] or ("Download denied: "..tostring(reason)))
+                err("Script download denied: "..tostring(reason))
+                return
+            end
             if not body2 or #body2 < 200 then
                 set_status(255,60,60, "Script too short or missing.")
-                err("Server returned empty script. Upload it first with /admin/upload_script.")
+                err("Server returned empty script. Upload it first with /script_upload in Discord.")
                 return
             end
 
