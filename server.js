@@ -45,12 +45,32 @@ async function db_write(data) {
 }
 
 // ── Script storage — also in Redis ───────────────────────────────────────
+// The script is ~800 KB: it is kept in parts (specter:script:<plan>:<i> + :parts = the count) so no single Redis request
+// gets near a size limit. A script stored the old way (one key) is still read.
+const SCRIPT_PART = 300000
+async function put_script(plan, script) {
+    const n = Math.ceil(script.length / SCRIPT_PART)
+    for (let i = 0; i < n; i++)
+        await redis.set(`specter:script:${plan}:${i}`, script.slice(i * SCRIPT_PART, (i + 1) * SCRIPT_PART))
+    await redis.set(`specter:script:${plan}:parts`, n)
+    await redis.del(`specter:script:${plan}`)
+    return n
+}
+async function read_script(plan) {
+    const n = Number(await redis.get(`specter:script:${plan}:parts`)) || 0
+    if (n > 0) {
+        const parts = await Promise.all(Array.from({ length: n }, (_, i) => redis.get(`specter:script:${plan}:${i}`)))
+        if (parts.some(p => typeof p !== 'string')) return null
+        return parts.join('')
+    }
+    const val = await redis.get(`specter:script:${plan}`)
+    return typeof val === 'string' ? val : null
+}
 async function get_script(plan) {
     try {
-        const val = await redis.get(`specter:script:${plan}`)
-        if (val) return val
-        return await redis.get('specter:script:default')
+        return (await read_script(plan)) || (await read_script('default'))
     } catch(e) {
+        console.error('Script read error:', e.message)
         return null
     }
 }
@@ -177,9 +197,14 @@ app.post('/admin/upload_script', async (req, res) => {
         return res.status(400).json({ error: 'invalid plan' })
     if (!script || script.length < 100)
         return res.status(400).json({ error: 'script too short' })
-    await redis.set(`specter:script:${plan}`, script)
-    res.json({ ok: true, plan, bytes: script.length })
-    console.log(`[SCRIPT UPLOAD] plan=${plan} bytes=${script.length}`)
+    try {
+        const parts = await put_script(plan, script)
+        res.json({ ok: true, plan, bytes: script.length, parts })
+        console.log(`[SCRIPT UPLOAD] plan=${plan} bytes=${script.length} parts=${parts}`)
+    } catch(e) {
+        console.error('Script upload error:', e.message)
+        res.status(500).json({ ok: false, error: 'redis: ' + e.message })
+    }
 })
 
 // ── GET /verify ───────────────────────────────────────────────────────────

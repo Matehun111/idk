@@ -10,8 +10,10 @@ ENV VARS (set in Discord bot host or .env):
   ADMIN_ROLE_ID       — Discord role ID that can use admin commands (optional)
   DEFAULT_ROLE_NAME   — Role given to every new member (default: "Member")
   LOG_CHANNEL_ID      — Channel ID for key/role logs (optional)
-  GITHUB_TOKEN        — GitHub PAT with repo write access (for key sync)
+  GITHUB_TOKEN        — GitHub PAT with repo write access (for key sync). Leave it EMPTY while the repo is public:
+                        the sync writes every key into specter_keys.json in the repo (the loader does not need it)
   GITHUB_REPO         — GitHub repo (default: Matehun111/idk)
+  SCRIPT_BRANCH       — branch /script_upload takes specter_cloud.lua from (default: main)
 """
 
 import os
@@ -32,6 +34,7 @@ DEFAULT_ROLE_NAME = os.getenv("DEFAULT_ROLE_NAME", "Member")
 LOG_CHANNEL_ID    = int(os.getenv("LOG_CHANNEL_ID", "0"))
 GITHUB_TOKEN      = os.getenv("GITHUB_TOKEN", "")
 GITHUB_REPO       = os.getenv("GITHUB_REPO", "Matehun111/idk")
+SCRIPT_BRANCH     = os.getenv("SCRIPT_BRANCH", "main")
 
 VALID_PLANS     = ["beta", "nightly", "specter", "debug"]
 VALID_DURATIONS = ["lifetime", "1d", "7d", "14d", "30d", "90d"]
@@ -631,7 +634,7 @@ async def key_create(
         embed.add_field(name="Key",      value=f"```{res['key']}```", inline=False)
         embed.add_field(name="Plan",     value=plan,    inline=True)
         embed.add_field(name="Duration", value=exp_str, inline=True)
-        embed.add_field(name="GitHub",   value="Synced" if synced else "Sync failed", inline=True)
+        embed.add_field(name="GitHub",   value="Off" if not GITHUB_TOKEN else ("Synced" if synced else "Sync failed"), inline=True)
         if note:
             embed.add_field(name="Note", value=note, inline=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -640,7 +643,7 @@ async def key_create(
         log_embed.add_field(name="Plan", value=plan, inline=True)
         log_embed.add_field(name="Duration", value=exp_str, inline=True)
         log_embed.add_field(name="By", value=interaction.user.mention, inline=True)
-        log_embed.add_field(name="GitHub", value="Synced" if synced else "Failed", inline=True)
+        log_embed.add_field(name="GitHub", value="Off" if not GITHUB_TOKEN else ("Synced" if synced else "Failed"), inline=True)
         if note:
             log_embed.add_field(name="Note", value=note, inline=True)
         await log_action(interaction.guild, log_embed)
@@ -868,6 +871,127 @@ async def key_sync(interaction: discord.Interaction):
         await interaction.followup.send(embed=embed, ephemeral=True)
     else:
         await interaction.followup.send("GitHub sync failed.", ephemeral=True)
+
+
+# ── /script_upload — put the cloud Lua on the license server ─────────
+
+def strip_lua_comments(src: str) -> str:
+    """Comments and blank lines out, strings and long strings kept (the same as the owners' build)."""
+    import re
+    out, i, n = [], 0, len(src)
+    while i < n:
+        c = src[i]
+        if c == "-" and src.startswith("--", i):
+            m = re.match(r"--\[(=*)\[", src[i:i + 64])
+            if m:
+                close = "]" + m.group(1) + "]"
+                j = src.find(close, i + m.end())
+                if j < 0:
+                    raise ValueError("unclosed long comment")
+                out.append("\n" * src.count("\n", i, j))
+                i = j + len(close)
+            else:
+                j = src.find("\n", i)
+                i = n if j < 0 else j
+            continue
+        if c in "\"'":
+            j = i + 1
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == c or src[j] == "\n":
+                    break
+                j += 1
+            out.append(src[i:j + 1])
+            i = j + 1
+            continue
+        if c == "[":
+            m = re.match(r"\[(=*)\[", src[i:i + 64])
+            if m:
+                close = "]" + m.group(1) + "]"
+                j = src.find(close, i + m.end())
+                if j < 0:
+                    raise ValueError("unclosed long string")
+                out.append(src[i:j + len(close)])
+                i = j + len(close)
+                continue
+        out.append(c)
+        i += 1
+    lines = [l.rstrip() for l in "".join(out).split("\n")]
+    return "\n".join(l for l in lines if l.strip()) + "\n"
+
+
+@tree.command(name="script_upload", description="Upload specter_cloud.lua to the license server (a file, or from GitHub)")
+@app_commands.describe(
+    file="specter_cloud.lua (empty: taken from GitHub)",
+    branch="GitHub branch when no file is given (default: SCRIPT_BRANCH)",
+    plan="Which plan gets it (default: all four)",
+)
+@app_commands.choices(plan=[app_commands.Choice(name="all", value="all")] + [app_commands.Choice(name=p, value=p) for p in VALID_PLANS])
+async def script_upload(
+    interaction: discord.Interaction,
+    file: discord.Attachment = None,
+    branch: str = "",
+    plan: str = "all",
+):
+    if not is_admin(interaction):
+        await interaction.response.send_message("No permission.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    source = ""
+    try:
+        if file is not None:
+            raw = await file.read()
+            source = file.filename
+        else:
+            br = branch or SCRIPT_BRANCH
+            url = f"https://raw.githubusercontent.com/{GITHUB_REPO}/{br}/specter_cloud.lua"
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url) as r:
+                    if r.status != 200:
+                        await interaction.followup.send(f"GitHub: {r.status} for `{url}`", ephemeral=True)
+                        return
+                    raw = await r.read()
+            source = f"GitHub {GITHUB_REPO}@{br}"
+        text = raw.decode("utf-8")
+    except Exception as e:
+        await interaction.followup.send(f"Could not read the script: {e}", ephemeral=True)
+        return
+
+    # only the cloud script: it has the auth gate the loader's prefix opens (the dev build has none)
+    if "-- ── AUTH GATE" not in text or "_auth_ok" not in text:
+        await interaction.followup.send("This is not specter_cloud.lua (no auth gate in it). Nothing uploaded.", ephemeral=True)
+        return
+
+    try:
+        script = strip_lua_comments(text)
+    except Exception as e:
+        await interaction.followup.send(f"Could not clean the script: {e}", ephemeral=True)
+        return
+
+    plans = VALID_PLANS if plan == "all" else [plan]
+    lines = []
+    for p in plans:
+        try:
+            res = await api_post("/admin/upload_script", {"plan": p, "script": script})
+            ok = res.get("ok") and res.get("status") == 200
+            lines.append(f"`{p}`: " + (f"ok ({res.get('bytes', 0) // 1024} KB, {res.get('parts', 1)} parts)" if ok else f"failed {res}"))
+        except Exception as e:
+            lines.append(f"`{p}`: API error {e}")
+
+    embed = discord.Embed(title="Script Upload", color=0x82C3FF)
+    embed.description = "\n".join(lines)
+    embed.add_field(name="Source", value=source, inline=False)
+    embed.add_field(name="Size", value=f"{len(text) // 1024} KB -> {len(script) // 1024} KB without comments", inline=False)
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+    log_embed = discord.Embed(title="Script Uploaded", color=0x82C3FF)
+    log_embed.add_field(name="Plans", value=", ".join(plans), inline=True)
+    log_embed.add_field(name="Source", value=source, inline=True)
+    log_embed.add_field(name="By", value=interaction.user.mention, inline=True)
+    await log_action(interaction.guild, log_embed)
 
 
 # ── /redeem — user-facing key claim + auto role ──────────────────────
